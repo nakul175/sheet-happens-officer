@@ -48,8 +48,9 @@ app
         setTimeout(() => res.end("done\n"), slowMs);
         return;
       }
-      handle(req, res).catch((err) => {
-        console.error(err);
+      handle(req, res).catch(() => {
+        // Framework errors may include request fields or credentials. Keep service logs bounded.
+        console.error("request handler failed");
         if (!res.headersSent) {
           res.statusCode = 500;
           res.end("Internal Server Error");
@@ -69,8 +70,8 @@ app
           : undefined,
     });
 
-    server.on("error", (err) => {
-      console.error(err);
+    server.on("error", () => {
+      console.error("server listen failed");
       process.exit(1);
     });
     server.listen(port, hostname, () => {
@@ -79,7 +80,7 @@ app
       process.stdout.write(`sho ready ${actual}\n`);
     });
   })
-  .catch((err) => {
-    console.error(err);
+  .catch(() => {
+    console.error("server preparation failed");
     process.exit(1);
   });

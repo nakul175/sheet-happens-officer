@@ -1,7 +1,9 @@
 import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
+import type { Prisma } from "@/generated/prisma/client";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/http";
+import { assertWorkspaceUser } from "@/lib/workspace";
 import { centralSessionActive } from "@/lib/central-status";
 
 export const SESSION_COOKIE = "sho_session";
@@ -90,6 +92,8 @@ export function deviceLabel(ua?: string | null) {
 }
 
 export async function startSession(userId: string, userAgent?: string | null) {
+  const user = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { workspaceId: true } });
+  await assertWorkspaceUser(user.workspaceId);
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * HOUR);
   await db.session.create({ data: { userId, tokenHash: sha256(token), expiresAt, userAgent: userAgent?.slice(0, 300) ?? null } });
@@ -128,6 +132,7 @@ export async function sessionUser(token: string | undefined, opts: { allowTempPa
   if (!session || session.revokedAt || session.expiresAt <= new Date() || !u || u.deactivatedAt || !u.emailVerifiedAt) {
     throw new ApiError(401, "Not signed in");
   }
+  await assertWorkspaceUser(u.workspaceId);
   const central = await db.centralSessionLink.findUnique({ where: { sessionId: session.id } });
   if (central && !(await centralSessionActive(central.subject, central.sessionUid, u.id))) throw new ApiError(401, "Central session expired. Sign in again.");
   // Last-active time for the Profile screen; written at most every 5 minutes.
@@ -165,24 +170,50 @@ export async function issueToken(userId: string, type: "VERIFY" | "RESET") {
   return token;
 }
 
-/**
- * APL-2742. Creates a token of a type and hands it to `send`. Only when the send succeeds are the earlier unused tokens
- * of that type voided, so a failed send leaves the link already delivered working. A failed send's token is deleted,
- * so it never counts toward the hourly limit. Returns the raw token.
+export class AuthMailLimitError extends Error {
+  constructor() { super("Recovery email limit reached"); }
+}
+
+/** Delivery reservation is serialized per user, across app workers. Pending sends
+ * count toward both caps; failed sends free the token quota but consume a separate
+ * failure quota. External email never runs inside a database transaction.
  */
 export async function issueTokenAndSend(userId: string, type: "VERIFY" | "RESET", send: (token: string) => Promise<void>) {
   const token = newToken();
   const hours = type === "VERIFY" ? VERIFY_HOURS : RESET_HOURS;
-  const row = await db.authToken.create({
-    data: { userId, type, tokenHash: sha256(token), expiresAt: new Date(Date.now() + hours * HOUR) },
-  });
+  const reserved = await db.$transaction(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+    const since = new Date(Date.now() - HOUR);
+    const deliveries = { actorId: userId, event: "AUTH_EMAIL_DELIVERY", createdAt: { gt: since } };
+    const [issued, pending, failed] = await Promise.all([
+      tx.authToken.count({ where: { userId, type, createdAt: { gt: since } } }),
+      tx.auditLog.count({ where: { ...deliveries, AND: [{ data: { path: ["type"], equals: type } }, { data: { path: ["result"], equals: "PENDING" } }] } }),
+      tx.auditLog.count({ where: { ...deliveries, AND: [{ data: { path: ["type"], equals: type } }, { data: { path: ["result"], equals: "FAILED" } }] } }),
+    ]);
+    if (issued >= MAX_EMAILS_PER_HOUR || pending + failed >= MAX_EMAILS_PER_HOUR) throw new AuthMailLimitError();
+    const row = await tx.authToken.create({ data: { userId, type, tokenHash: sha256(token), expiresAt: new Date(Date.now() + hours * HOUR) } });
+    const receipt = await tx.auditLog.create({ data: { event: "AUTH_EMAIL_DELIVERY", actorId: userId, channel: "SCREEN", data: { type, result: "PENDING" } } });
+    return { row, receipt };
+  }, { isolationLevel: "ReadCommitted" });
   try {
     await send(token);
   } catch (err) {
-    await db.authToken.delete({ where: { id: row.id } });
+    await db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+      await tx.authToken.delete({ where: { id: reserved.row.id } });
+      await tx.auditLog.update({ where: { id: reserved.receipt.id }, data: { data: { type, result: "FAILED" } } });
+    }, { isolationLevel: "ReadCommitted" });
     throw err;
   }
-  await db.authToken.updateMany({ where: { userId, type, usedAt: null, id: { not: row.id } }, data: { usedAt: new Date() } });
+  await db.$transaction(async tx => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+    const row = reserved.row;
+    // A late older send cannot invalidate a newer delivered link, even at equal timestamps.
+    await tx.authToken.updateMany({ where: { userId, type, usedAt: null, OR: [
+      { createdAt: { lt: row.createdAt } }, { createdAt: row.createdAt, id: { lt: row.id } },
+    ] }, data: { usedAt: new Date() } });
+    await tx.auditLog.update({ where: { id: reserved.receipt.id }, data: { data: { type, result: "SENT" } } });
+  }, { isolationLevel: "ReadCommitted" });
   return token;
 }
 
@@ -192,12 +223,20 @@ export async function emailLimitReached(userId: string, type: "VERIFY" | "RESET"
   return n >= MAX_EMAILS_PER_HOUR;
 }
 
+/** Read-only eligibility check; mutations must still claim again inside their transaction. */
+export async function usableToken(raw: string, type: "VERIFY" | "RESET", tx: Prisma.TransactionClient = db) {
+  const t = await tx.authToken.findUnique({ where: { tokenHash: sha256(raw) } });
+  return !t || t.type !== type || t.usedAt || t.expiresAt <= new Date() ? null : t;
+}
+
 /** Consumes a token once; returns the userId or null when unknown, used or expired. */
-export async function consumeToken(raw: string, type: "VERIFY" | "RESET") {
-  const hash = sha256(raw);
-  const t = await db.authToken.findUnique({ where: { tokenHash: hash } });
-  if (!t || t.type !== type || t.usedAt || t.expiresAt <= new Date()) return null;
-  const claimed = await db.authToken.updateMany({ where: { id: t.id, usedAt: null }, data: { usedAt: new Date() } });
+export async function consumeToken(raw: string, type: "VERIFY" | "RESET", tx: Prisma.TransactionClient = db) {
+  const t = await usableToken(raw, type, tx);
+  if (!t) return null;
+  // Match issuance/finalisation lock order: user first, then token.
+  await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${t.userId} FOR UPDATE`;
+  const now = new Date();
+  const claimed = await tx.authToken.updateMany({ where: { id: t.id, type, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } });
   return claimed.count === 1 ? t.userId : null;
 }
 

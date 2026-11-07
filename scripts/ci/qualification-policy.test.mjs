@@ -1,0 +1,5 @@
+import { test } from 'node:test';import assert from 'node:assert/strict';import { readFileSync } from 'node:fs';
+const read=f=>readFileSync(new URL('../../.github/workflows/'+f,import.meta.url),'utf8');
+test('PR and production request share a single qualification definition',()=>{for(const f of ['ci.yml','deploy.yml'])assert.match(read(f),/uses: \.\/\.github\/workflows\/qualification.yml/);assert.match(read('deploy.yml'),/needs: \[test, phone\]/);});
+test('qualification includes lint/typechecks/build/default/mode/browser gates without secrets',()=>{const s=read('qualification.yml');for(const c of ['npm run lint','tsc --noEmit','tsconfig.e2e.json','npm run build','npm test','npm run test:modes','npx playwright test'])assert.ok(s.includes(c),c);assert.doesNotMatch(s,/secrets\.|continue-on-error/);assert.match(s,/node --import tsx server.js/);});
+test('phone gate runs the same exact-head native entry and avoids duplicate main push',()=>{const s=read('phone-checks.yml');assert.match(s,/workflow_call:/);assert.match(s,/head.sha \|\| github.sha/);assert.match(s,/node --import tsx server.js/);assert.doesNotMatch(s,/branches: \[main/);});

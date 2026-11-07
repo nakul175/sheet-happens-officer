@@ -140,7 +140,7 @@ describe("purgeTrash scope (APL-2718)", () => {
     expect(userPurgeCallers(path.join(root, "src/app/(app)/projects/[id]/trash"))).toEqual([]);
   });
 
-  it("AC1 a signed-in user of workspace A does not change workspace B (APL-2718-AC1@v1)", async () => {
+  it("AC1 ambiguous multi-workspace storage refuses login and cannot change workspace B (APL-2718-AC1@v1)", async () => {
     const seed = await seedWorkspaces();
     const ids = [seed.A.expiredId, seed.A.recentId, seed.B.expiredId, seed.B.recentId];
     try {
@@ -148,22 +148,14 @@ describe("purgeTrash scope (APL-2718)", () => {
       expect(before).toHaveLength(4);
       const c = new Client();
       const signed = await c.post("/api/auth/signin", { email: seed.A.email, password: PW });
-      expect(signed.status, JSON.stringify(signed.json)).toBe(200);
-      expect(signed.json.user.orgRole).toBe("ADMIN");
-      expect(signed.json.user.id).toBe(seed.A.userId);
-
-      const mine = await c.get(`/api/projects/${seed.A.projectId}`);
-      const other = await c.get(`/api/projects/${seed.B.projectId}`);
-      expect(mine.status, JSON.stringify(mine.json)).toBe(200);
-      expect(other.status, JSON.stringify(other.json)).toBe(200);
-      expect(mine.json.project.role).toBe("LEADER");
-      expect(other.json.project.role).toBe("LEADER");
-
-      const trashA = await c.get(`/api/projects/${seed.A.projectId}/trash`);
-      const trashB = await c.get(`/api/projects/${seed.B.projectId}/trash`);
-      expect(trashA.status).toBe(200);
-      expect(trashB.status).toBe(200);
-      expect((trashB.json.items as { id: string }[]).map((item) => item.id).sort()).toEqual([seed.B.expiredId, seed.B.recentId].sort());
+      // Owner-approved single-organisation contract: ambiguous storage cannot
+      // produce an authenticated admin session or expose either workspace.
+      expect(signed.status, JSON.stringify(signed.json)).toBe(503);
+      expect(signed.json.user).toBeUndefined();
+      for (const p of [seed.A.projectId, seed.B.projectId]) {
+        expect((await c.get(`/api/projects/${p}`)).status).toBe(401);
+        expect((await c.get(`/api/projects/${p}/trash`)).status).toBe(401);
+      }
 
       const secret = process.env.JOB_SECRET ?? "";
       const wrong = (secret.startsWith("y") ? "x" : "y").repeat(Math.max(16, secret.length));

@@ -21,15 +21,17 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+          [ -n "$HOST_KEY" ] || { echo "Verified DROPLET_HOST_KEY is required"; exit 1; }
           printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          ssh-keygen -F "$HOST" -f ~/.ssh/known_hosts >/dev/null
       - name: Compare
         env:
           RESTORE_DATABASE_URL: ${{ secrets.RESTORE_DATABASE_URL }}
         run: |
           [ -n "$RESTORE_DATABASE_URL" ] || { echo "RESTORE_DATABASE_URL secret is missing"; exit 1; }
-          printf '%s\n' "$RESTORE_DATABASE_URL" | ssh "deploy@$HOST" 'umask 077; cat > /tmp/rc.url'
-          scp deploy/restore-check.cjs "deploy@$HOST:/tmp/restore-check.cjs"
-          ssh "deploy@$HOST" 'rm -rf /tmp/rc && mkdir /tmp/rc && cd /tmp/rc && npm init -y >/dev/null && npm i pg --no-audit --no-fund --loglevel=error && cp /tmp/restore-check.cjs . && node restore-check.cjs'
+          printf '%s\n' "$RESTORE_DATABASE_URL" | ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'umask 077; cat > /tmp/rc.url'
+          scp -o StrictHostKeyChecking=yes deploy/restore-check.cjs deploy/restore-assessment.cjs deploy/restore-connection.cjs "deploy@$HOST:/tmp/"
+          ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'rm -rf /tmp/rc && mkdir /tmp/rc && cd /tmp/rc && npm init -y >/dev/null && npm i pg --no-audit --no-fund --loglevel=error && cp /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs . && node restore-check.cjs'
       - name: Clean up
         if: always()
-        run: ssh "deploy@$HOST" 'rm -rf /tmp/rc /tmp/restore-check.cjs /tmp/rc.url'
+        run: ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'rm -rf /tmp/rc /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs /tmp/rc.url'

@@ -1,0 +1,22 @@
+# Backup recovery acceptance
+
+The legacy Restore check is now a **presence probe**, not recovery certification. It exits1 for missing tables/no users and2(INCONCLUSIVE) otherwise. Matching counts cannot establish content integrity; older backups can legitimately have fewer rows. A green restore claim requires the independent drill below. Production restore, DDL and any cloud-resource creation remain outside this remediation approval.
+
+1. Use the owner-approved RPO (maximum data loss) of one hour and RTO (maximum restoration time) of four hours. These are targets, not demonstrated capabilities.
+2. Database custodian supplies an existing backup ID/time, managed backup retention configuration and trusted snapshot reference(e.g. export fingerprints captured with the backup), without posting secrets. A manifest generated only from the suspect restored copy is not independent evidence.
+3. Restore that backup into an explicitly isolated, authorized environment. Confirm distinct cluster/database and private target before any connection; preserve production unchanged. Record start/end and costs/cleanup owner.
+4. Verify schema migration checksums, custom indexes/triggers and constraints; compare row identities/content fingerprints to the same snapshot reference. Never compare an old snapshot to a moving live database as an exact equality oracle. Validate cross-record/task-section, membership/leader and soft-delete/Undo invariants.
+5. Start the corresponding app revision with synthetic/isolated external dependencies; exercise sign-in, project/task/deal read/write/Undo and suite fail-closed boundaries. No mail/consent/schedules against real recipients.
+6. Capture redacted per-check outcomes, observed snapshot loss and elapsed restore time; explicitly pass/fail approved RPO/RTO. Stop owned resources and preserve evidence. Receiving engineer repeats using this runbook.
+
+Current status: checker false-assurance fixed in candidate code; the owner approved the targets on 7 November 2026. Real restore acceptance remains open pending an authorized, isolated provider-backup restore with trusted source containment, independent reference evidence, and measured data loss/service recovery. Nothing in this document authorizes production changes or a billed restored cluster.
+
+Owner-approved targets (7 November 2026): RPO at most one hour of lost changes; RTO at most four hours from incident declaration to verified service recovery. These are not measured capabilities. Validate provider backup/PITR coverage and measure a real isolated restore before claiming either target is met.
+
+## Synthetic qualification drill
+
+Release qualification runs `scripts/ci/recovery-drill.mjs` against its disposable PostgreSQL 16 service. The runner rejects non-CI/shared database URLs, checks the exact service container and PostgreSQL system identifier, creates two uniquely named owned databases, and replays only the checked-in migration baseline. It never connects to production or shared staging.
+
+The private source is quiescent while its content/schema reference and custom-format dump are captured. The reference comes from the source **before** restore. Later synthetic source writes demonstrate why comparing to current live counts would be wrong. The restored database must match all public table content fingerprints and catalog fingerprints (columns, indexes, constraints, triggers, functions, enums and sequences). Checks also cover legacy dates, null deadline fields, decimal precision, a transactional write/rollback, foreign-key and single-Done-section enforcement. Deliberate same-count content corruption and a missing custom index must both be detected.
+
+Artifacts under `test-results/recovery/` record source/restored fingerprints, dump hash, tool versions, phase outcomes, elapsed dump/restore time and cleanup. Raw dumps are deleted; only databases actually created by this run can be dropped. Failure or incomplete cleanup fails qualification. The status `SYNTHETIC_REHEARSAL_PASS` proves this tooling exercise only: it does **not** certify provider backups, production recovery, application/browser recovery, access grants/ownership, large-volume performance or RPO/RTO. Those remain separate acceptance gates above. Do not reuse this CI-only runner against a real backup or shared database.

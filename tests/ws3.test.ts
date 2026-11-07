@@ -1,7 +1,8 @@
 // Integration tests for reminders (7.4), search (3.2/3.6 AC6), Usage (9.2 AC3) and sign-out everywhere (1.6 AC3).
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com, JOB_SECRET set and the same EMAIL_OUTBOX_DIR.
-import { describe, expect, it } from "vitest";
-import { Client, PW, account, istDate, project, superAdmin, task, patchTask, withVersion } from "./helpers";
+import { afterEach, describe, expect, it } from "vitest";
+import { Client, PW, account, cleanupZz, istDate, project, superAdmin, task, patchTask, withVersion, type Account } from "./helpers";
+import { assertLocalFixture } from "./e2e/local-fixture-guard";
 
 const SECRET = process.env.JOB_SECRET ?? "";
 const runJob = (name: string) => fetch(`${process.env.TASKBOARD_URL ?? "http://localhost:3000"}/api/jobs/${name}`, { method: "POST", headers: { authorization: `Bearer ${SECRET}` } });
@@ -66,19 +67,37 @@ describe("cron health", () => {
 import { admin } from "./helpers";
 
 describe("search (3.2 AC6, 3.6 AC6)", () => {
+  const ownedProjects: string[] = [], ownedPeople: Account[] = [];
+  let archivedProject = "";
+  afterEach(async () => {
+    if (archivedProject) {
+      const sa = await superAdmin();
+      expect((await sa.c.post(`/api/projects/${archivedProject}/unarchive`)).status).toBe(200);
+      archivedProject = "";
+    }
+    if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects.splice(0), ownedPeople.splice(0));
+  });
   it("finds only what the person may see, leaves archived out unless asked, and shows Admins everything", async () => {
+    assertLocalFixture(process.env.DATABASE_URL);
     const sa = await superAdmin();
     const lead = await account("lead");
+    ownedPeople.push(lead);
     const me = await account("me");
+    ownedPeople.push(me);
     const out = await account("outsider");
+    ownedPeople.push(out);
     const tag = `zq${Date.now()}`;
     const mine = await project(lead, lead, [{ who: me }]);
+    ownedProjects.push(mine.id);
     const secret = await project(lead, lead);
+    ownedProjects.push(secret.id);
     const old = await project(lead, lead, [{ who: me }]);
+    ownedProjects.push(old.id);
     const a = await task(lead, mine.id, { title: `${tag} visible`, assigneeId: me.id });
     await task(lead, secret.id, { title: `${tag} hidden` });
     await task(lead, old.id, { title: `${tag} archived task`, assigneeId: me.id });
     expect((await lead.c.post(`/api/projects/${old.id}/archive`)).status).toBe(200);
+    archivedProject = old.id;
     const q = (who: { c: Client }, extra = "") => who.c.get(`/api/search?q=${tag}${extra}`);
     const mine1 = (await q(me)).json.tasks.map((t: { title: string }) => t.title).sort();
     expect(mine1).toEqual([`${tag} visible`]);
@@ -87,6 +106,7 @@ describe("search (3.2 AC6, 3.6 AC6)", () => {
     expect((await q(out, "&archived=true")).json.tasks).toHaveLength(0);
     expect((await q(sa)).json.tasks.map((t: { title: string }) => t.title).sort()).toEqual([`${tag} hidden`, `${tag} visible`]);
     const ad = await admin(sa, "searchadmin");
+    ownedPeople.push(ad);
     const titles = async (who: { c: Client }, extra = "") => (await q(who, extra)).json.tasks.map((t: { title: string }) => t.title).sort();
     // APL-2684: with Include archived on, an Admin and the Super Admin see the archived project they are not members of.
     expect(await titles(sa, "&archived=true")).toEqual([`${tag} archived task`, `${tag} hidden`, `${tag} visible`]);
@@ -107,6 +127,18 @@ describe("search (3.2 AC6, 3.6 AC6)", () => {
     expect(await idsFor(me, secretName, "&archived=true")).not.toContain(secret.id);
     expect(await idsFor(out, secretName, "&archived=true")).not.toContain(secret.id);
     expect(await idsFor(ad, secretName, "&archived=true")).toContain(secret.id);
+    const ideaTag = `zi${Date.now()}`;
+    const ideaId = await task(lead, mine.id, { title: `${ideaTag} insight` });
+    const regularId = await task(lead, mine.id, { title: `${ideaTag} regular` });
+    const trashedId = await task(lead, mine.id, { title: `${ideaTag} trash` });
+    expect((await lead.c.post(`/api/tasks/${ideaId}/idea`, { isIdea: true })).status).toBe(200);
+    expect((await lead.c.del(`/api/tasks/${trashedId}`)).status).toBe(204);
+    const ideaSearch = async (who: { c: Client }, extra = "") =>
+      (await who.c.get(`/api/search?q=${ideaTag}${extra}`)).json.tasks as { id: string }[];
+    expect((await ideaSearch(me)).map((t) => t.id).sort()).toEqual([ideaId, regularId].sort());
+    expect((await ideaSearch(me, "&idea=true")).map((t) => t.id)).toEqual([ideaId]);
+    expect((await ideaSearch(me, "&idea=true&archived=true")).map((t) => t.id)).toEqual([ideaId]);
+    expect(await ideaSearch(out, "&idea=true&archived=true")).toEqual([]);
     expect((await me.c.get("/api/search?q=z")).json.tasks).toHaveLength(0); // too short
     expect((await new Client().get(`/api/search?q=${tag}`)).status).toBe(401);
     expect(a).toBeTruthy();

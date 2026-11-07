@@ -3,14 +3,15 @@
 // argument, and nothing here prints a connection string.
 const { Client } = require("pg");
 const fs = require("node:fs");
+const { assessPresence } = require("./restore-assessment.cjs");
+const { restoreConnectionOptions } = require("./restore-connection.cjs");
 
-function clean(u) { const x = new URL(u); x.searchParams.delete("sslmode"); return x.toString(); }
 async function counts(url) {
-  const c = new Client({ connectionString: clean(url), ssl: { rejectUnauthorized: false } });
+  const c = new Client(restoreConnectionOptions(url));
   await c.connect();
   const t = await c.query("select tablename from pg_tables where schemaname='public' order by 1");
   const out = {};
-  for (const { tablename } of t.rows) out[tablename] = Number((await c.query(`select count(*) n from "${tablename}"`)).rows[0].n);
+  for (const { tablename } of t.rows) out[tablename] = Number((await c.query(`select count(*) n from "${tablename.replaceAll('"', '""')}"`)).rows[0].n);
   const u = await c.query(`select max("createdAt") m from "User"`).catch(() => ({ rows: [{}] }));
   await c.end();
   return { out, newestUser: u.rows[0].m };
@@ -32,7 +33,7 @@ async function counts(url) {
     console.log(n.padEnd(22), String(p ?? "-").padStart(11), String(r ?? "-").padStart(10), note);
   }
   console.log("newest user  production:", prod.newestUser?.toISOString?.() ?? "none", " restored:", rest.newestUser?.toISOString?.() ?? "none");
-  const users = rest.out.User ?? 0;
-  console.log(bad === 0 && users > 0 ? "PASS  restored copy has every table and real data" : "FAIL  restored copy is incomplete");
-  process.exit(bad === 0 && users > 0 ? 0 : 1);
-})().catch((e) => { console.error("FAIL ", e.message); process.exit(1); });
+  const assessment = assessPresence(prod.out, rest.out);
+  console.log(assessment.status, assessment.reason);
+  process.exit(assessment.exitCode);
+})().catch((e) => { console.error("FAIL RESTORE_CHECK", /^[A-Z0-9_]{1,40}$/.test(e.code ?? "") ? e.code : "CONNECTION_OR_QUERY_FAILED"); process.exit(1); });

@@ -1,0 +1,98 @@
+// SHO-REG-PROJECTS-04: exact 30-day task Trash boundary, restore roles and scoped purge.
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { db } from '@/lib/db';
+import { purgeTrash, restoreTask } from '@/lib/tasks';
+import { UNDO_WINDOW_MS } from '@/lib/undoable';
+import { getOrCreateWorkspace } from '@/lib/workspace';
+import { assertLocalFixture } from './e2e/local-fixture-guard';
+
+vi.mock('next/server', () => ({ connection: vi.fn() }));
+
+const prefix = `project-trash-boundary-${randomUUID()}`;
+const leader = { id: `${prefix}-leader`, orgRole: 'MEMBER' as const };
+const editor = { id: `${prefix}-editor`, orgRole: 'MEMBER' as const };
+const viewer = { id: `${prefix}-viewer`, orgRole: 'MEMBER' as const };
+const admin = { id: `${prefix}-admin`, orgRole: 'ADMIN' as const };
+const userIds: string[] = [];
+const projectIds: string[] = [];
+let auditBeforeIds: Set<string> | null = null;
+let safe = false;
+let projectId = '';
+let sectionId = '';
+let workspaceId = '';
+let cleanup = false;
+
+beforeAll(async () => {
+  assertLocalFixture(process.env.DATABASE_URL);
+  safe = true;
+  workspaceId = (await getOrCreateWorkspace()).id;
+  for (const actor of [leader, editor, viewer, admin]) {
+    await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: `${actor.id}@example.invalid`, passwordHash: 'unused', emailVerifiedAt: new Date(), orgRole: actor.orgRole } });
+    userIds.push(actor.id);
+  }
+  const project = await db.project.create({ data: { workspaceId, name: prefix } });
+  projectId = project.id;
+  projectIds.push(project.id);
+  await db.projectMember.createMany({ data: [
+    { projectId, userId: leader.id, role: 'LEADER' },
+    { projectId, userId: editor.id, role: 'EDITOR' },
+    { projectId, userId: viewer.id, role: 'VIEWER' },
+  ] });
+  sectionId = (await db.section.create({ data: { projectId, name: 'To do', position: 0 } })).id;
+});
+
+afterAll(async () => {
+  if (!safe) return;
+  try {
+    await db.notification.deleteMany({ where: { projectId: { in: projectIds } } });
+    await db.actionLog.deleteMany({ where: { projectId: { in: projectIds } } });
+    if (auditBeforeIds) {
+      const ownedAuditIds = (await db.auditLog.findMany({ where: { event: 'TASK_PURGED' }, select: { id: true } })).map(row => row.id).filter(id => !auditBeforeIds!.has(id));
+      if (ownedAuditIds.length) await db.auditLog.deleteMany({ where: { id: { in: ownedAuditIds } } });
+    }
+    await db.project.deleteMany({ where: { id: { in: projectIds } } });
+    await db.user.deleteMany({ where: { id: { in: userIds } } });
+    expect(await db.project.count({ where: { id: { in: projectIds } } })).toBe(0);
+    expect(await db.user.count({ where: { id: { in: userIds } } })).toBe(0);
+    cleanup = true;
+  } finally {
+    mkdirSync('test-results/project-trash-boundary', { recursive: true });
+    writeFileSync('test-results/project-trash-boundary/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'disposable-local-postgres', cleanup, projectIds, userIds }, null, 2));
+  }
+});
+
+it('preserves exact-boundary and unrelated Trash, purges only expired owned tasks, and enforces restore roles', async () => {
+  const now = new Date();
+  const cutoff = now.getTime() - UNDO_WINDOW_MS;
+  const create = (name: string, deletedAt: number, inProject = projectId) => db.task.create({ data: {
+    workspaceId, projectId: inProject, sectionId,
+    title: `${prefix}-${name}`, assigneeId: leader.id, createdById: leader.id,
+    deletedAt: new Date(deletedAt), deletedById: leader.id,
+  } });
+  const recent = await create('recent', cutoff + 1);
+  const exact = await create('exact', cutoff);
+  const expired = await create('expired', cutoff - 1);
+  const sentinel = await create('unrelated-sentinel', cutoff - 86_400_000);
+  const sentinelBefore = await db.task.findUniqueOrThrow({ where: { id: sentinel.id }, select: { id: true, title: true, deletedAt: true, projectId: true } });
+  auditBeforeIds = new Set((await db.auditLog.findMany({ where: { event: 'TASK_PURGED' }, select: { id: true } })).map(row => row.id));
+
+  await expect(restoreTask(editor, exact.id)).rejects.toMatchObject({ status: 403 });
+  await expect(restoreTask(viewer, exact.id)).rejects.toMatchObject({ status: 403 });
+  await restoreTask(admin, recent.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: recent.id } })).deletedAt).toBeNull();
+
+  expect(await purgeTrash(now, { projectId, title: { startsWith: `${prefix}-expired` } })).toBe(1);
+  expect(await db.task.findUnique({ where: { id: expired.id } })).toBeNull();
+  expect((await db.task.findUniqueOrThrow({ where: { id: exact.id } })).deletedAt?.getTime()).toBe(cutoff);
+  await restoreTask(leader, exact.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: exact.id } })).deletedAt).toBeNull();
+  expect(await db.task.findUniqueOrThrow({ where: { id: sentinel.id }, select: { id: true, title: true, deletedAt: true, projectId: true } })).toEqual(sentinelBefore);
+  expect(await db.project.findUnique({ where: { id: projectId }, select: { id: true } })).toEqual({ id: projectId });
+  const newAudit = (await db.auditLog.findMany({ where: { event: 'TASK_PURGED' }, select: { id: true } })).map(row => row.id).filter(id => !auditBeforeIds!.has(id));
+  expect(newAudit).toHaveLength(1);
+
+  mkdirSync('test-results/project-trash-boundary', { recursive: true });
+  writeFileSync('test-results/project-trash-boundary/verification.json', JSON.stringify({ fixture: prefix, cutoff: new Date(cutoff).toISOString(), denied: ['EDITOR', 'VIEWER'], restored: ['ADMIN recent', 'LEADER exact'], purged: 1, sentinelPreserved: true, projectPreserved: true }, null, 2));
+});

@@ -14,6 +14,7 @@ let app = BASE;
 let projectId = "";
 let taskId = "";
 let email = "";
+let viewerEmail = "";
 // QA #128 D4: ZZ-TEST names and nakul17+ aliases. The Super Admin leads the project so that, in afterAll,
 // it can deactivate both people and archive the project through the API.
 const RUN = Date.now().toString(36);
@@ -38,9 +39,11 @@ beforeAll(async () => {
   const writer = await account("phonewriter", `nakul17+zztest-apl2590-phone-writer-${RUN}@aplyd.com`, "ZZ-TEST phone writer");
   email = writer.email;
   const colleague = await account("phonecolleague", `nakul17+zztest-apl2590-phone-colleague-${RUN}@aplyd.com`, "ZZ-TEST phone colleague");
-  made.push(writer, colleague);
+  const viewer = await account("phoneviewer", `nakul17+zztest-apl2590-phone-viewer-${RUN}@aplyd.com`, "ZZ-TEST phone viewer");
+  viewerEmail = viewer.email;
+  made.push(writer, colleague, viewer);
   root = await superAdmin();
-  const p = await project(root, root, [{ who: writer, role: "EDITOR" }, { who: colleague, role: "EDITOR" }], `ZZ-TEST phone ${RUN}`);
+  const p = await project(root, root, [{ who: writer, role: "EDITOR" }, { who: colleague, role: "EDITOR" }, { who: viewer, role: "VIEWER" }], `ZZ-TEST phone ${RUN}`);
   projectId = p.id;
   taskId = await task(writer, p.id, { title: "ZZ-TEST phone comment" });
   const probe = await writer.c.get(`/api/tasks/${taskId}`);
@@ -86,6 +89,30 @@ async function phone(): Promise<{ ctx: BrowserContext; page: Page }> {
 }
 
 describe("phone comments", () => {
+  it("denies signed-in Viewer comment writes on the feature-enabled server without changing the visible list", async () => {
+    const writer = await browser.newContext({ baseURL: app });
+    const viewer = await browser.newContext({ baseURL: app });
+    try {
+      expect((await writer.request.post("/api/auth/signin", { data: { email, password: "correct-horse-9" } })).status()).toBe(200);
+      expect((await viewer.request.post("/api/auth/signin", { data: { email: viewerEmail, password: "correct-horse-9" } })).status()).toBe(200);
+      const url = `/api/tasks/${taskId}/comments`;
+      const created = await writer.request.post(url, { data: { text: `ZZ-TEST viewer boundary ${RUN}` } });
+      expect(created.status()).toBe(201);
+      const id = (await created.json()).comment.id as string;
+      const before = await viewer.request.get(url);
+      expect(before.status()).toBe(200);
+      const list = await before.json();
+      expect(list.comments.some((comment: { id: string }) => comment.id === id)).toBe(true);
+      expect((await viewer.request.post(url, { data: { text: "ZZ-TEST denied" } })).status()).toBe(403);
+      expect((await viewer.request.patch(`${url}/${id}`, { data: { text: "ZZ-TEST denied edit" } })).status()).toBe(403);
+      expect((await viewer.request.delete(`${url}/${id}`)).status()).toBe(403);
+      expect(await (await viewer.request.get(url)).json()).toEqual(list);
+    } finally {
+      await writer.close();
+      await viewer.close();
+    }
+  });
+
   it("qa:TC missing N1: posts a comment from a 390x800 viewport", async () => {
     const { ctx, page } = await phone();
     const text = `ZZ-TEST phone ${Date.now().toString(36)}`;

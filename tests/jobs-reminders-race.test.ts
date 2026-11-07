@@ -91,6 +91,66 @@ async function dueTasks(label: string) {
   ];
 }
 
+type EligibilityChange = "reassign" | "archive" | "deactivate";
+
+/** Commit a competing eligibility change while a reminder job waits on its row/insert. */
+async function raceEligibilityChange(change: EligibilityChange, taskId: string) {
+  const gate = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+  const watch = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+  let began = false;
+  let changed = false;
+  let posts: Promise<unknown> | null = null;
+  try {
+    await gate.connect();
+    await watch.connect();
+    await gate.query("BEGIN");
+    began = true;
+    const row = change === "archive" ? { table: "Project", id: proj.id }
+      : change === "deactivate" ? { table: "User", id: holder.id }
+        : { table: "Task", id: taskId };
+    // The relation name comes only from the fixed union above, never external input.
+    await gate.query(`SELECT "id" FROM "${row.table}" WHERE "id" = $1 FOR UPDATE`, [row.id]);
+    await gate.query('LOCK TABLE "Notification" IN SHARE MODE');
+    posts = postReminders(1).then(() => null, (err: unknown) => err);
+    const deadline = Date.now() + 3_000;
+    let waiting = false;
+    while (Date.now() < deadline) {
+      const { rows } = await watch.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM pg_stat_activity
+         WHERE datname = current_database() AND pid <> pg_backend_pid()
+           AND state = 'active' AND wait_event_type = 'Lock'
+           AND (query ILIKE '%"Task"%' OR query ILIKE '%"Project"%'
+             OR query ILIKE '%"User"%' OR query ILIKE '%"Notification"%')`,
+      );
+      if (rows[0].count > 0) { waiting = true; break; }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(waiting, `reminder job reached the held ${row.table} row or notification insert`).toBe(true);
+    if (change === "reassign") await gate.query('UPDATE "Task" SET "assigneeId" = $2 WHERE "id" = $1', [taskId, leader.id]);
+    if (change === "archive") await gate.query('UPDATE "Project" SET "archivedAt" = $2 WHERE "id" = $1', [proj.id, new Date()]);
+    if (change === "deactivate") await gate.query('UPDATE "User" SET "deactivatedAt" = $2 WHERE "id" = $1', [holder.id, new Date()]);
+    await gate.query("COMMIT");
+    began = false;
+    changed = true;
+    const failed = await posts;
+    if (failed) throw failed;
+    if (change === "archive") { await gate.query('UPDATE "Project" SET "archivedAt" = NULL WHERE "id" = $1', [proj.id]); changed = false; }
+    if (change === "deactivate") { await gate.query('UPDATE "User" SET "deactivatedAt" = NULL WHERE "id" = $1', [holder.id]); changed = false; }
+    const oldHolder = await dueTomorrow(holder, taskId, `ZZ-TEST ${change} during reminder ${tag}`);
+    const newHolder = change === "reassign" ? await dueTomorrow(leader, taskId, `ZZ-TEST ${change} during reminder ${tag}`) : [];
+    return { oldHolder, newHolder };
+  } finally {
+    try {
+      if (began) await gate.query("ROLLBACK");
+      // The change is part of the disposable fixture, not a permanent deactivation or archive.
+      if (changed && change === "archive") await gate.query('UPDATE "Project" SET "archivedAt" = NULL WHERE "id" = $1', [proj.id]);
+      if (changed && change === "deactivate") await gate.query('UPDATE "User" SET "deactivatedAt" = NULL WHERE "id" = $1', [holder.id]);
+    } finally {
+      await Promise.allSettled([gate.end(), watch.end()]);
+    }
+  }
+}
+
 describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder per holder, task, type and day", () => {
   beforeAll(async () => {
     leader = await zz.person("Leader");
@@ -156,4 +216,59 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     console.log(`APL-2749 overlap ${JSON.stringify(overlap)} after ${heldMs} ms held; reminder rows per (recipient, task, TASK_DUE_TOMORROW) after ${LOAD} concurrent runs: ${JSON.stringify(counts)}`);
     expect(counts).toEqual({ holder: 1, leader: 1 });
   }, 90_000);
+
+  it("does not notify a task completed while a reminder run is waiting to insert", async () => {
+    const title = `ZZ-TEST completed during reminder ${tag}`;
+    const taskId = await task(leader, proj.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
+    const gate = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+    const watch = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+    let began = false;
+    let posts: Promise<unknown> | null = null;
+    try {
+      await gate.connect();
+      await watch.connect();
+      await gate.query("BEGIN");
+      began = true;
+      // A completed task must never acquire a stale due notice. The row lock keeps the
+      // completion before a fresh locked selection; the table lock exposes an old
+      // pre-transaction selection by pausing its later notification insert.
+      await gate.query('SELECT id FROM "Task" WHERE id = $1 FOR UPDATE', [taskId]);
+      await gate.query('LOCK TABLE "Notification" IN SHARE MODE');
+      posts = postReminders(1).then(() => null, (err: unknown) => err);
+      const deadline = Date.now() + 3_000;
+      let waiting = false;
+      while (Date.now() < deadline) {
+        const { rows } = await watch.query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM pg_stat_activity
+           WHERE datname = current_database() AND pid <> pg_backend_pid()
+             AND state = 'active' AND wait_event_type = 'Lock'
+             AND (query ILIKE '%"Task"%' OR query ILIKE '%"Notification"%')`,
+        );
+        if (rows[0].count > 0) { waiting = true; break; }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(waiting, "reminder job reached the held task row or notification insert").toBe(true);
+      await gate.query('UPDATE "Task" SET "completedAt" = $2 WHERE id = $1', [taskId, new Date()]);
+      await gate.query("COMMIT");
+      began = false;
+    } finally {
+      try { if (began) await gate.query("ROLLBACK"); }
+      finally { await Promise.allSettled([gate.end(), watch.end()]); }
+    }
+    const failed = await posts;
+    if (failed) throw failed;
+    expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
+  }, 60_000);
+
+  it.each(["reassign", "archive", "deactivate"] as const)(
+    "rechecks task eligibility after a concurrent %s",
+    async (change) => {
+      const title = `ZZ-TEST ${change} during reminder ${tag}`;
+      const taskId = await task(leader, proj.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
+      const { oldHolder, newHolder } = await raceEligibilityChange(change, taskId);
+      expect(oldHolder, "former holder must not receive a stale due notice").toEqual([]);
+      expect(newHolder.map((item) => item.text)).toEqual(change === "reassign" ? [`"${title}" is due tomorrow.`] : []);
+    },
+    60_000,
+  );
 });

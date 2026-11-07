@@ -86,7 +86,7 @@ type Fixtures = {
   admin: { page: Page; api: Api; user: Json };
   /** A page signed in as the plain Member: login("MEMBER"), SHO_MEMBER_* outside CI shards. Skips the test when none is set. */
   member: { page: Page; api: Api; user: Json };
-  /** Register a clean-up. Runs after the test, newest first, and never fails the test. */
+  /** Register a clean-up. Runs after the test, newest first; any failure fails the test after all callbacks run. */
   later: (fn: () => Promise<unknown>) => void;
   /** A browser context with no sign-in. */
   anon: Page;

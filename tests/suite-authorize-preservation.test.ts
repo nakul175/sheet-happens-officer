@@ -30,6 +30,17 @@ afterEach(() => {
 });
 
 describe("first-party suite authorize route preservation", () => {
+  it("rejects an unknown client before configuration lookup without redirecting or writing a grant", async () => {
+    const invalid = new URL(authorizeUrl());
+    invalid.searchParams.set("client_id", "unknown-client");
+    const response = await GET(new Request(invalid));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid_request" });
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid authorization request without creating a grant", async () => {
     vi.stubEnv("SUITE_ACCOUNTS_CLIENT_SECRET", "test-only-accounts-client-secret-000000000000");
     const invalid = new URL(authorizeUrl());

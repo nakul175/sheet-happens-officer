@@ -2,11 +2,11 @@
 //   locally set PW_CHROMIUM to a chrome binary; in CI run `npx playwright-core install --with-deps chromium` first.
 // It signs in as throw-away accounts it creates itself with invented names, and never touches any other database.
 // Fails with: screen, width, element, and a screenshot saved under test-results/viewport/.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
 import type { AxeResults } from "axe-core";
-import { account, BASE, istDate, PW, project, superAdmin, task } from "../helpers";
+import { account, BASE, cleanupZz, istDate, PW, project, superAdmin, task, type Account } from "../helpers";
 import { readFileSync } from "node:fs";
 import { SCREENS, TASK_TITLE, type Ids } from "./screens";
 import { openScreen, requireLocalFixtures } from "./screen-ready";
@@ -16,6 +16,8 @@ const AXE = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
 let browser: Browser;
 let ids: Ids;
 let viewerEmail = "";
+const ownedProjects: string[] = [], ownedPeople: Account[] = [];
+let ownedOrganisation = "";
 
 beforeAll(async () => {
   // The suite creates accounts and data, so it only runs against a server on this machine (a test database), never a live site.
@@ -24,23 +26,68 @@ beforeAll(async () => {
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const root = await superAdmin();
   const editor = await account("vpeditor");
+  ownedPeople.push(editor);
   const viewer = await account("vpviewer");
+  ownedPeople.push(viewer);
   viewerEmail = viewer.email;
   const p = await project(root, root, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
+  ownedProjects.push(p.id);
   const parent = await task(root, p.id, { title: TASK_TITLE, dueDate: istDate(2), priority: "HIGH", collaboratorIds: [editor.id] });
   await task(root, p.id, { title: "W".repeat(100), sectionId: p.doing, dueDate: istDate(-1) }); // a 100-character unbreakable title
   await root.c.post(`/api/projects/${p.id}/tasks`, { title: "Draft the summary", parentId: parent });
   const org = await root.c.post("/api/orgs", { name: `Viewport Org ${Date.now()}` });
   const orgId = org.json.organisation.id as string;
+  ownedOrganisation = orgId;
   const pipes = (await root.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const d = await root.c.post("/api/deals", {
     name: `Viewport Deal ${Date.now()}`, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
     whyPursue: "Test deal", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
+  ownedProjects.push((d.json.deal?.id ?? d.json.project?.id) as string);
   ids = { project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId };
 }, 60000);
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => {
+  await browser?.close();
+  let cleanup = false;
+  try {
+    if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects, ownedPeople);
+    if (ownedOrganisation) {
+      const root = await superAdmin();
+      expect((await root.c.post(`/api/orgs/${ownedOrganisation}/archive`, { archive: true })).status).toBe(200);
+    }
+    cleanup = true;
+  } finally {
+    mkdirSync(SHOTS, { recursive: true });
+    writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify({ projects: ownedProjects.length, people: ownedPeople.length, organisation: Boolean(ownedOrganisation), cleanup }, null, 2));
+  }
+});
+
+it("Deal date-range error names both invalid inputs and clears after correction at phone width", async () => {
+  const ctx = await ctxFor("root", 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/deals", { waitUntil: "load" });
+    await page.getByRole("button", { name: "Date filters", exact: true }).click();
+    const from = page.getByLabel("From", { exact: true });
+    const through = page.getByLabel("Through", { exact: true });
+    await from.fill("2026-11-10");
+    await through.fill("2026-11-09");
+    const error = page.locator("#deal-date-range-error[role=alert]");
+    await error.waitFor();
+    expect(await error.innerText()).toBe("From must be on or before Through.");
+    for (const input of [from, through]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("true");
+      expect(await input.getAttribute("aria-describedby")).toBe("deal-date-range-error");
+    }
+    await through.fill("2026-11-10");
+    expect(await error.count()).toBe(0);
+    for (const input of [from, through]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("false");
+      expect(await input.getAttribute("aria-describedby")).toBeNull();
+    }
+  } finally { await ctx.close(); }
+});
 
 
 async function ctxFor(who: "root" | "viewer" | null, width: number) {
@@ -121,10 +168,37 @@ describe("keyboard", () => {
       await page.keyboard.press("Tab");
       expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), `Tab ${i + 1}`).toBe(true);
     }
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press("Shift+Tab");
+      expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), `Shift+Tab ${i + 1}`).toBe(true);
+    }
     await page.keyboard.press("Escape");
     await page.waitForSelector('[role="dialog"]', { state: "detached" });
     expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("link");
     await ctx.close();
+  });
+  it("Escape and browser Back close nested task dialogs without a destructive action", async () => {
+    const ctx = await ctxFor("root", 1280);
+    try {
+      const page = await ctx.newPage();
+      let deletes = 0;
+      page.on("request", (request) => {
+        if (request.method() === "DELETE" && new URL(request.url()).pathname === `/api/tasks/${ids.task}`) deletes++;
+      });
+      await page.goto(`/projects/${ids.project}?task=${ids.task}`, { waitUntil: "load" });
+      const taskDialog = page.getByRole("dialog", { name: "Task", exact: true });
+      await taskDialog.getByRole("button", { name: "Move to Trash", exact: true }).click();
+      const confirm = page.getByRole("dialog", { name: "Move to Trash?", exact: true });
+      await confirm.waitFor();
+      await page.keyboard.press("Escape");
+      await confirm.waitFor({ state: "detached" });
+      await taskDialog.waitFor();
+      await page.evaluate(() => history.back());
+      await page.waitForURL((url) => !url.searchParams.has("task"));
+      await taskDialog.waitFor({ state: "detached" });
+      expect(deletes).toBe(0);
+      expect((await ctx.request.get(`/api/tasks/${ids.task}`)).status()).toBe(200);
+    } finally { await ctx.close(); }
   });
   it("Retry loads the screen again without a full page reload", async () => {
     const ctx = await ctxFor("root", 1280);

@@ -9,7 +9,7 @@ import { WORKSTREAM_DEAL, crmMode, crmProjectWhere, crmVisible, requireCrm } fro
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { orgOf } from "@/lib/orgs";
-import { taskAccess } from "@/lib/tasks";
+import { taskAccess } from "@/lib/task-access";
 
 import { dealClassificationFields, type DealClassificationInput } from "@/lib/deal-classification";
 
@@ -522,46 +522,55 @@ export async function replaceBuyer(user: Actor, projectId: string, input: BuyerR
   if (input.organisationId === input.expectedOrganisationId) throw new ApiError(400, "Choose a different Buyer.");
 
   const actor = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
-  return db.$transaction(async (tx) => {
-    const current = await tx.dealParty.findFirst({
-      where: { projectId, role: "BUYER" },
-      include: { organisation: { select: { id: true, name: true } } },
-    });
-    if (!current) throw new ApiError(409, "This deal no longer has the Buyer you opened. Reload and try again.");
-    if (current.id !== input.expectedPartyId || current.organisationId !== input.expectedOrganisationId) {
+  try {
+    return await db.$transaction(async (tx) => {
+      const current = await tx.dealParty.findFirst({
+        where: { projectId, role: "BUYER" },
+        include: { organisation: { select: { id: true, name: true } } },
+      });
+      if (!current) throw new ApiError(409, "This deal no longer has the Buyer you opened. Reload and try again.");
+      if (current.id !== input.expectedPartyId || current.organisationId !== input.expectedOrganisationId) {
+        throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
+      }
+      const replacement = await tx.organisation.findFirst({
+        where: { id: input.organisationId, workspaceId: actor.workspaceId, archivedAt: null },
+        select: { id: true, name: true },
+      });
+      if (!replacement) throw new ApiError(400, "Choose an active organisation in this workspace.");
+
+      // project-lookup-ok: the duplicate warning deliberately checks every deal in this workspace for the proposed Buyer
+      const duplicate = await tx.project.findFirst({
+        where: {
+          id: { not: projectId }, workspaceId: actor.workspaceId, typeId: WORKSTREAM_DEAL,
+          name: { equals: access.project.name, mode: "insensitive" },
+          parties: { some: { organisationId: replacement.id, role: "BUYER" } },
+        },
+        select: { id: true },
+      });
+      if (duplicate && !input.force) {
+        throw new ApiError(409, `A deal called "${access.project.name}" already exists for ${replacement.name}.`, { needsConfirm: "duplicate", existingId: duplicate.id });
+      }
+
+      const changed = await tx.dealParty.updateMany({
+        where: { id: current.id, projectId, role: "BUYER", organisationId: current.organisationId },
+        data: { organisationId: replacement.id },
+      });
+      if (changed.count !== 1) throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
+      await logAction(tx, {
+        actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.buyer_replaced",
+        before: { partyId: current.id, organisationId: current.organisation.id, organisation: current.organisation.name },
+        after: { partyId: current.id, organisationId: replacement.id, organisation: replacement.name },
+      });
+      return { oldBuyer: current.organisation, newBuyer: replacement };
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    // Another replacement can win between our snapshot read and write. Preserve
+    // the one-winner transaction, but tell the losing editor to reload.
+    if ((error as { code?: string })?.code === "P2034") {
       throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
     }
-    const replacement = await tx.organisation.findFirst({
-      where: { id: input.organisationId, workspaceId: actor.workspaceId, archivedAt: null },
-      select: { id: true, name: true },
-    });
-    if (!replacement) throw new ApiError(400, "Choose an active organisation in this workspace.");
-
-    // project-lookup-ok: the duplicate warning deliberately checks every deal in this workspace for the proposed Buyer
-    const duplicate = await tx.project.findFirst({
-      where: {
-        id: { not: projectId }, workspaceId: actor.workspaceId, typeId: WORKSTREAM_DEAL,
-        name: { equals: access.project.name, mode: "insensitive" },
-        parties: { some: { organisationId: replacement.id, role: "BUYER" } },
-      },
-      select: { id: true },
-    });
-    if (duplicate && !input.force) {
-      throw new ApiError(409, `A deal called "${access.project.name}" already exists for ${replacement.name}.`, { needsConfirm: "duplicate", existingId: duplicate.id });
-    }
-
-    const changed = await tx.dealParty.updateMany({
-      where: { id: current.id, projectId, role: "BUYER", organisationId: current.organisationId },
-      data: { organisationId: replacement.id },
-    });
-    if (changed.count !== 1) throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
-    await logAction(tx, {
-      actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.buyer_replaced",
-      before: { partyId: current.id, organisationId: current.organisation.id, organisation: current.organisation.name },
-      after: { partyId: current.id, organisationId: replacement.id, organisation: replacement.name },
-    });
-    return { oldBuyer: current.organisation, newBuyer: replacement };
-  }, { isolationLevel: "Serializable" });
+    throw error;
+  }
 }
 
 

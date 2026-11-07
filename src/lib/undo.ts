@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // SHO-US-6.4: Undo from the stored before-state, with a conflict warning and "Undo anyway".
 import { db } from "@/lib/db";
+import { Prisma } from "@/generated/prisma/client";
 import { ApiError, notFound } from "@/lib/http";
-import { WORKERS, activeMember, isAdmin, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
+import { WORKERS, WORKSTREAM_DEAL, activeMember, isActive, isAdmin, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
 import { formatDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { deleteTask, recordAccess, restoreTask } from "@/lib/tasks";
@@ -10,6 +11,26 @@ import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { undoRecord } from "@/lib/records";
 import { commentsEnabled, isCommentAction } from "@/lib/flags";
 import { assertCommentRoom } from "@/lib/comments";
+import { requireCrm } from "@/lib/crm";
+
+const TRASH_TASK_UNDO = new Set(["task.deleted", "task.created", "task.restored"]);
+const FAMILY_TASK_UNDO = new Set([...TRASH_TASK_UNDO, "task.completed", "task.reopened"]);
+const COLLABORATOR_TASK_UNDO = new Set(["task.collaborator_added", "task.collaborator_removed"]);
+const COMMENT_TASK_UNDO = new Set(["comment.added", "comment.removed"]);
+const TASK_LINK_UNDO = new Set(["task.link_added", "task.link_removed"]);
+const MANAGEMENT_UNDO = new Set([
+  "project.updated", "project.archived", "project.unarchived", "project.leader_changed",
+  "member.added", "member.removed", "member.role_changed",
+  "section.added", "section.renamed", "section.moved", "section.done_changed",
+]);
+const TRANSACTIONAL_TASK_UNDO = new Set([
+  "task.updated", "task.moved", ...FAMILY_TASK_UNDO, ...COLLABORATOR_TASK_UNDO,
+  ...COMMENT_TASK_UNDO,
+  ...TASK_LINK_UNDO, "task.idea_changed",
+  "task.assigned", "task.sent_for_approval", "task.sent_back", "task.approver_changed",
+]);
+
+const TRANSACTIONAL_UNDO = new Set([...TRANSACTIONAL_TASK_UNDO, ...MANAGEMENT_UNDO, "deal.stage_changed", "deal.details_updated", "deal.converted"]);
 
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
@@ -35,13 +56,13 @@ const FIELD_LABEL: Record<string, string> = {
   assigneeId: "Assignee", approverId: "Approver", sectionId: "Section", name: "Name", role: "Role", leaderId: "Leader", position: "Position",
 };
 
-async function taskOf(id: string, projectId: string) {
-  const t = await db.task.findFirst({ where: { id, projectId } });
+async function taskOf(id: string, projectId: string, tx?: Tx) {
+  const t = await (tx ?? db).task.findFirst({ where: { id, projectId } });
   if (!t) throw bad("This task no longer exists.");
   return t;
 }
-const liveTask = async (id: string, projectId: string) => {
-  const t = await taskOf(id, projectId);
+const liveTask = async (id: string, projectId: string, tx?: Tx) => {
+  const t = await taskOf(id, projectId, tx);
   if (t.deletedAt) throw bad("This task is in Trash. Restore it first.");
   return t;
 };
@@ -70,21 +91,21 @@ function refuseShortDoneLists(before: Record<string, unknown>, after: Record<str
   if (gaps.length) throw bad(`Undo was not applied. This record lists only ${gaps.join(", ")}, so nothing was changed.`);
 }
 
-async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
+async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<Plan> {
   const b = (row.beforeState ?? {}) as any;
   const f = (row.afterState ?? {}) as any;
   const id = row.targetId as string;
   switch (row.action as string) {
     case "task.updated": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       const now: Record<string, unknown> = { title: t.title, description: t.description, dueDate: t.dueDate, priority: t.priority, blocked: t.blocked, blockedReason: t.blockedReason };
       const keys = Object.keys(b);
       const data: Record<string, unknown> = {};
       for (const k of keys) data[k] = k === "dueDate" ? (b[k] ? new Date(b[k]) : null) : b[k];
-      return { conflicts: fieldConflicts(keys, b, f, now), subject: t.title, fields: keys.map((k) => FIELD_LABEL[k] ?? k).join(", "), apply: async (tx) => { await tx.task.update({ where: { id }, data }); } };
+      return { conflicts: fieldConflicts(keys, b, f, now), subject: t.title, fields: keys.map((k) => FIELD_LABEL[k] ?? k).join(", "), apply: async (tx) => { await tx.task.update({ where: { id }, data: { ...data, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } }); } };
     }
     case "task.assigned": case "task.sent_for_approval": case "task.sent_back": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       // A send-back that cleared the approver (SHO-BUG-6) recorded it, so Undo puts the approver back too.
       const keys = "approverId" in f ? ["assigneeId", "approverId"] : ["assigneeId"];
       return {
@@ -92,98 +113,104 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
         apply: async (tx) => {
           if (!(await activeMember(tx, projectId, b.assigneeId, WORKERS))) throw bad("The previous assignee can no longer take this task.");
           if ("approverId" in f && b.approverId && !(await activeMember(tx, projectId, b.approverId, WORKERS))) throw bad("The previous approver can no longer take that role.");
-          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null, ...("approverId" in f ? { approverId: b.approverId ?? null } : {}) } });
+          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)), ...("approverId" in f ? { approverId: b.approverId ?? null } : {}) } });
         },
       };
     }
     case "task.approver_changed": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       const keys = Object.keys(f).filter((k) => k === "approverId" || k === "assigneeId");
       return {
         conflicts: fieldConflicts(keys, b, f, { approverId: t.approverId, assigneeId: t.assigneeId }), subject: t.title, fields: "Approver",
         apply: async (tx) => {
           for (const k of keys) if (b[k] && !(await activeMember(tx, projectId, b[k], WORKERS))) throw bad("The previous person can no longer take that role.");
-          await tx.task.update({ where: { id }, data: Object.fromEntries(keys.map((k) => [k, b[k] ?? null])) });
+          await tx.task.update({ where: { id }, data: { ...Object.fromEntries(keys.map((k) => [k, b[k] ?? null])), updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } });
         },
       };
     }
     case "task.collaborator_added": {
-      const t = await liveTask(id, projectId);
-      const has = await db.taskCollaborator.findUnique({ where: { taskId_userId: { taskId: id, userId: f.userId } } });
+      const t = await liveTask(id, projectId, tx);
+      const has = await (tx ?? db).taskCollaborator.findUnique({ where: { taskId_userId: { taskId: id, userId: f.userId } } });
       if (!has) throw bad("That collaborator was already removed.");
       return { conflicts: [], subject: t.title, apply: async (tx) => { await tx.taskCollaborator.delete({ where: { taskId_userId: { taskId: id, userId: f.userId } } }); } };
     }
     case "task.collaborator_removed": {
-      const t = await liveTask(id, projectId);
-      if (await db.taskCollaborator.findUnique({ where: { taskId_userId: { taskId: id, userId: b.userId } } })) throw bad("That person is a collaborator again already.");
+      const t = await liveTask(id, projectId, tx);
+      if (await (tx ?? db).taskCollaborator.findUnique({ where: { taskId_userId: { taskId: id, userId: b.userId } } })) throw bad("That person is a collaborator again already.");
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
           if (!(await activeMember(tx, projectId, b.userId))) throw bad("That person is no longer an active member of the project.");
-          await tx.taskCollaborator.create({ data: { taskId: id, userId: b.userId } });
+          try { await tx.taskCollaborator.create({ data: { taskId: id, userId: b.userId } }); }
+          catch (error) {
+            if (error && typeof error === "object" && "code" in error && error.code === "P2002") throw bad("That person is a collaborator again already.");
+            throw error;
+          }
         },
       };
     }
     case "task.completed": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       if (!t.completedAt) throw bad("This task was already reopened.");
       if (t.parentId) {
-        const parent = await db.task.findUniqueOrThrow({ where: { id: t.parentId } });
+        const parent = await (tx ?? db).task.findUniqueOrThrow({ where: { id: t.parentId } });
         if (parent.completedAt) throw bad("Reopen the parent task first.");
       }
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
-          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: null } }); return; }
+          const updatedAt = new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1));
+          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: null, updatedAt } }); return; }
           const sec = b.sectionId ? await tx.section.findFirst({ where: { id: b.sectionId, projectId, isDone: false } }) : null;
           const dest = sec ?? (await tx.section.findFirstOrThrow({ where: { projectId, isDone: false }, orderBy: { position: "asc" } }));
-          await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest.id, previousSectionId: b.previousSectionId ?? null } });
-          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds } }, data: { completedAt: null } });
+          await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest.id, previousSectionId: b.previousSectionId ?? null, updatedAt } });
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, projectId, parentId: id, completedAt: f.completedAt ? new Date(f.completedAt) : { not: null } }, data: { completedAt: null } });
         },
       };
     }
     case "task.reopened": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       if (t.completedAt) throw bad("This task was already completed again.");
       return {
         conflicts: [], subject: t.title,
         apply: async (tx) => {
           const stamp = new Date(b.completedAt ?? Date.now());
-          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: stamp } }); return; }
+          const updatedAt = new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1));
+          if (t.parentId) { await tx.task.update({ where: { id }, data: { completedAt: stamp, updatedAt } }); return; }
           const done = await tx.section.findFirstOrThrow({ where: { projectId, isDone: true } });
-          await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId } });
+          await tx.task.update({ where: { id }, data: { completedAt: stamp, sectionId: done.id, previousSectionId: t.sectionId, updatedAt } });
           // Subtasks that reopened with the parent close with it again, on the same completedAt (APL-2721).
           // One ticked done on its own since then keeps its own completedAt. One moved to Trash since closes too:
           // the reopen never lists a subtask that was already in Trash, so these ids are only ones it changed (APL-2870).
-          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, completedAt: null }, data: { completedAt: stamp } });
+          if (Array.isArray(f.subtaskIds) && f.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: f.subtaskIds }, projectId, parentId: id, completedAt: null }, data: { completedAt: stamp } });
         },
       };
     }
     case "task.moved": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
       return {
         conflicts: fieldConflicts(["sectionId"], b, f, { sectionId: t.sectionId }), subject: t.title, fields: "Section",
         apply: async (tx) => {
           if (!(await tx.section.findFirst({ where: { id: b.sectionId, projectId } }))) throw bad("The section it came from no longer exists.");
-          await tx.task.update({ where: { id }, data: { sectionId: b.sectionId } });
+          await tx.task.update({ where: { id }, data: { sectionId: b.sectionId, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } });
         },
       };
     }
     case "comment.added": {
       const commentId = String(f.commentId ?? "");
-      const c = await db.comment.findUnique({ where: { id: commentId } });
-      if (!c) throw bad("This comment no longer exists.");
+      const c = await (tx ?? db).comment.findUnique({ where: { id: commentId } });
+      if (!c || c.taskId !== id) throw bad("This comment no longer exists.");
       if (c.removedAt) throw bad("This comment is already deleted.");
-      const task = await liveTask(id, projectId);
+      const task = await liveTask(id, projectId, tx);
       return { conflicts: [], subject: task.title, apply: async (tx) => { await tx.comment.update({ where: { id: commentId }, data: { removedAt: new Date() } }); } };
     }
     case "comment.removed": {
       const commentId = String(f.commentId ?? "");
-      const c = await db.comment.findUnique({ where: { id: commentId } });
-      if (!c) throw bad("This comment no longer exists.");
+      const c = await (tx ?? db).comment.findUnique({ where: { id: commentId } });
+      if (!c || c.taskId !== id) throw bad("This comment no longer exists.");
       if (!c.removedAt) throw bad("This comment is already back.");
-      const task = await liveTask(id, projectId);
-      await roomForRestore(db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message (409)
+      const task = await liveTask(id, projectId, tx);
+      await roomForRestore(tx ?? db, c.taskId); // APL-2840: at 200 live comments the restore is refused with the cap message (409)
       return {
         conflicts: [], subject: task.title,
         apply: async (tx) => {
@@ -193,68 +220,146 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       };
     }
     case "task.deleted": {
-      const t = await taskOf(id, projectId);
+      const t = await taskOf(id, projectId, tx);
       if (!t.deletedAt) throw bad("This task is already restored.");
-      return { conflicts: [], subject: t.title, apply: async () => {} }; // restored by `undoAction` before the log is written
+      return { conflicts: [], subject: t.title, apply: async (tx) => { await restoreTask(user, id, true, { skipRestoredLog: true, tx }); } };
     }
     case "task.restored": case "task.created": {
-      const t = await taskOf(id, projectId);
+      const t = await taskOf(id, projectId, tx);
       if (t.deletedAt) throw bad("This task is already in Trash.");
-      return { conflicts: [], subject: t.title, apply: async () => {} };
+      return { conflicts: [], subject: t.title, apply: async (tx) => { await deleteTask(user, id, { byUndo: true, tx }); } };
     }
     case "deal.stage_changed": {
-      // project-lookup-ok: Undo preparation already authorizes the action project through recordAccess before planning.
-      const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      if (id !== projectId) throw bad("This stage action no longer belongs to this deal.");
+      // project-lookup-ok: Undo preparation authorizes this exact project through recordAccess before planning.
+      const p = await (tx ?? db).project.findUniqueOrThrow({ where: { id: projectId } });
+      if (p.typeId !== WORKSTREAM_DEAL || !p.pipelineId) throw bad("This is no longer a deal with stages.");
       // Retired stages remain valid historical targets. Normal moves reject them; Undo preserves the original ID.
-      if (!b.stageId || !(await db.stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId ?? "" } }))) throw bad("The earlier stage no longer exists.");
+      if (!b.stageId || !(await (tx ?? db).stage.findFirst({ where: { id: b.stageId, pipelineId: p.pipelineId } }))) throw bad("The earlier stage no longer exists.");
       return {
         conflicts: p.stageId !== f.stageId ? [{ field: "stage", before: b.stage, after: f.stage, now: p.stageId }] : [], subject: p.name, fields: "Stage",
         apply: async (tx) => {
-          const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: p.pipelineId, stageId: p.stageId, updatedAt: p.updatedAt }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date() } });
+          const changed = await tx.project.updateMany({ where: { id: projectId, typeId: WORKSTREAM_DEAL, pipelineId: p.pipelineId, stageId: p.stageId, updatedAt: p.updatedAt, archivedAt: null }, data: { stageId: b.stageId, stageReason: b.reason ?? null, stageChangedAt: new Date(), updatedAt: new Date(Math.max(Date.now(), p.updatedAt.getTime() + 1)) } });
           if (!changed.count) throw bad("This deal changed. Refresh before undoing its stage.");
         },
       };
     }
     case "deal.converted": {
       // Undo returns the task and its subtasks to their original project and Section, and archives the new deal (12.2 AC4).
-      const task = await db.task.findUnique({ where: { id }, include: { project: true } });
-      if (!task || task.projectId !== projectId) throw bad("The task is no longer in this deal, so the conversion cannot be undone.");
+      if (f.dealId !== projectId || typeof b.sourceProjectId !== "string" || !b.sourceProjectId || b.sourceProjectId === projectId
+        || !Array.isArray(b.subtaskIds) || b.subtaskIds.some((childId: unknown) => typeof childId !== "string" || !childId)
+        || new Set(b.subtaskIds).size !== b.subtaskIds.length) throw bad("This conversion record is incomplete. Reload before undoing it.");
+      const client = tx ?? db;
+      const task = await client.task.findUnique({ where: { id } });
+      if (!task || task.projectId !== projectId || task.parentId) throw bad("The task is no longer in this deal, so the conversion cannot be undone.");
       if (task.deletedAt) throw bad("The task is in Trash. Restore it first.");
-      // project-lookup-ok: Original source ID comes from the authorized conversion before-state; task is verified against the current project.
-      const src = await db.project.findUnique({ where: { id: b.sourceProjectId } });
-      if (!src) throw bad("The original project no longer exists.");
+      // project-lookup-ok: prepare authorizes this same deal before planning, and rechecks access inside the transaction.
+      const deal = await client.project.findUnique({ where: { id: projectId } });
+      if (!deal || deal.typeId !== WORKSTREAM_DEAL || deal.workspaceId !== task.workspaceId || deal.archivedAt || deal.deletedAt) {
+        throw bad("The converted deal is no longer available.");
+      }
+      // The historic source ID is data, not authorization. Check it again inside the locked transaction.
+      const sourceAccess = await recordAccess(user, b.sourceProjectId, "Project", { ...(tx ? { tx } : {}) });
+      requireWrite(sourceAccess);
+      const src = sourceAccess.project;
+      if (src.workspaceId !== task.workspaceId || src.typeId !== "wst_project" || src.deletedAt) throw bad("The original project is no longer available.");
       if (src.archivedAt) throw bad("The original project is archived. Unarchive it first.");
+      const children = await client.task.findMany({ where: { parentId: id }, select: { id: true, projectId: true, deletedAt: true, assigneeId: true, approverId: true } });
+      const expected = b.subtaskIds as string[];
+      if (children.length !== expected.length || children.some((child) => !expected.includes(child.id) || child.projectId !== projectId || child.deletedAt)) {
+        throw bad("The converted task family has changed. Reload before undoing it.");
+      }
+      const family = [task, ...children];
+      const collaborators = await client.taskCollaborator.findMany({ where: { taskId: { in: family.map((item) => item.id) } }, select: { userId: true } });
+      const peopleSet = new Set<string>();
+      for (const item of family) {
+        peopleSet.add(item.assigneeId);
+        if (item.approverId) peopleSet.add(item.approverId);
+      }
+      for (const collaborator of collaborators) peopleSet.add(collaborator.userId);
+      const people = [...peopleSet].sort();
+      if (tx) {
+        // A source member or person removed/deactivated during Undo must serialize with the move.
+        try {
+          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" IN (${Prisma.join(people)}) ORDER BY "id" FOR SHARE NOWAIT`;
+          await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${src.id} AND "userId" IN (${Prisma.join(people)}) ORDER BY "userId" FOR SHARE NOWAIT`;
+        } catch (error) {
+          if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+            throw bad("A task person's access is changing. Reload and try again.");
+          }
+          throw error;
+        }
+      }
+      const sourceMembers = await client.projectMember.findMany({
+        where: { projectId: src.id, userId: { in: people } },
+        select: { userId: true, role: true, user: { select: { deactivatedAt: true, emailVerifiedAt: true } } },
+      });
+      const eligible = new Map(sourceMembers.filter((member) => isActive(member.user)).map((member) => [member.userId, member.role]));
+      const canWork = (personId: string) => eligible.get(personId) === "LEADER" || eligible.get(personId) === "EDITOR";
+      if (family.some((item) => !canWork(item.assigneeId) || (item.approverId && !canWork(item.approverId)))
+        || collaborators.some((c) => !eligible.has(c.userId))) {
+        throw bad("One of this task family's people is no longer eligible in the original project.");
+      }
+      const sec = (await client.section.findFirst({ where: { id: b.sectionId, projectId: src.id } }))
+        ?? (await client.section.findFirst({ where: { projectId: src.id, isDone: false }, orderBy: { position: "asc" } }));
+      if (!sec) throw bad("The original project has no section for this task.");
       return {
         conflicts: [], subject: task.title,
         apply: async (tx) => {
-          const sec = (await tx.section.findFirst({ where: { id: b.sectionId, projectId: src.id } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: src.id, isDone: false }, orderBy: { position: "asc" } }));
-          await tx.task.update({ where: { id }, data: { projectId: src.id, sectionId: sec.id, previousSectionId: b.previousSectionId ?? null, isIdea: !!b.isIdea } });
-          if (Array.isArray(b.subtaskIds) && b.subtaskIds.length) await tx.task.updateMany({ where: { id: { in: b.subtaskIds } }, data: { projectId: src.id, sectionId: sec.id } });
-          await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
+          const moved = await tx.task.updateMany({ where: { id, projectId, parentId: null, deletedAt: null, updatedAt: task.updatedAt }, data: { projectId: src.id, sectionId: sec.id, previousSectionId: b.previousSectionId ?? null, isIdea: !!b.isIdea, updatedAt: new Date(Math.max(Date.now(), task.updatedAt.getTime() + 1)) } });
+          if (moved.count !== 1) throw bad("The converted task changed. Reload before undoing it.");
+          if (expected.length) {
+            const movedChildren = await tx.task.updateMany({ where: { id: { in: expected }, parentId: id, projectId, deletedAt: null }, data: { projectId: src.id, sectionId: sec.id } });
+            if (movedChildren.count !== expected.length) throw bad("The converted task family changed. Reload before undoing it.");
+          }
+          const archived = await tx.project.updateMany({ where: { id: projectId, typeId: WORKSTREAM_DEAL, workspaceId: task.workspaceId, archivedAt: null, updatedAt: deal.updatedAt }, data: { archivedAt: new Date() } });
+          if (archived.count !== 1) throw bad("The deal changed. Reload before undoing the conversion.");
         },
       };
     }
     case "task.link_added": {
-      const l = await db.taskLink.findUnique({ where: { id: f.linkId } });
-      if (!l) throw bad("That link is already gone.");
+      if (typeof f.linkId !== "string" || !f.linkId) throw bad("That link can no longer be undone.");
+      const l = await (tx ?? db).taskLink.findUnique({ where: { id: f.linkId } });
+      if (!l || l.taskId !== id || l.organisationId !== (f.organisationId ?? null) || l.contactId !== (f.contactId ?? null)) throw bad("That link is already gone or has changed.");
+      await liveTask(id, projectId, tx);
       return { conflicts: [], subject: "the link", apply: async (tx) => { await tx.taskLink.delete({ where: { id: f.linkId } }); } };
     }
     case "task.link_removed": {
-      const t = await liveTask(id, projectId);
-      if (await db.taskLink.findFirst({ where: { taskId: id, organisationId: b.organisationId ?? null, contactId: b.contactId ?? null } })) throw bad("That link is back already.");
-      return { conflicts: [], subject: t.title, apply: async (tx) => { await tx.taskLink.create({ data: { id: b.linkId, taskId: id, organisationId: b.organisationId ?? null, contactId: b.contactId ?? null } }); } };
+      const t = await liveTask(id, projectId, tx);
+      const orgId = b.organisationId ?? null, contactId = b.contactId ?? null;
+      if (typeof b.linkId !== "string" || !b.linkId || !!orgId === !!contactId
+        || (orgId !== null && (typeof orgId !== "string" || !orgId))
+        || (contactId !== null && (typeof contactId !== "string" || !contactId))) throw bad("That link can no longer be restored.");
+      if (await (tx ?? db).taskLink.findFirst({ where: { OR: [{ id: b.linkId }, { taskId: id, organisationId: orgId, contactId }] } })) throw bad("That link is back already.");
+      const target = orgId
+        ? await (tx ?? db).organisation.findFirst({ where: { id: orgId, workspaceId: t.workspaceId } })
+        : await (tx ?? db).contact.findFirst({ where: { id: contactId, workspaceId: t.workspaceId, removedAt: null } });
+      if (!target) throw bad("The linked record is no longer available.");
+      return {
+        conflicts: [], subject: t.title,
+        apply: async (tx) => {
+          try { await tx.taskLink.create({ data: { id: b.linkId, taskId: id, organisationId: orgId, contactId } }); }
+          catch (error) {
+            if (error && typeof error === "object" && "code" in error && (error.code === "P2002" || error.code === "P2003")) throw bad("That link is back already or its record is unavailable.");
+            throw error;
+          }
+        },
+      };
     }
     case "task.idea_changed": {
-      const t = await liveTask(id, projectId);
+      const t = await liveTask(id, projectId, tx);
+      if (t.parentId) throw bad("Only a top-level task can be an idea.");
       return {
         conflicts: t.isIdea !== f.isIdea ? [{ field: "isIdea", before: b.isIdea, after: f.isIdea, now: t.isIdea }] : [], subject: t.title, fields: "Idea",
-        apply: async (tx) => { await tx.task.update({ where: { id }, data: { isIdea: !!b.isIdea } }); },
+        apply: async (tx) => { await tx.task.update({ where: { id }, data: { isIdea: !!b.isIdea, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } }); },
       };
     }
     case "deal.details_updated": {
-      // project-lookup-ok: prepare authorizes recordAccess before preparing this guarded undo
-      const project = await db.project.findUniqueOrThrow({ where: { id: projectId } });
-      const d = await db.dealDetails.findUnique({ where: { projectId } });
+      if (id !== projectId) throw bad("This details action no longer belongs to this deal.");
+      // project-lookup-ok: prepare authorizes this exact project through recordAccess before planning.
+      const project = await (tx ?? db).project.findUniqueOrThrow({ where: { id: projectId } });
+      if (project.typeId !== WORKSTREAM_DEAL) throw bad("This is no longer a deal.");
+      const d = await (tx ?? db).dealDetails.findUnique({ where: { projectId } });
       if (!d) throw bad("This deal no longer exists.");
       const keys = Object.keys(f);
       const now: Record<string, unknown> = {
@@ -267,14 +372,14 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       const data: Record<string, unknown> = {};
       for (const k of keys) data[k] = (k === "expectedClose" || k === "submissionDeadline") && b[k] ? new Date(`${b[k]}T00:00:00Z`) : b[k] ?? null;
       return { conflicts: fieldConflicts(keys, b, f, now), subject: "the deal", fields: keys.join(", "), apply: async (tx) => {
-        const changed = await tx.project.updateMany({ where: { id: projectId, pipelineId: project.pipelineId, updatedAt: project.updatedAt }, data: { updatedAt: new Date() } });
+        const changed = await tx.project.updateMany({ where: { id: projectId, typeId: WORKSTREAM_DEAL, pipelineId: project.pipelineId, updatedAt: project.updatedAt, archivedAt: null }, data: { updatedAt: new Date(Math.max(Date.now(), project.updatedAt.getTime() + 1)) } });
         if (!changed.count) throw bad("This deal changed. Refresh before undoing its details.");
         await tx.dealDetails.update({ where: { projectId }, data });
       } };
     }
     case "project.updated": {
       // project-lookup-ok: Undo preparation already authorizes this exact project through recordAccess before planning.
-      const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      const p = await (tx ?? db).project.findUniqueOrThrow({ where: { id: projectId } });
       const keys = Object.keys(f);
       if (p.isVertical && keys.includes("name") && !isAdmin(user)) throw new ApiError(403, "Only Admins rename verticals.");
       if (p.isVertical && keys.includes("verticalId")) throw new ApiError(409, "A vertical board cannot belong to another vertical.");
@@ -282,20 +387,20 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     }
     case "project.archived": {
       // project-lookup-ok: Undo preparation already authorizes this exact project through recordAccess before planning.
-      const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      const p = await (tx ?? db).project.findUniqueOrThrow({ where: { id: projectId } });
       if (!p.archivedAt) throw bad("This project is not archived any more.");
       return { conflicts: [], subject: p.name, apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: { archivedAt: null } }); } };
     }
     case "project.unarchived": {
       // project-lookup-ok: Undo preparation already authorizes this exact project through recordAccess before planning.
-      const p = await db.project.findUniqueOrThrow({ where: { id: projectId } });
+      const p = await (tx ?? db).project.findUniqueOrThrow({ where: { id: projectId } });
       if (p.archivedAt) throw bad("This project is archived again already.");
       return { conflicts: [], subject: p.name, apply: async (tx) => { await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date(b.archivedAt ?? Date.now()) } }); } };
     }
     case "project.leader_changed": {
       if (f.previousRole === "REMOVE") throw bad("The previous Leader was removed from the project, so this cannot be undone here. Use Change Leader.");
       if (f.handedOver > 0) throw bad("Tasks were handed over with this change, so it cannot be undone. Use Change Leader.");
-      const cur = await db.projectMember.findFirst({ where: { projectId, role: "LEADER" } });
+      const cur = await (tx ?? db).projectMember.findFirst({ where: { projectId, role: "LEADER" } });
       return {
         conflicts: cur && cur.userId !== f.leaderId ? [{ field: "leaderId", before: b.leaderId, after: f.leaderId, now: cur.userId }] : [], subject: "the project Leader", fields: "Leader",
         apply: async (tx) => {
@@ -306,9 +411,9 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       };
     }
     case "member.added": {
-      const m = await db.projectMember.findUnique({ where: { projectId_userId: { projectId, userId: id } } });
+      const m = await (tx ?? db).projectMember.findUnique({ where: { projectId_userId: { projectId, userId: id } } });
       if (!m) throw bad("That person is not a member any more.");
-      if (await db.task.count({ where: { projectId, assigneeId: id, completedAt: null, deletedAt: null } })) throw bad("That person now holds open tasks. Remove them from Members and choose who takes the tasks.");
+      if (await (tx ?? db).task.count({ where: { projectId, assigneeId: id, completedAt: null, deletedAt: null } })) throw bad("That person now holds open tasks. Remove them from Members and choose who takes the tasks.");
       return {
         conflicts: m.role !== f.role ? [{ field: "role", before: null, after: f.role, now: m.role }] : [], subject: "the member", fields: "Role",
         apply: async (tx) => {
@@ -319,7 +424,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     }
     case "member.removed": {
       if (f.handedOver > 0) throw bad("Their tasks were handed over when they were removed, so this cannot be undone. Add them again from Members.");
-      if (await db.projectMember.findUnique({ where: { projectId_userId: { projectId, userId: id } } })) throw bad("That person is a member again already.");
+      if (await (tx ?? db).projectMember.findUnique({ where: { projectId_userId: { projectId, userId: id } } })) throw bad("That person is a member again already.");
       return {
         conflicts: [], subject: "the member",
         apply: async (tx) => {
@@ -330,7 +435,7 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
     }
     case "member.role_changed": {
       if (f.handedOver > 0) throw bad("Their tasks were handed over with this change, so it cannot be undone. Change the role from Members.");
-      const m = await db.projectMember.findUnique({ where: { projectId_userId: { projectId, userId: id } } });
+      const m = await (tx ?? db).projectMember.findUnique({ where: { projectId_userId: { projectId, userId: id } } });
       if (!m) throw bad("That person is not a member any more.");
       return {
         conflicts: m.role !== f.role ? [{ field: "role", before: b.role, after: f.role, now: m.role }] : [], subject: "the member", fields: "Role",
@@ -338,19 +443,19 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       };
     }
     case "section.added": {
-      const s = await db.section.findFirst({ where: { id, projectId } });
+      const s = await (tx ?? db).section.findFirst({ where: { id, projectId } });
       if (!s) throw bad("That section no longer exists.");
       if (s.isDone) throw bad("That section is now the done section.");
-      if ((await db.task.count({ where: { sectionId: id } })) > 0) throw bad("That section now holds tasks, so it cannot be undone. Delete it and choose where its tasks go.");
+      if ((await (tx ?? db).task.count({ where: { sectionId: id } })) > 0) throw bad("That section now holds tasks, so it cannot be undone. Delete it and choose where its tasks go.");
       return { conflicts: [], subject: s.name, apply: async (tx) => { await tx.section.delete({ where: { id } }); await renumber(tx, projectId); } };
     }
     case "section.renamed": {
-      const s = await db.section.findFirst({ where: { id, projectId } });
+      const s = await (tx ?? db).section.findFirst({ where: { id, projectId } });
       if (!s) throw bad("That section no longer exists.");
       return { conflicts: fieldConflicts(["name"], b, f, { name: s.name }), subject: s.name, fields: "Name", apply: async (tx) => { await tx.section.update({ where: { id }, data: { name: b.name } }); } };
     }
     case "section.moved": {
-      const all = await db.section.findMany({ where: { projectId }, orderBy: { position: "asc" } });
+      const all = await (tx ?? db).section.findMany({ where: { projectId }, orderBy: { position: "asc" } });
       const i = all.findIndex((x) => x.id === id);
       if (i < 0) throw bad("That section no longer exists.");
       return {
@@ -364,8 +469,8 @@ async function plan(row: any, user: Actor, projectId: string): Promise<Plan> {
       };
     }
     case "section.done_changed": {
-      const cur = await db.section.findFirst({ where: { projectId, isDone: true } });
-      if (!b.doneSectionId || !(await db.section.findFirst({ where: { id: b.doneSectionId, projectId } }))) throw bad("The earlier done section no longer exists.");
+      const cur = await (tx ?? db).section.findFirst({ where: { projectId, isDone: true } });
+      if (!b.doneSectionId || !(await (tx ?? db).section.findFirst({ where: { id: b.doneSectionId, projectId } }))) throw bad("The earlier done section no longer exists.");
       refuseShortDoneLists(b, f);
       return {
         conflicts: cur && cur.id !== f.doneSectionId ? [{ field: "sectionId", before: b.doneSectionId, after: f.doneSectionId, now: cur.id }] : [], subject: "the done section", fields: "Done section",
@@ -394,12 +499,12 @@ async function renumber(tx: Tx, projectId: string) {
 }
 
 /** Names for ids shown in the conflict dialog. */
-async function present(conflicts: Conflict[]) {
+async function present(conflicts: Conflict[], tx?: Tx) {
   const ids = new Set<string>();
   for (const c of conflicts) for (const v of [c.before, c.after, c.now]) if (typeof v === "string" && v.length > 20) ids.add(v);
   const [us, ss] = await Promise.all([
-    db.user.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
-    db.section.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
+    (tx ?? db).user.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
+    (tx ?? db).section.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true } }),
   ]);
   const names = new Map<string, string>([...us, ...ss].map((x) => [x.id, x.name] as [string, string]));
   const show = (field: string, v: unknown) => {
@@ -411,14 +516,15 @@ async function present(conflicts: Conflict[]) {
   return conflicts.map((c) => ({ field: FIELD_LABEL[c.field] ?? c.field, before: show(c.field, c.before), after: show(c.field, c.after), now: show(c.field, c.now) }));
 }
 
-async function prepare(user: Actor, logId: string) {
-  const row = await db.actionLog.findUnique({ where: { id: logId } });
+async function prepare(user: Actor, logId: string, tx?: Tx) {
+  const row = await (tx ?? db).actionLog.findUnique({ where: { id: logId } });
   if (!row) throw notFound("Action");
+  if (TASK_LINK_UNDO.has(row.action)) requireCrm(user);
   // APL-2590 D1: with the comments switch off, a comment row is the same 404 as an action that does not exist.
   if (isCommentAction(row.action) && !commentsEnabled()) throw notFound("Action");
   const projectId = row.projectId;
   if (!projectId) throw bad("This kind of action cannot be undone.");
-  const a = await recordAccess(user, projectId, "Action");
+  const a = tx ? await recordAccess(user, projectId, "Action", { tx }) : await recordAccess(user, projectId, "Action");
   requireWrite(a);
   const archiveKind = row.action === "project.archived" || row.action === "project.unarchived";
   if (a.project.archivedAt && !archiveKind) throw new ApiError(409, "This project is archived and read-only.");
@@ -427,22 +533,26 @@ async function prepare(user: Actor, logId: string) {
   // otherwise gets 403 after a Leader has already undone that delete.
   if (row.action === "task.deleted" && row.undoneAt) throw bad("This was already undone.");
   // Undoing a delete is a restore from Trash, so it takes the same Leader or Admin check (SHO-US-6.2 AC4, SHO-BUG-8).
-  if (row.action === "task.deleted") requireManage(a);
+  if (row.action === "task.deleted" || MANAGEMENT_UNDO.has(row.action)) requireManage(a);
+  if (archiveKind && a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins can retire or reactivate verticals.");
   if (row.undoneAt) throw bad("This action was already undone.");
   if (!isUndoable(row.action)) throw bad("This kind of action cannot be undone.");
   if (isTooOldToUndo(row.createdAt)) throw bad("Too old to undo", { tooOld: true });
 
-  const p = await plan(row, user, projectId);
+  // These task and comment inverses use the locked transaction below. Other action kinds
+  // retain their separate validation/transaction paths.
+  if (tx && !TRANSACTIONAL_UNDO.has(row.action)) throw bad("This action changed. Reload before undoing it.");
+  const p = await plan(row, user, projectId, tx);
   return { row, projectId, p };
 }
 
-async function conflictError(row: Awaited<ReturnType<typeof prepare>>["row"], p: Plan, userId: string) {
-  const later = await db.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id } }, include: { actor: { select: { name: true } } } });
+async function conflictError(row: Awaited<ReturnType<typeof prepare>>["row"], p: Plan, userId: string, tx?: Tx) {
+  const later = await (tx ?? db).actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id } }, include: { actor: { select: { name: true } } } });
   return bad("This changed after your action.", {
     needsConfirm: "conflict",
     label: UNDO_LABELS[row.action],
     changedBy: [...new Set(later.filter((l) => l.actorId !== userId).map((l) => l.actor.name))],
-    conflicts: await present(p.conflicts),
+    conflicts: await present(p.conflicts, tx),
   });
 }
 
@@ -452,6 +562,31 @@ export async function checkUndo(user: Actor, logId: string) {
   if (own && !own.projectId) return; // organisation, contact and note rows are checked by their own resource rules
   const { row, p } = await prepare(user, logId);
   if (p.conflicts.length) throw await conflictError(row, p, user.id);
+}
+/** Persist the inverse and activity together; locked task inverses also claim the action atomically. */
+async function applyPreparedUndo(tx: Tx, user: Actor, prepared: Awaited<ReturnType<typeof prepare>>, anyway: boolean) {
+  const { row, projectId, p } = prepared;
+  if (TRANSACTIONAL_UNDO.has(row.action)) {
+    const claimed = await tx.actionLog.updateMany({ where: { id: row.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+    if (claimed.count !== 1) throw bad("This action was already undone.");
+  }
+  await p.apply(tx);
+  if (!TRANSACTIONAL_UNDO.has(row.action)) await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
+  const commentId = (row.afterState as { commentId?: string } | null)?.commentId
+    ?? (row.beforeState as { commentId?: string } | null)?.commentId;
+  await logAction(tx, {
+    actorId: user.id, projectId, targetType: row.targetType as "task", targetId: row.targetId, action: "undo",
+    before: { undoes: row.id, action: row.action, ...(commentId ? { commentId } : {}) },
+    after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0, ...(commentId ? { commentId } : {}) },
+  });
+  if (anyway && p.conflicts.length) {
+    const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });
+    await notify(tx, later.map((l) => l.actorId), "CHANGE_OVERRIDDEN", {
+      actorId: user.id, projectId, taskId: row.targetType === "task" ? row.targetId : undefined, data: { title: p.subject, fields: p.fields },
+    });
+    await auditTx(tx, "UNDO_OVERRIDE", { actorId: user.id, targetId: row.targetId, targetType: row.targetType, data: { projectId, action: row.action } });
+  }
+  return { label: UNDO_LABELS[row.action], noticesSent: NOTIFYING.has(row.action), overrode: anyway && p.conflicts.length > 0 };
 }
 
 /**
@@ -464,27 +599,73 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   const { row, projectId, p } = await prepare(user, logId);
   if (p.conflicts.length && !anyway) throw await conflictError(row, p, user.id);
 
-  // Deleting and restoring have their own transactions.
-  if (row.action === "task.deleted") await restoreTask(user, row.targetId, true, { skipRestoredLog: true }); // Undo logs its own row
-  if (row.action === "task.restored" || row.action === "task.created") await deleteTask(user, row.targetId, { byUndo: true });
+  if (TRANSACTIONAL_UNDO.has(row.action)) {
+    return db.$transaction(async (tx) => {
+      // Same task-first ordering as ordinary edits. Shared project/membership
+      // locks preserve archive/access state; NOWAIT avoids reverse-order waits
+      // with management operations that already own those rows.
+      try {
+        if (row.action === "deal.converted") await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} OR "parentId" = ${row.targetId} ORDER BY "id" FOR UPDATE NOWAIT`;
+        else if (row.action === "task.idea_changed") await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE NOWAIT`;
+        else if (TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${row.targetId} AND "projectId" = ${projectId} FOR UPDATE`;
+        else await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+        if (FAMILY_TASK_UNDO.has(row.action)) {
+          // Trash and completion inverses can include a parent and its cohort.
+          // Lock that family without waiting on a reverse parent/child order.
+          const target = await tx.task.findUnique({ where: { id: row.targetId }, select: { parentId: true } });
+          const root = target?.parentId ?? row.targetId;
+          await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "projectId" = ${projectId} AND ("id" = ${root} OR "parentId" = ${root}) ORDER BY "id" FOR UPDATE NOWAIT`;
+        }
+        if (TRANSACTIONAL_TASK_UNDO.has(row.action)) await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
+        if (row.action === "deal.converted") {
+          const sourceId = (row.beforeState as { sourceProjectId?: unknown } | null)?.sourceProjectId;
+          if (typeof sourceId !== "string" || !sourceId || sourceId === projectId) throw bad("This conversion record is incomplete. Reload before undoing it.");
+          await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${sourceId} FOR SHARE NOWAIT`;
+          await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${sourceId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+          await tx.$queryRaw`SELECT "id" FROM "Section" WHERE "projectId" = ${sourceId} ORDER BY "id" FOR SHARE NOWAIT`;
+        }
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        if (row.action === "task.collaborator_added") {
+          const collaboratorId = (row.afterState as { userId?: string } | null)?.userId;
+          if (collaboratorId) await tx.$queryRaw`SELECT "taskId" FROM "TaskCollaborator" WHERE "taskId" = ${row.targetId} AND "userId" = ${collaboratorId} FOR UPDATE NOWAIT`;
+        }
+        if (row.action === "task.collaborator_removed") {
+          const collaboratorId = (row.beforeState as { userId?: string } | null)?.userId;
+          if (collaboratorId) await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${collaboratorId} FOR SHARE NOWAIT`;
+        }
+        if (COMMENT_TASK_UNDO.has(row.action)) {
+          const commentId = (row.afterState as { commentId?: string } | null)?.commentId;
+          if (commentId) await tx.$queryRaw`SELECT "id" FROM "Comment" WHERE "id" = ${commentId} AND "taskId" = ${row.targetId} FOR UPDATE NOWAIT`;
+        }
+        if (row.action === "task.link_added") {
+          const linkId = (row.afterState as { linkId?: string } | null)?.linkId;
+          if (linkId) await tx.$queryRaw`SELECT "id" FROM "TaskLink" WHERE "id" = ${linkId} AND "taskId" = ${row.targetId} FOR UPDATE NOWAIT`;
+        }
+        if (row.action === "task.link_removed") {
+          const prior = row.beforeState as { organisationId?: string; contactId?: string } | null;
+          const contactId = prior?.contactId;
+          if (contactId) await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${contactId} FOR SHARE NOWAIT`;
+          const organisationId = prior?.organisationId;
+          if (organisationId) await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${organisationId} FOR SHARE NOWAIT`;
+        }
+        if (row.action === "deal.stage_changed") {
+          const previousStageId = (row.beforeState as { stageId?: string } | null)?.stageId;
+          if (previousStageId) await tx.$queryRaw`SELECT "id" FROM "Stage" WHERE "id" = ${previousStageId} FOR SHARE NOWAIT`;
+        }
+        if (row.action === "deal.details_updated") await tx.$queryRaw`SELECT "projectId" FROM "DealDetails" WHERE "projectId" = ${projectId} FOR UPDATE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw bad("This task or its project access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      const fresh = await prepare(user, logId, tx);
+      if (fresh.row.targetId !== row.targetId || fresh.projectId !== projectId) throw bad("This action changed. Reload before undoing it.");
+      if (fresh.p.conflicts.length && !anyway) throw await conflictError(fresh.row, fresh.p, user.id, tx);
+      return applyPreparedUndo(tx, user, fresh, anyway);
+    }, { isolationLevel: "ReadCommitted" });
+  }
 
-  await db.$transaction(async (tx) => {
-    await p.apply(tx);
-    await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
-    const commentId = (row.afterState as { commentId?: string } | null)?.commentId
-      ?? (row.beforeState as { commentId?: string } | null)?.commentId;
-    await logAction(tx, {
-      actorId: user.id, projectId, targetType: row.targetType as "task", targetId: row.targetId, action: "undo",
-      before: { undoes: row.id, action: row.action, ...(commentId ? { commentId } : {}) },
-      after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0, ...(commentId ? { commentId } : {}) },
-    });
-    if (anyway && p.conflicts.length) {
-      const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });
-      await notify(tx, later.map((l) => l.actorId), "CHANGE_OVERRIDDEN", {
-        actorId: user.id, projectId, taskId: row.targetType === "task" ? row.targetId : undefined, data: { title: p.subject, fields: p.fields },
-      });
-      await auditTx(tx, "UNDO_OVERRIDE", { actorId: user.id, targetId: row.targetId, targetType: row.targetType, data: { projectId, action: row.action } });
-    }
-  });
-  return { label: UNDO_LABELS[row.action], noticesSent: NOTIFYING.has(row.action), overrode: anyway && p.conflicts.length > 0 };
+  return db.$transaction((tx) => applyPreparedUndo(tx, user, { row, projectId, p }, anyway));
 }

@@ -1,6 +1,6 @@
 // APL-2684: Include archived search. Membership and the archive flag are separate, so an
 // Admin or Super Admin sees archived projects they are not a member of, and a Member does not.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "@/lib/access";
 
 const db = vi.hoisted(() => ({
@@ -9,6 +9,7 @@ const db = vi.hoisted(() => ({
   contact: { findMany: vi.fn() },
   project: { findMany: vi.fn() },
   task: { findMany: vi.fn() },
+  comment: { findMany: vi.fn() },
 }));
 
 vi.mock("@/lib/db", () => ({ db }));
@@ -25,14 +26,58 @@ const other: Actor = { id: "member-2", orgRole: "MEMBER" };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("SEARCH_STAGE_A_ENABLED", "false");
   db.user.findUniqueOrThrow.mockResolvedValue({ workspaceId: "ws-1" });
   db.organisation.findMany.mockResolvedValue([]);
   db.contact.findMany.mockResolvedValue([]);
   db.project.findMany.mockResolvedValue([]);
   db.task.findMany.mockResolvedValue([]);
+  db.comment.findMany.mockResolvedValue([]);
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("Include archived search (APL-2684)", () => {
+  it("keeps idea-only and comment hits inside the same live visible task boundary", async () => {
+    vi.stubEnv("FF_TASK_COMMENTS", "true");
+    db.comment.findMany.mockResolvedValue([{ taskId: "task-1" }]);
+    db.task.findMany.mockResolvedValue([{
+      id: "task-1", title: "Review", completedAt: null, isIdea: true,
+      assignee: { name: "Lee" }, project: { id: "project-1", name: "Private", archivedAt: null },
+    }]);
+    const found = await search(member, "secret phrase", false, true);
+    const commentWhere = argWhere(db.comment.findMany);
+    expect(commentWhere.removedAt).toBeNull();
+    expect((commentWhere.task as Where).deletedAt).toBeNull();
+    expect((commentWhere.task as Where).isIdea).toBe(true);
+    expect(((commentWhere.task as Where).project as Where).members).toEqual({ some: { userId: member.id } });
+    expect(((commentWhere.task as Where).project as Where).deletedAt).toBeNull();
+    const taskWhere = argWhere(db.task.findMany);
+    expect(taskWhere.deletedAt).toBeNull();
+    expect(taskWhere.isIdea).toBe(true);
+    expect((taskWhere.project as Where).members).toEqual({ some: { userId: member.id } });
+    expect(found.tasks.map((t) => t.id)).toEqual(["task-1"]);
+    expect(JSON.stringify(found)).not.toContain("secret phrase");
+    expect(db.organisation.findMany).not.toHaveBeenCalled();
+    expect(db.contact.findMany).not.toHaveBeenCalled();
+  });
+
+  it("bounds direct legacy queries before every database search", async () => {
+    const long = "b".repeat(400);
+    await search(admin, long, false);
+    for (const fn of [db.organisation.findMany, db.contact.findMany, db.project.findMany]) {
+      expect((argWhere(fn).name as { contains: string }).contains).toHaveLength(200);
+    }
+    expect(((argWhere(db.task.findMany).title as { contains: string }).contains)).toHaveLength(200);
+  });
+  it("hides contacts of archived organisations until Include archived is selected", async () => {
+    await search(admin, "vault", false);
+    expect(argWhere(db.organisation.findMany).archivedAt).toBeNull();
+    expect(argWhere(db.contact.findMany).organisation).toEqual({ archivedAt: null });
+
+    await search(admin, "vault", true);
+    expect(argWhere(db.organisation.findMany).archivedAt).toBeUndefined();
+    expect(argWhere(db.contact.findMany)).not.toHaveProperty("organisation");
+  });
   it("shows Admins and Super Admins archived projects they are not members of", async () => {
     for (const user of [admin, superAdmin]) {
       await search(user, "vault", true);

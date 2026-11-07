@@ -22,20 +22,14 @@
 #   SHO_MEMBER_EMAIL / SHO_MEMBER_PASS also feed SHARD_EMAIL / SHARD_PASS, which APL-2733 signs in with.
 # They reach steps through env: only and are never echoed.
 #
-# Traces are OFF unless the "trace" input asks for them. A trace cannot be redacted: it holds the sign-in request body (the
+# Traces are OFF and cannot be enabled through this workflow. A trace cannot be redacted: it holds the sign-in request body (the
 # password) and the basic-auth header (STAGING_USER:STAGING_PASS in base64, which GitHub's log masking does not
-# catch) (APL-2476). With traces on, the uploaded test-results artifact carries those secrets to anyone who can download it.
+# catch) (APL-2476). Do not upload traces: the test-results artifact would expose those secrets to artifact readers.
 name: Staging regression
 
 on:
   workflow_dispatch:
     inputs:
-      trace:
-        description: "Playwright traces. They contain passwords (see the comment at the top of this file)."
-        required: false
-        default: "off"
-        type: choice
-        options: ["off", "retain-on-failure"]
 
 permissions:
   contents: read
@@ -137,7 +131,7 @@ jobs:
           SHARD_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHARD_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
-          TRACE: ${{ inputs.trace }}
+          TRACE: "off"
         run: npx playwright test --workers=1 --grep-invert "$EXCLUDED_TAGS" --reporter=list,html,json --trace="$TRACE"
 
       - name: Count the results
@@ -183,7 +177,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload the evidence (HTML report, test results, traces when turned on)
+      - name: Upload the evidence (HTML report and test results)
         if: always()
         uses: actions/upload-artifact@v4
         with:

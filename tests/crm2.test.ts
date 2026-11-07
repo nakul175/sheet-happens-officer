@@ -73,6 +73,22 @@ describe("next step notices (12.5)", () => {
 });
 
 describe("parties (12.4)", () => {
+  it("does not delete another deal's party and keeps an archived party as deal history", async () => {
+    const lead = await account("party-boundary");
+    const first = await setup(lead);
+    const second = await setup(lead);
+    const organisationId = (await lead.c.post("/api/orgs", { name: `Historic party ${Date.now()}-${seq++}` })).json.organisation.id as string;
+    const added = await lead.c.post(`/api/projects/${second.id}/parties`, { organisationId, role: "PARTNER" });
+    expect(added.status).toBe(201);
+    const party = ((await lead.c.get(`/api/projects/${second.id}`)).json.project.deal.parties as { id: string; organisation: { id: string } }[])
+      .find((row) => row.organisation.id === organisationId);
+    expect(party).toBeTruthy();
+    expect((await lead.c.del(`/api/projects/${first.id}/parties/${party!.id}`)).status).toBe(404);
+    expect((await lead.c.post(`/api/orgs/${organisationId}/archive`, { archive: true })).status).toBe(200);
+    const history = (await lead.c.get(`/api/projects/${second.id}`)).json.project.deal.parties as { id: string; organisation: { id: string } }[];
+    expect(history.some((row) => row.id === party!.id && row.organisation.id === organisationId)).toBe(true);
+  });
+
   it("adds and removes parties, keeps exactly one Buyer, and refuses archived organisations", async () => {
     const lead = await account("plead");
     const viewer = await account("pview");

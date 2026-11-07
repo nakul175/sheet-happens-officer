@@ -224,7 +224,9 @@ describe("stages (10.3)", () => {
     const id = r.json.deal.id as string;
     await lead.c.post(`/api/projects/${id}/members`, { userId: viewer.id, role: "VIEWER" });
     const conv = pipes.proactive.stages[1].id;
+    const beforeViewerStage = (await lead.c.get(`/api/projects/${id}`)).json.project.deal;
     expect((await viewer.c.post(`/api/projects/${id}/stage`, { stageId: conv })).status).toBe(403);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal).toEqual(beforeViewerStage);
     expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: pipes.bid.stages[1].id })).status).toBe(400);
     expect((await lead.c.post(`/api/projects/${id}/archive`, {})).status).toBe(200);
     expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: conv })).status).toBe(409);
@@ -354,6 +356,8 @@ describe("deal details (12.3)", () => {
     expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.details.value).toBeNull();
     const viewer = await account("detviewer");
     await lead.c.post(`/api/projects/${id}/members`, { userId: viewer.id, role: "VIEWER" });
+    const beforeViewerEdit = (await lead.c.get(`/api/projects/${id}`)).json.project.deal;
     expect((await viewer.c.patch(`/api/projects/${id}/deal`, { need: "x" })).status).toBe(403);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal).toEqual(beforeViewerEdit);
   });
 });
