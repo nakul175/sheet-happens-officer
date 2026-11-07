@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { consumeToken, hashToken, issueTokenAndSend } from "@/lib/auth";
@@ -37,6 +38,11 @@ afterAll(async () => {
   await db.auditLog.deleteMany({ where: { actorId: userId } });
   await db.authToken.deleteMany({ where: { userId } });
   await db.user.deleteMany({ where: { id: { in: [userId, sentinelId] } } });
+  expect(await db.auditLog.count({ where: { actorId: userId } })).toBe(0);
+  expect(await db.authToken.count({ where: { userId } })).toBe(0);
+  expect(await db.user.count({ where: { id: { in: [userId, sentinelId] } } })).toBe(0);
+  mkdirSync("test-results/auth-mail-failure", { recursive: true });
+  writeFileSync("test-results/auth-mail-failure/cleanup.json", JSON.stringify({ fixture, usersRemoved: 2, tokenRowsRemaining: 0, auditRowsRemaining: 0 }, null, 2));
   await db.$disconnect();
 });
 
