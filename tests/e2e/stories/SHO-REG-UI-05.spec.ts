@@ -4,6 +4,7 @@ import { test, local2691 } from '../helpers/2691-admin';
 import { account, PW } from '../local-api';
 import { newProject, newTask, deleteFixtureTask } from '../helpers/migration-2731';
 import { expect, signInAs, zz } from './qa';
+import { Client as PgClient } from 'pg';
 
 test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes unavailable after deletion', async ({ admin, later, browser }) => {
   if (!local2691) throw new Error('The navigation audit uses only the guarded local test database.');
@@ -15,6 +16,18 @@ test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes u
   const project = await newProject(admin, later, { label: 'navigation journey' });
   const title = zz('navigation deep link');
   const taskId = await newTask(admin, project.id, { title });
+  const database = new URL(process.env.DATABASE_URL ?? '');
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(database.hostname) || !/^\/sho_test(?:_[\w-]+)?$/.test(database.pathname))
+    throw new Error('Notification navigation fixtures require a synthetic local database.');
+  const db = new PgClient({ connectionString: process.env.DATABASE_URL });
+  await db.connect();
+  const notificationIds: string[] = [];
+  later(async () => {
+    if (notificationIds.length) await db.query('DELETE FROM "Notification" WHERE "id" = ANY($1) AND "recipientId" = $2', [notificationIds, admin.user.id]);
+    const remaining = await db.query('SELECT count(*)::int AS count FROM "Notification" WHERE "id" = ANY($1)', [notificationIds]);
+    expect(remaining.rows[0].count).toBe(0);
+    await db.end();
+  });
   let outsiderId = '';
   later(async () => {
     await deleteFixtureTask(admin, taskId);
@@ -65,6 +78,32 @@ test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes u
     await expect(tab.getByRole('heading', { name: /my tasks/i }).first()).toBeVisible();
 
     expect((await admin.api.del(`/api/tasks/${taskId}`)).status).toBe(204);
+    const sentinelNoticeId = randomUUID();
+    const deletedNoticeId = randomUUID();
+    await db.query('INSERT INTO "Notification" ("id", "recipientId", "type", "projectId", "taskId", "data", "createdAt") VALUES ($1, $2, $3, $4, $5, $6::jsonb, now())',
+      [sentinelNoticeId, admin.user.id, 'TASK_ASSIGNED', project.id, randomUUID(), JSON.stringify({ title: `ZZ-TEST unrelated ${fixture}` })]);
+    notificationIds.push(sentinelNoticeId);
+    await db.query('INSERT INTO "Notification" ("id", "recipientId", "type", "projectId", "taskId", "data", "createdAt") VALUES ($1, $2, $3, $4, $5, $6::jsonb, now())',
+      [deletedNoticeId, admin.user.id, 'TASK_ASSIGNED', project.id, taskId, JSON.stringify({ title })]);
+    notificationIds.push(deletedNoticeId);
+    const beforeNotice = await admin.api.get('/api/notifications');
+    expect(beforeNotice.status).toBe(200);
+    expect(beforeNotice.json.items.find((n: { id: string }) => n.id === deletedNoticeId)).toMatchObject({ href: `/tasks/${taskId}`, read: false });
+    expect(beforeNotice.json.items.find((n: { id: string }) => n.id === sentinelNoticeId)).toMatchObject({ read: false });
+    await tab.goto('/my-tasks');
+    await tab.getByRole('button', { name: /notifications/i }).click();
+    await expect(tab.getByRole('dialog', { name: 'Notifications' }).locator(`a[href="/tasks/${taskId}"]`)).toBeVisible();
+    await tab.getByRole('dialog', { name: 'Notifications' }).locator(`a[href="/tasks/${taskId}"]`).click();
+    await expect(tab).toHaveURL(new RegExp(`/tasks/${taskId}$`));
+    await expect(tab.getByRole('heading', { name: "This task isn't available" })).toBeVisible();
+    await tab.goBack();
+    await expect(tab.getByRole('heading', { name: /my tasks/i }).first()).toBeVisible();
+    const afterNotice = await admin.api.get('/api/notifications');
+    expect(afterNotice.status).toBe(200);
+    expect(afterNotice.json.items.find((n: { id: string }) => n.id === deletedNoticeId)).toMatchObject({ read: true });
+    expect(afterNotice.json.items.find((n: { id: string }) => n.id === sentinelNoticeId)).toMatchObject({ read: false });
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/notification-navigation.json`, JSON.stringify({ fixture, deletedNotice: deletedNoticeId, sentinelNotice: sentinelNoticeId, taskId, unavailable: true, back: true, targetRead: true, sentinelUnread: true, localSyntheticDatabase: true }, null, 2));
     cssResponses.length = 0;
     const unavailable = await tab.goto(`/tasks/${taskId}`);
     expect(unavailable?.status()).toBe(404);
