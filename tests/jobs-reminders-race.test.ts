@@ -13,8 +13,10 @@
 // qa:TC missing single run
 // qa:TC missing 40 concurrent reminder requests
 import pg from "pg";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BASE, istDate, task, type Account } from "./helpers";
+import { BASE, OUTBOX, istDate, task, type Account } from "./helpers";
 import { zzTestData, type ZzProject } from "./zz-test-data";
 
 const LOAD = 40;
@@ -88,6 +90,20 @@ async function dueReminderRecipients(taskId: string) {
       [taskId, "TASK_DUE_TOMORROW"],
     );
     return rows.map((row) => row.recipientId);
+  } finally {
+    await client.end();
+  }
+}
+
+async function dueReminderRows(taskId: string) {
+  const client = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000 });
+  try {
+    await client.connect();
+    const { rows } = await client.query<{ recipientId: string; type: string }>(
+      'SELECT "recipientId", "type" FROM "Notification" WHERE "taskId" = $1 AND "type" IN ($2, $3, $4)',
+      [taskId, "TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"],
+    );
+    return rows;
   } finally {
     await client.end();
   }
@@ -329,5 +345,35 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     await postReminders(1);
     expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
     expect(await dueReminderRecipients(taskId)).toEqual([]);
+  }, 60_000);
+
+  it("honors due-day boundaries, dedupes a second run, and sends no task email", async () => {
+    const cases = [
+      { offset: 1, type: "TASK_DUE_TOMORROW" },
+      { offset: 0, type: "TASK_DUE_TODAY" },
+      { offset: -1, type: "TASK_OVERDUE" },
+      { offset: -8, type: "TASK_OVERDUE" },
+      { offset: -29, type: null },
+    ] as const;
+    const due: { id: string; type: string | null }[] = [];
+    for (const { offset, type } of cases) {
+      due.push({ id: await task(leader, proj.id, {
+        title: `ZZ-TEST reminder boundary ${offset} ${tag}`,
+        assigneeId: holder.id,
+        dueDate: istDate(offset),
+      }), type });
+    }
+    await postReminders(1);
+    await postReminders(1);
+    for (const { id, type } of due) {
+      const rows = await dueReminderRows(id);
+      expect(rows, `due reminder for ${id}`).toEqual(type ? [{ recipientId: holder.id, type }] : []);
+    }
+    const mailFiles = (() => { try { return readdirSync(OUTBOX); } catch { return []; } })();
+    const mail = mailFiles.map((file) => readFileSync(path.join(OUTBOX, file), "utf8")).join("\n");
+    expect(mail).not.toContain(`ZZ-TEST reminder boundary 1 ${tag}`);
+    expect(mail).not.toContain(`ZZ-TEST reminder boundary 0 ${tag}`);
+    expect(mail).not.toContain(`ZZ-TEST reminder boundary -1 ${tag}`);
+    expect(mail).not.toContain(`ZZ-TEST reminder boundary -8 ${tag}`);
   }, 60_000);
 });
