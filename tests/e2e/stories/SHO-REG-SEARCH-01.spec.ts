@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import pg from 'pg';
 import { test, local2691 } from '../helpers/2691-admin';
 import { account, PW } from '../local-api';
 import { newProject, newTask } from '../helpers/migration-2731';
@@ -17,9 +18,14 @@ test('SHO-REG-SEARCH-03: default search works without pg_trgm or ranked payload'
     mkdirSync(evidenceDir, { recursive: true });
     writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ projectId, projectArchived: true }, null, 2));
   });
-  const { db } = await import('../../../src/lib/db');
-  const extensions = await db.$queryRaw<{ count: bigint }[]>`SELECT count(*)::bigint AS count FROM pg_extension WHERE extname = 'pg_trgm'`;
-  expect(Number(extensions[0]?.count)).toBe(0);
+  const database = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await database.connect();
+  try {
+    const extensions = await database.query<{ count: string }>("SELECT count(*)::bigint AS count FROM pg_extension WHERE extname = 'pg_trgm'");
+    expect(Number(extensions.rows[0]?.count)).toBe(0);
+  } finally {
+    await database.end();
+  }
   const project = await newProject(admin, later, { label: 'Search Stage A disabled' });
   projectId = project.id;
   const query = zz(`stage a off ${randomUUID().slice(0, 8)}`);
