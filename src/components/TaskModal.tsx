@@ -380,18 +380,18 @@ export function TaskModal({ id, me, onClose, onChanged, asPage }: { id: string; 
       )}
       {confirmExit && <Confirm title="Close without saving?" yes="Close anyway" onNo={() => { pauseBlurSave.current = false; setConfirmExit(false); }} onYes={finishClose}
         body="Some edits have not been saved or a save is still in progress. Closing can lose these edits. A save already sent may still finish. Choose Cancel to keep editing." />}
-      {convert && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}
-      {confirm && (
+      {convert && canEdit && <ConvertDialog task={task} meId={me} onClose={() => setConvert(false)} />}
+      {confirm && canEdit && (
         <Confirm title="Open subtasks" yes="Complete them all" busy={busy} onNo={() => setConfirm(null)}
           body={`This task has ${confirm.n} open subtask${confirm.n === 1 ? "" : "s"}. Complete them too?`}
           onYes={() => (confirm.kind === "complete" ? complete(true) : move(confirm.sectionId!, true))} />
       )}
-      {trash && (
+      {trash && canEdit && (
         <Confirm title="Move to Trash?" yes="Move to Trash" danger busy={busy} error={err} onNo={() => setTrash(false)}
           body="The task and its subtasks are kept for 30 days and can be restored from the project's Trash. Everyone on the task is told."
           onYes={async () => { const r = await api("DELETE", `/api/tasks/${id}`); if (r.ok) { onChanged?.(); finishClose(); } else setErr(r.error ?? "Could not move it."); }} />
       )}
-      {trashSub && (
+      {trashSub && canEdit && (
         <Confirm title={`Delete subtask “${trashSub.title}”?`} yes="Move to Trash" danger busy={busy} error={err} onNo={() => setTrashSub(null)}
           body="The subtask is kept for 30 days and can be restored from the project's Trash."
           onYes={async () => { const r = await run(api("DELETE", `/api/tasks/${trashSub.id}`), () => setTrashSub(null)); if (!r?.ok) setErr(r?.error ?? "Could not move the subtask."); }} />

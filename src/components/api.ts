@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AUTHORITY_CHANGED } from "@/components/authority-refresh";
 import { isSignInScreen, legacySignInHref, returnToEnabled, signInHref } from "@/lib/return-to";
 
 export type Res<T = Record<string, any>> = { ok: boolean; status: number; error?: string; data: T }; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -83,6 +84,17 @@ export function useGet<T = Record<string, any>>(path: string | null, opts?: { ke
       }));
     });
   }, [path, tick, gen]);
+  useEffect(() => {
+    if (!path) return;
+    const invalidate = () => {
+      // Cancel authority from old in-flight responses before the next effect.
+      ++seq.current;
+      setState({ forPath: path, req: gen, data: null, error: null, status: 0, code: null, loading: true });
+      setTick(n => n + 1);
+    };
+    window.addEventListener(AUTHORITY_CHANGED, invalidate);
+    return () => { window.removeEventListener(AUTHORITY_CHANGED, invalidate); };
+  }, [path, gen]);
   const reload = useCallback(() => { setState((p) => (p.data ? p : { ...p, loading: true, error: null })); setTick((n) => n + 1); }, []);
   const fresh = state.forPath === path && state.req === gen;
   // Stale-while-loading is opt-in. The default still hides the previous page the moment the path changes.

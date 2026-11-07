@@ -333,7 +333,7 @@ function Inner({ id }: { id: string }) {
         </div>
         </>
       )}
-      {moving && secs && (
+      {moving && canWrite && secs && (
         <MoveSheet title={`Move to… ${moving.title.length > 60 ? moving.title.slice(0, 57) + "…" : moving.title}`}
           options={moveMenuSections(secs, moving).map((x) => ({ id: x.id, name: x.name, current: x.id === moving.sectionId }))}
           onClose={() => setMoving(null)}
@@ -354,11 +354,11 @@ function Inner({ id }: { id: string }) {
       {viewDialog && <SaveViewDialog kind={viewDialog} projectId={id} state={ls} view={activeView} onClose={() => setViewDialog(null)}
         onDone={(afterDelete) => { setViewDialog(null); vw.reload(); if (afterDelete) router.replace(urlWith({ assignee: null, f: null, priority: null, sort: null, group: null }), { scroll: false }); }} />}
       {open && <TaskModal id={open} me={me.id} onClose={closeTask} onChanged={refresh} />}
-      {adding && p && <NewTask p={p} onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }} />}
-      {dialog?.kind === "addSection" && <SectionName title="Add section" yes="Add section" onClose={() => setDialog(null)} onSave={(name) => api("POST", `/api/projects/${id}/sections`, { name })} onDone={() => { setDialog(null); refresh(); }} />}
-      {dialog?.kind === "rename" && dialog.s && <SectionName title="Rename section" yes="Save" initial={dialog.s.name} onClose={() => setDialog(null)} onSave={(name) => api("PATCH", `/api/projects/${id}/sections/${dialog.s!.id}`, { name })} onDone={() => { setDialog(null); refresh(); }} />}
-      {dialog?.kind === "delete" && dialog.s && secs && <DeleteSection s={dialog.s} secs={secs} projectId={id} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
-      {ask && (
+      {adding && canWrite && p && <NewTask p={p} onClose={() => setAdding(false)} onAdded={() => { setAdding(false); refresh(); }} />}
+      {manage && dialog?.kind === "addSection" && <SectionName title="Add section" yes="Add section" onClose={() => setDialog(null)} onSave={(name) => api("POST", `/api/projects/${id}/sections`, { name })} onDone={() => { setDialog(null); refresh(); }} />}
+      {manage && dialog?.kind === "rename" && dialog.s && <SectionName title="Rename section" yes="Save" initial={dialog.s.name} onClose={() => setDialog(null)} onSave={(name) => api("PATCH", `/api/projects/${id}/sections/${dialog.s!.id}`, { name })} onDone={() => { setDialog(null); refresh(); }} />}
+      {manage && dialog?.kind === "delete" && dialog.s && secs && <DeleteSection s={dialog.s} secs={secs} projectId={id} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
+      {ask && canWrite && (
         <Confirm title="Open subtasks" yes="Complete them all" onNo={() => setAsk(null)} body={`This task has ${ask.n} open subtask${ask.n === 1 ? "" : "s"}. Complete them too?`} onYes={() => moveTo(ask.taskId, ask.sectionId, true)} />
       )}
     </Page>

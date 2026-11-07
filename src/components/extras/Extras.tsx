@@ -86,7 +86,7 @@ export function Extras({ children }: { children: React.ReactNode }) {
   return (
     <X.Provider value={value}>
       {children}
-      {dialog === "add" && <QuickAdd key={fresh} projects={projects} lastId={t.data?.lastProjectId ?? null} onClose={close} />}
+      {dialog === "add" && canAdd && <QuickAdd key={fresh} projects={projects} lastId={t.data?.lastProjectId ?? null} onClose={close} />}
       {dialog === "palette" && <Palette commands={commands} onClose={close} />}
       {dialog === "help" && <Help onClose={close} />}
     </X.Provider>
