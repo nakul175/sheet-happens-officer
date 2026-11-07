@@ -1,4 +1,4 @@
-import { activeSuiteIdentity, sameSecret, suiteConfig, oauthJson, readSuiteBody } from "@/lib/suite-oauth";
+import { activeSuiteIdentity, sameSecret, suiteConfig, oauthJson, readSuiteBody, SuiteBodyTooLargeError } from "@/lib/suite-oauth";
 
 export async function POST(req: Request) {
   try {
@@ -10,5 +10,8 @@ export async function POST(req: Request) {
     if (typeof p.user_id !== "string" || p.user_id.length > 200 || typeof p.source_session_id !== "string" || p.source_session_id.length > 200) return oauthJson({ error: "invalid_request" }, 400);
     const identity = await activeSuiteIdentity(p.user_id, p.source_session_id);
     return oauthJson({ active: !!identity, ...(identity ? { sub: identity.sub } : {}) });
-  } catch { return oauthJson({ error: "server_error" }, 503); }
+  } catch (error) {
+    if (error instanceof SuiteBodyTooLargeError) return oauthJson({ error: "invalid_request" }, 413);
+    return oauthJson({ error: "server_error" }, 503);
+  }
 }

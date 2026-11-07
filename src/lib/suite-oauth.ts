@@ -39,6 +39,10 @@ export function oauthJson(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store", Pragma: "no-cache", "Referrer-Policy": "no-referrer" } });
 }
 
+export class SuiteBodyTooLargeError extends Error {
+  constructor() { super("Body too large"); }
+}
+
 export async function readSuiteBody(req: Request, limit = 4096): Promise<string> {
   const reader = req.body?.getReader();
   if (!reader) throw new Error("Body required");
@@ -47,7 +51,7 @@ export async function readSuiteBody(req: Request, limit = 4096): Promise<string>
     const { done, value } = await reader.read();
     if (done) break;
     length += value.byteLength;
-    if (length > limit) { await reader.cancel(); throw new Error("Body too large"); }
+    if (length > limit) { await reader.cancel(); throw new SuiteBodyTooLargeError(); }
     chunks.push(value);
   }
   return Buffer.concat(chunks).toString("utf8");
