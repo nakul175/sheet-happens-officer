@@ -18,7 +18,9 @@ function exercise(failure='') {
   source=source.replace('ROOT=/opt/sho',`ROOT="${root}"`).replaceAll('/etc/sho/app.env',path.join(dir,'app.env')).replaceAll('/etc/sho/local.env',path.join(dir,'absent.env'));
   const script=path.join(dir,'release.sh');writeFileSync(script,source);
   const log=path.join(dir,'calls.jsonl');writeFileSync(log,'');
-  const result=spawnSync('bash',[script,failure==='revision'?'bad; touch unexpected':sha],{env:{...process.env,PATH:bin+':'+process.env.PATH,CALL_LOG:log,FAILURE:failure},encoding:'utf8',timeout:10000});
+  // The verify-failure path deliberately waits for health before rollback; ten seconds
+  // can expire before the script returns on a loaded CI runner.
+  const result=spawnSync('bash',[script,failure==='revision'?'bad; touch unexpected':sha],{env:{...process.env,PATH:bin+':'+process.env.PATH,CALL_LOG:log,FAILURE:failure},encoding:'utf8',timeout:30000});
   const calls=readFileSync(log,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
   return {config:readFileSync(path.join(dir,'app.env'),'utf8'),status:result.status,error:result.error,output:result.stdout+result.stderr,calls,current:realpathSync(path.join(root,'current')),previous:realpathSync(prev),candidate:realpathSync(rel)};
  } finally {rmSync(dir,{recursive:true,force:true});}
