@@ -178,6 +178,36 @@ it('oversized bodies and unauthenticated userinfo are rejected',async()=>{
  expect((await fetch(BASE+'/api/suite/status',{method:'POST',body:'x'.repeat(4097)})).status).toBe(413);
  expect((await fetch(BASE+'/api/suite/userinfo')).status).toBe(401);
 });
+it('malformed and chunked suite bodies are bounded and leave the process responsive',async()=>{
+ const statusUrl=BASE+'/api/suite/status',tokenUrl=BASE+'/api/suite/token';
+ const empty=await fetch(statusUrl,{method:'POST',headers:{'content-type':'application/json'},body:''});
+ const malformed=await fetch(statusUrl,{method:'POST',headers:{'content-type':'application/json'},body:'{"client_id":'});
+ const unsupported=await fetch(statusUrl,{method:'POST',headers:{'content-encoding':'gzip','content-type':'application/json'},body:'not-gzip'});
+ expect([empty.status,malformed.status,unsupported.status]).toEqual([503,503,503]);
+ for(const response of [empty,malformed,unsupported]){
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(response.headers.get('location')).toBeNull();
+  expect(await response.json()).toEqual({error:'server_error'});
+ }
+ const streamed=(size:number)=>new ReadableStream<Uint8Array>({start(controller){
+  controller.enqueue(new TextEncoder().encode('x'.repeat(Math.floor(size/2))));
+  controller.enqueue(new TextEncoder().encode('x'.repeat(size-Math.floor(size/2))));
+  controller.close();
+ }});
+ const chunked=(url:string,size:number)=>fetch(url,{method:'POST',body:streamed(size),duplex:'half'} as RequestInit & {duplex:'half'});
+ const [largeStatus,largeToken]=await Promise.all([chunked(statusUrl,4097),chunked(tokenUrl,8193)]);
+ expect([largeStatus.status,largeToken.status]).toEqual([413,413]);
+ for(const response of [largeStatus,largeToken]){
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(response.headers.get('location')).toBeNull();
+ }
+ const health=await fetch(BASE+'/api/health');
+ expect(health.status).toBe(200);
+ mkdirSync('test-results/suite-body-boundary',{recursive:true});
+ writeFileSync('test-results/suite-body-boundary/verification.json',JSON.stringify({emptyStatus:503,malformedStatus:503,
+  unsupportedEncodingStatus:503,chunkedStatusOver4096:413,chunkedTokenOver8192:413,noRedirects:true,healthAfter:200,
+  privateRuntime:true},null,2));
+});
 it('suite identity fails closed during workspace ambiguity and recovers without changing data',async()=>{
  const g=await issue('accounts'),token=await(await redeem(g)).json();
  const identity=await(await userinfo(token.access_token)).json();
