@@ -79,6 +79,20 @@ async function dueTomorrow(who: Account, taskId: string, title: string) {
   return (r.json.items as BellItem[]).filter((item) => item.href === `/tasks/${taskId}` && item.text === `"${title}" is due tomorrow.`);
 }
 
+async function dueReminderRecipients(taskId: string) {
+  const client = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000 });
+  try {
+    await client.connect();
+    const { rows } = await client.query<{ recipientId: string }>(
+      'SELECT "recipientId" FROM "Notification" WHERE "taskId" = $1 AND "type" = $2',
+      [taskId, "TASK_DUE_TOMORROW"],
+    );
+    return rows.map((row) => row.recipientId);
+  } finally {
+    await client.end();
+  }
+}
+
 /** One task due tomorrow for each holder, so each run starts with no reminder written for them. */
 async function dueTasks(label: string) {
   const holderTitle = `ZZ-TEST ${label} ${tag}`;
@@ -271,4 +285,28 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     },
     60_000,
   );
+
+  it("routes the next reminder only to the handover recipient after project membership removal", async () => {
+    const separate = await zz.project(leader);
+    const added = await leader.c.post(`/api/projects/${separate.id}/members`, { userId: holder.id, role: "EDITOR" });
+    expect(added.status, JSON.stringify(added.json)).toBe(201);
+    const title = `ZZ-TEST removed member reminder ${tag}`;
+    const taskId = await task(leader, separate.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
+    const removed = await leader.c.del(`/api/projects/${separate.id}/members/${holder.id}?handoverTo=${leader.id}`);
+    expect(removed.status, JSON.stringify(removed.json)).toBe(204);
+    await postReminders(1);
+    expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
+    expect(await dueTomorrow(leader, taskId, title)).toHaveLength(1);
+    expect(await dueReminderRecipients(taskId)).toEqual([leader.id]);
+  }, 60_000);
+
+  it("leaves no due reminder for a task deleted before the job runs", async () => {
+    const title = `ZZ-TEST deleted before reminder ${tag}`;
+    const taskId = await task(leader, proj.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
+    const deleted = await leader.c.del(`/api/tasks/${taskId}`);
+    expect(deleted.status, JSON.stringify(deleted.json)).toBe(204);
+    await postReminders(1);
+    expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
+    expect(await dueReminderRecipients(taskId)).toEqual([]);
+  }, 60_000);
 });
