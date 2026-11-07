@@ -25,7 +25,7 @@ it.each(["create", "link"] as const)("opens the %s picker with the checked ident
   expect(target.origin).toBe(context.origin);
   expect(target.pathname).toBe("/embed/picker");
   expect(hash.get("hs-user")).toBe(context.subject);
-  expect(hash.get("hs-host")).toBe("https://sheethappensofficer.aplyd.org");
+  expect(hash.get("hs-host")).toBe("https://tasks.aplyd.org");
   expect(hash.get("hs-mode")).toBe(mode);
   expect(hash.get("hs-space")).toBe(context.defaultSpaceId);
   expect(hash.get("hs-channel")).toMatch(/^[0-9a-f-]{36}$/i);

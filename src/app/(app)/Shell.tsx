@@ -171,7 +171,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <a className="skip" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById("main"); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         {open && <div className="veil" onClick={() => closeDrawer()} />}
         <aside ref={drawer} className={`side${open ? " open" : ""}`} aria-label="Main" onClickCapture={open ? e => followOverlayLink(e, closeDrawer, href => router.push(href)) : undefined}>
-          <Link href="/" className="brand" aria-label="Sheet Happens Officer home"><Image src="/logo-icon-reversed.svg" width={40} height={40} alt="" unoptimized loading="eager" />Sheet Happens Officer</Link>
+          <Link href="/" className="brand" aria-label="Tasks by aplyd home"><Image src="/logo-icon-reversed.svg" width={40} height={40} alt="" unoptimized loading="eager" />Tasks by aplyd</Link>
           <nav className="nav">
             {items.map(([href, label]) => (
               <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>
@@ -185,7 +185,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
         <div className="main">
           <header className="top">
             <button className="burger" aria-label="Open menu" aria-expanded={open} onClick={() => closeTopOverlayThen(() => setMenu(path))}>☰</button>
-            <Link href="/" className="top-brand" aria-label="SHO, Sheet Happens Officer home"><Image src="/logo-icon-reversed.svg" width={40} height={40} alt="" unoptimized loading="eager" /><span className="wordmark-full" aria-hidden="true">Sheet Happens Officer</span><span className="wordmark-short" aria-hidden="true">SHO</span></Link>
+            <Link href="/" className="top-brand" aria-label="Tasks by aplyd home"><Image src="/logo-icon-reversed.svg" width={40} height={40} alt="" unoptimized loading="eager" /><span className="wordmark-full" aria-hidden="true">Tasks by aplyd</span><span className="wordmark-short" aria-hidden="true">Tasks</span></Link>
             <nav className="primary-nav" aria-label="Primary">{primary.map(([href, label]) => <Link key={href} href={href} aria-current={here(href) ? "page" : undefined}>{label}</Link>)}</nav>
             <span className="grow" />
             <SearchButton />
@@ -214,7 +214,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
 /** Shared page frame with the full available content width. */
 export function Page({ title, docTitle, sub, actions, beforeTitle, className = "", children }: { title?: React.ReactNode; docTitle?: string; sub?: React.ReactNode; actions?: React.ReactNode; beforeTitle?: React.ReactNode; className?: string; children: React.ReactNode }) {
   const tab = docTitle ?? (typeof title === "string" ? title : undefined);
-  useEffect(() => { if (tab) document.title = `${tab} · Sheet Happens Officer`; }, [tab]);
+  useEffect(() => { if (tab) document.title = `${tab} · Tasks by aplyd`; }, [tab]);
   return (
     <>
       <main id="main" tabIndex={-1} className={`content ${className}`}>

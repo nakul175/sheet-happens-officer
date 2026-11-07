@@ -22,7 +22,7 @@ import { GET } from "../src/app/api/suite/authorize/route";
 const challenge = "c".repeat(43);
 const state = "s".repeat(32);
 const authorizeUrl = (overrides = "") =>
-  `https://sheethappensofficer.aplyd.org/api/suite/authorize?response_type=code&scope=email+profile&state=${state}&redirect_uri=${encodeURIComponent("https://accounts.aplyd.org/bridge/callback")}&code_challenge=${challenge}&code_challenge_method=S256&client_id=accounts${overrides}`;
+  `https://tasks.aplyd.org/api/suite/authorize?response_type=code&scope=email+profile&state=${state}&redirect_uri=${encodeURIComponent("https://accounts.aplyd.org/bridge/callback")}&code_challenge=${challenge}&code_challenge_method=S256&client_id=accounts${overrides}`;
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -46,7 +46,7 @@ describe("first-party suite authorize route preservation", () => {
     const response = await GET(new Request(authorizeUrl()));
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location")!);
-    expect(location.origin).toBe("https://sheethappensofficer.aplyd.org");
+    expect(location.origin).toBe("https://tasks.aplyd.org");
     expect(location.pathname).toBe("/signin");
     expect(location.searchParams.get("returnTo")).toContain("/api/suite/authorize?");
     expect(location.searchParams.get("returnTo")).toContain("client_id=accounts");

@@ -157,7 +157,7 @@ export function latestMail(email: string, subjectIncludes: string) {
 }
 
 export function mailedPassword(email: string) {
-  return latestMail(email, "Your Sheet Happens Officer account")?.match(/^Password: (.+)$/m)?.[1] ?? null;
+  return latestMail(email, "Your Tasks by aplyd account")?.match(/^Password: (.+)$/m)?.[1] ?? null;
 }
 
 /** First check of every spec: /api/health names the release SHA, and the body does not contain the password. */

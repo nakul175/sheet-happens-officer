@@ -111,7 +111,7 @@ describe("qa:TC missing APL-2590 seed step (staging-e2e.yml)", () => {
   it("qa:TC missing: staging, production, placeholder, prod DB hosts, defaultdb and a missing SHO_QA_PASS are refused", () => {
     const good = url("?schema=sho_pr8");
     const cases: [string, string, string | undefined][] = [
-      ["staging.sheethappensofficer.com", good, undefined],
+      ["staging.tasks.aplyd.org", good, undefined],
       ["app.sheethappensofficer.com", good, undefined],
       ["sheethappensofficer.aplyd.org", good, undefined],
       [pr(9), good, undefined],
@@ -238,7 +238,7 @@ describe("qa:TC missing APL-2590 seed step (staging-e2e.yml)", () => {
     expect(WORKFLOW).toMatch(/- name: Seed APL-2590 fixtures \(pr slots only\)\n\s+if: steps\.target\.outputs\.pr_slot == 'true'/);
     const target = stepRun("Check the target host");
     const allow = WORKFLOW.match(/TARGET_ALLOWLIST: '([^']+)'/)?.[1] ?? "";
-    for (const [host, slot] of [[pr(5), "true"], [pr(8), "true"], ["staging.sheethappensofficer.com", "false"]]) {
+    for (const [host, slot] of [[pr(5), "true"], [pr(8), "true"], ["staging.tasks.aplyd.org", "false"]]) {
       const out = path.join(dir, `out-${host}`);
       writeFileSync(out, "");
       const r = spawnSync("bash", ["-c", target], { encoding: "utf8", env: { PATH: process.env.PATH, TARGET: host, TARGET_ALLOWLIST: allow, GITHUB_OUTPUT: out, NODE_ENV: "test" } });

@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promi
 import path from "node:path";
 
 /** Hosts from .github/workflows/staging-e2e.yml (TARGET_ALLOWLIST). Production is not on this list. */
-const STAGING_HOST = /^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$/;
+const STAGING_HOST = /^(staging\.tasks\.aplyd\.org|staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$/;
 
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FILE_BYTES = 256 * 1024;

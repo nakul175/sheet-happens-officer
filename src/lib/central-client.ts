@@ -1,7 +1,7 @@
 import * as client from "openid-client";
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { holyQaIdentity, centralIdentitySecret, centralIdentityIssuer } from "@/lib/holy-qa-identity";
-export const SHO_ORIGIN = holyQaIdentity()?.origin ?? "https://sheethappensofficer.aplyd.org";
+export const SHO_ORIGIN = holyQaIdentity()?.origin ?? "https://tasks.aplyd.org";
 export const CENTRAL_CALLBACK = SHO_ORIGIN + "/api/auth/aplyd/callback";
 export const FLOW_COOKIE = "__Host-sho_oidc_flow";
 export const flowCookieOptions = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 600 };

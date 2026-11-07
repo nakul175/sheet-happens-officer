@@ -16,7 +16,7 @@ export function suiteConfig(id = "bugoff") {
   return {
     id,
     secret,
-    origin: realm?.origin ?? "https://sheethappensofficer.aplyd.org",
+    origin: realm?.origin ?? "https://tasks.aplyd.org",
     callback: id === "accounts" ? (realm ? realm.origin + "/bridge/callback" : "https://accounts.aplyd.org/bridge/callback") : "https://bugoff.aplyd.org/api/auth/callback/aplyd",
   };
 }

@@ -12,7 +12,7 @@ const NEW_PW = "my-own-pass-7";
 function signInMail(email: string) {
   const files = readdirSync(OUTBOX).sort();
   const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email);
-  const details = mails.filter((m) => /Your Sheet Happens Officer account/.test(m.subject));
+  const details = mails.filter((m) => /Your Tasks by aplyd account/.test(m.subject));
   const text = (details.at(-1)?.text ?? "") as string;
   return { text, password: text.match(/Password: (\S+)/)?.[1] ?? "", resetToken: (mails.at(-1)?.text as string)?.match(/token=([\w-]+)/)?.[1] ?? "" };
 }

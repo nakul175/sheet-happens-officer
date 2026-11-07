@@ -48,9 +48,9 @@ on:
         type: choice
         options: ["off", "retain-on-failure"]
       target:
-        description: "Host to test: staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com. Production is refused."
+        description: "Host to test: staging.tasks.aplyd.org or pr1-pr8.staging.sheethappensofficer.com. Production is refused."
         required: false
-        default: staging.sheethappensofficer.com
+        default: staging.tasks.aplyd.org
         type: string
       max_parallel:
         description: "Shards running at once (1-20). The staging DB has 25 connections: keep 5 until NJ approves a pool."
@@ -67,7 +67,7 @@ concurrency:
 
 env:
   # The only hosts a run may target: staging, or Oscar's preview slots pr1-pr8. Matched against the whole host.
-  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com)$'
+  TARGET_ALLOWLIST: '^(staging\.tasks\.aplyd\.org|pr[1-8]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
@@ -93,11 +93,11 @@ jobs:
         env:
           TARGET: ${{ inputs.target }}
         run: |
-          if [[ "${TARGET,,}" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
+          if [[ "${TARGET,,}" =~ ^((www\.|app\.)?sheethappensofficer\.com|sheethappensofficer\.aplyd\.org|tasks\.aplyd\.org)\.?$ ]]; then
             echo "::error::Refusing to run against production ($TARGET)."; exit 1
           fi
           if ! [[ "$TARGET" =~ $TARGET_ALLOWLIST ]]; then
-            echo "::error::Target '$TARGET' is not allowed. Use staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com."; exit 1
+            echo "::error::Target '$TARGET' is not allowed. Use staging.tasks.aplyd.org or pr1-pr8.staging.sheethappensofficer.com."; exit 1
           fi
           echo "Target: https://$TARGET"
           echo "base_url=https://$TARGET" >> "$GITHUB_OUTPUT"

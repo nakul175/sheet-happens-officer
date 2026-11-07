@@ -1,5 +1,5 @@
 #cloud-config
-# Sheet Happens Officer: droplet bootstrap (SHO-US-9.3).
+# Tasks by aplyd: droplet bootstrap (SHO-US-9.3).
 # Paste this whole file into "User data" when creating the droplet (Ubuntu 24.04 LTS, BLR1).
 # Choose the sho_deploy SSH key in the same form; its public key is copied to the "deploy"
 # user below, which is the account GitHub Actions uses to release. Nothing here needs
@@ -36,9 +36,12 @@ write_files:
   # A record for this name points at the droplet.
   - path: /etc/sho/Caddyfile
     content: |
-      sheethappensofficer.aplyd.org {
+      tasks.aplyd.org {
         encode gzip
         reverse_proxy 127.0.0.1:3000
+      }
+      sheethappensofficer.aplyd.org {
+        redir https://tasks.aplyd.org{uri} permanent
       }
 
   # The app as a service. Settings come from /etc/sho/app.env (written by each release from
@@ -46,7 +49,7 @@ write_files:
   - path: /etc/systemd/system/sho.service
     content: |
       [Unit]
-      Description=Sheet Happens Officer
+      Description=Tasks by aplyd
       After=network-online.target
       Wants=network-online.target
 

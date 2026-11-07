@@ -203,10 +203,10 @@ describe("qa:TC missing APL-2748 AC2/AC3: no secret printed, never production", 
 
   it("qa:TC missing AC3: production and unknown hosts are refused; staging, pr1-pr8 and localhost are allowed", () => {
     for (const bad of [undefined, "", "not a url", "https://sheethappensofficer.com", "https://www.sheethappensofficer.com.", "https://app.sheethappensofficer.com",
-      "http://168.144.144.69", "https://pr9.staging.sheethappensofficer.com", "https://pr0.staging.sheethappensofficer.com", "https://staging.sheethappensofficer.com.evil.example", "http://staging.sheethappensofficer.com"]) {
+      "http://168.144.144.69", "https://pr9.staging.sheethappensofficer.com", "https://pr0.staging.sheethappensofficer.com", "https://staging.tasks.aplyd.org.evil.example", "http://staging.tasks.aplyd.org"]) {
       expect(() => provisionTarget(bad), String(bad)).toThrow();
     }
-    expect(provisionTarget("https://staging.sheethappensofficer.com/x").href).toBe("https://staging.sheethappensofficer.com/");
+    expect(provisionTarget("https://staging.tasks.aplyd.org/x").href).toBe("https://staging.tasks.aplyd.org/");
     expect(provisionTarget("https://pr4.staging.sheethappensofficer.com").host).toBe("pr4.staging.sheethappensofficer.com");
     expect(provisionTarget("https://pr5.staging.sheethappensofficer.com").host).toBe("pr5.staging.sheethappensofficer.com");
     expect(provisionTarget("https://pr8.staging.sheethappensofficer.com").host).toBe("pr8.staging.sheethappensofficer.com");

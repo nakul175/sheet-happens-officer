@@ -27,7 +27,7 @@ function chromePath() {
 
 function emailedPassword(email: string) {
   const mails = readdirSync(OUTBOX).sort().map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8")));
-  const text = (mails.filter((m) => m.to === email && /Your Sheet Happens Officer account/.test(m.subject)).at(-1)?.text ?? "") as string;
+  const text = (mails.filter((m) => m.to === email && /Your Tasks by aplyd account/.test(m.subject)).at(-1)?.text ?? "") as string;
   return text.match(/Password: (\S+)/)?.[1] ?? "";
 }
 

@@ -37,7 +37,7 @@ const run = Date.now();
 let n = 0;
 const fresh = () => `nakul17+zztest-apl2742-${run}-${n++}@aplyd.com`;
 const FAKE_KEY = "re_test_not_a_real_key_0000";
-const MAIL = { to: "nakul17+zztest-apl2742@aplyd.com", subject: "Verify your email for Sheet Happens Officer", text: "Open https://app.example/verify?token=SECRET-TOKEN-123" };
+const MAIL = { to: "nakul17+zztest-apl2742@aplyd.com", subject: "Verify your email for Tasks by aplyd", text: "Open https://app.example/verify?token=SECRET-TOKEN-123" };
 
 const post = (route: (req: Request) => Promise<Response>, path: string, body: unknown) =>
   route(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }));

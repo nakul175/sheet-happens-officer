@@ -51,12 +51,12 @@ export function parseSlots(raw: string | undefined): string[] {
   return [...new Set(out)];
 }
 
-const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "sheethappensofficer.aplyd.org", "168.144.144.69"]);
-const ALLOWED_HOST = /^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com|localhost|127\.0\.0\.1)$/;
+const PRODUCTION_HOSTS = new Set(["tasks.aplyd.org", "sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "sheethappensofficer.aplyd.org", "168.144.144.69"]);
+const ALLOWED_HOST = /^(staging\.tasks\.aplyd\.org|pr[1-8]\.staging\.sheethappensofficer\.com|localhost|127\.0\.0\.1)$/;
 
 /** The provisioning script's target. Staging, a pr1-pr8 preview or this machine; production and everything else are refused. */
 export function provisionTarget(raw: string | undefined): URL {
-  if (!raw) throw new Error("Set BASE_URL to the staging host (https://staging.sheethappensofficer.com). There is no default.");
+  if (!raw) throw new Error("Set BASE_URL to the staging host (https://staging.tasks.aplyd.org). There is no default.");
   let url: URL;
   try { url = new URL(raw); } catch { throw new Error("BASE_URL is not a URL."); }
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
@@ -67,7 +67,7 @@ export function provisionTarget(raw: string | undefined): URL {
   return new URL(url.origin);
 }
 
-export const STAGING_HOST = "staging.sheethappensofficer.com";
+export const STAGING_HOST = "staging.tasks.aplyd.org";
 
 /** The create-mode target: staging itself only. A pr1-pr4 preview, localhost and production are all refused. */
 export function stagingOnlyTarget(raw: string | undefined): URL {

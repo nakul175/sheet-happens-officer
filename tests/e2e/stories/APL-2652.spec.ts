@@ -170,7 +170,7 @@ test("qa:TC-APL2652-7526bdb0@v3 a hidden task and a missing task are the same 40
   expect(hidden.status).toBe(404);
   expect(gone.status).toBe(404);
   const title = (html: string) => html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] ?? "";
-  expect(title(hidden.html)).toBe("Task · Sheet Happens Officer");
+  expect(title(hidden.html)).toBe("Task · Tasks by aplyd");
   expect(title(gone.html)).toBe(title(hidden.html));
   expect(hidden.html).toContain("This task isn't available");
   expect(hidden.html).not.toContain(task.title);
@@ -217,7 +217,7 @@ test("qa:TC-APL2652-41bcfb02@v2 five failures lock the account and the return ta
   const personId = String(added.json.person?.id ?? "");
   expect(personId).not.toBe("");
   later(() => admin.api.post(`/api/team/${personId}/deactivate`, { reassign: "leaders" }));
-  const mailed = await sinkText(email, "Your Sheet Happens Officer account");
+  const mailed = await sinkText(email, "Your Tasks by aplyd account");
   const password = mailed?.match(/^Password: (\S+)$/m)?.[1] ?? "";
   test.skip(!password, "No temporary-password mail in the sink");
   await anon.goto(`/signin?next=${encodeURIComponent("/")}`);
@@ -243,7 +243,7 @@ test("qa:TC-APL2652-544f8d39@v3 a temporary password is changed before the deep 
   later(() => admin.api.post(`/api/team/${personId}/deactivate`, { reassign: "leaders" }));
   const joined = await admin.api.post(`/api/projects/${task.project.id}/members`, { userId: personId, role: "EDITOR" });
   expect(joined.status).toBe(201);
-  const mailed = await sinkText(email, "Your Sheet Happens Officer account");
+  const mailed = await sinkText(email, "Your Tasks by aplyd account");
   const password = mailed?.match(/^Password: (\S+)$/m)?.[1] ?? "";
   test.skip(!password, "No temporary-password mail in the sink");
   await anon.goto(`/signin?next=${encodeURIComponent(`/tasks/${task.id}`)}`);

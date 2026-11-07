@@ -9,7 +9,7 @@ import { LOCAL_DEFAULT, resolveBaseUrl } from "./base-url";
 import { localDatabaseUrl } from "./helpers/local-clock";
 
 const root = path.join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
-const STAGING = "https://staging.sheethappensofficer.com";
+const STAGING = "https://staging.tasks.aplyd.org";
 const LOCAL_DB = "postgresql://u:p@localhost:5432/taskboard?schema=public";
 
 /**
