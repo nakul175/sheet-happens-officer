@@ -8,7 +8,7 @@ import { centralSessionActive } from '@/lib/central-status';
 import { holySheetOrigin } from '@/lib/holy-sheet-url';
 // Raw row locks must use the same configured schema as Prisma, including preview
 // slots behind transaction pooling. Identifiers are escaped, never request input.
-function table(name: 'Project' | 'ProjectMember' | 'Task' | 'User') {
+function table(name: 'Project' | 'ProjectMember' | 'Task' | 'User' | 'Session') {
     const schema = process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).searchParams.get('schema') ?? 'public' : 'public';
     return Prisma.raw('"' + schema.replaceAll('"', '""') + '"."' + name + '"');
 }
@@ -54,6 +54,26 @@ export async function changeDocument(actor: Actor, origin: DocumentOrigin, input
     if (input.subject !== c.subject)
         throw new ApiError(409, 'Your Aplyd account changed. Reopen the picker.');
     await db.$transaction(async (tx) => {
+        // Serialize a sign-out or central reattachment with this write. A session
+        // revoked after picker preflight must not leave a link/default-space row.
+        const liveSessionId = await currentSessionId();
+        if (!liveSessionId)
+            throw new ApiError(401, 'Sign in with Aplyd to open Holy Sheet.');
+        try {
+            await tx.$queryRaw `SELECT id FROM ${table('Session')} WHERE id=${liveSessionId} FOR SHARE NOWAIT`;
+        }
+        catch (error) {
+            const failure = error as { code?: string; meta?: { code?: string } } | null;
+            if (failure?.code === 'P2010' && failure.meta?.code === '55P03')
+                throw new ApiError(409, 'Session is changing. Reload and try again.');
+            throw error;
+        }
+        const liveSession = await tx.session.findUnique({ where: { id: liveSessionId }, include: { centralLink: true } });
+        const binding = liveSession?.centralLink;
+        if (!liveSession || liveSession.userId !== actor.id || liveSession.revokedAt || liveSession.expiresAt <= new Date() ||
+            !binding || binding.subject !== c.subject || await currentSessionId() !== liveSessionId ||
+            !await centralSessionActive(binding.subject, binding.sessionUid, actor.id))
+            throw new ApiError(401, 'Sign in with Aplyd to open Holy Sheet.');
         // Lock the native source and its memberships until commit; links never grant HS access.
         await tx.$queryRaw `SELECT id FROM ${table('Project')} WHERE id=${c.projectId} FOR UPDATE`;
         try {
@@ -94,6 +114,6 @@ export async function changeDocument(actor: Actor, origin: DocumentOrigin, input
             if ((input.created || input.setDefault) && input.spaceId)
                 await tx.holySheetDefault.upsert({ where: { projectId: c.projectId }, create: { projectId: c.projectId, spaceId: input.spaceId }, update: input.setDefault ? { spaceId: input.spaceId } : {} });
         }
-    });
+    }, { timeout: 10_000 });
     return { ok: true };
 }

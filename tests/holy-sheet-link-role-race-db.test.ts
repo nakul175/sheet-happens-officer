@@ -202,6 +202,43 @@ it("denies a document link when its SHO session is revoked after picker prefligh
   }
 }, 20_000);
 
+it("denies a link when central authority expires after picker preflight", async () => {
+  const expiredPage = randomUUID(), pause = pauseBeforeWrite();
+  const beforeDefault = await db.holySheetDefault.findUnique({ where: { projectId } });
+  const pending = Promise.allSettled([changeDocument(admin, { kind: "projects", id: projectId }, {
+    pageId: expiredPage, subject, spaceId: `${prefix}-expired-space`, setDefault: true,
+  })]);
+  try {
+    await pause.ready();
+    authority.active.mockResolvedValue(false);
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 401 }) })]);
+    expect(await db.holySheetLink.count({ where: { projectId, pageId: expiredPage } })).toBe(0);
+    expect(await db.holySheetDefault.findUnique({ where: { projectId } })).toEqual(beforeDefault);
+    completed.push("central-revocation-no-link");
+  } finally { pause.release(); await pending; authority.active.mockResolvedValue(true); }
+}, 20_000);
+
+it("returns a retryable conflict while its SHO session is changing", async () => {
+  const lockedPage = randomUUID();
+  let release!: () => void, reached!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const atLock = new Promise<void>((resolve) => { reached = resolve; });
+  const blocker = transact(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Session" WHERE "id" = ${sessionId} FOR UPDATE`;
+    reached(); await held;
+  });
+  const safety = setTimeout(() => release(), 15_000);
+  try {
+    await atLock;
+    await expect(changeDocument(admin, { kind: "projects", id: projectId }, { pageId: lockedPage, subject })).rejects.toMatchObject({ status: 409 });
+    expect(await db.holySheetLink.count({ where: { projectId, pageId: lockedPage } })).toBe(0);
+  } finally { clearTimeout(safety); release(); await blocker; }
+  await changeDocument(admin, { kind: "projects", id: projectId }, { pageId: lockedPage, subject });
+  expect(await db.holySheetLink.count({ where: { projectId, pageId: lockedPage } })).toBe(1);
+  completed.push("session-lock-retry");
+}, 20_000);
+
 it("returns a retryable conflict while the Admin account role is locked", async () => {
   const lockedPage = randomUUID();
   let release!: () => void, reached!: () => void;
