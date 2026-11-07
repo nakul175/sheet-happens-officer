@@ -60,15 +60,17 @@ it('RESET route rolls back a post-session failure and accepts the same link on r
  try{
  const request=()=>new Request('http://localhost/api/auth/reset-password',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:raw,password:'NewSyntheticPassword123!',confirm:'NewSyntheticPassword123!'})});
  const original=db.$transaction.bind(db);
+ let injectedAuditFailures=0;
  const fault=vi.spyOn(db,'$transaction').mockImplementation(((callback: (tx: unknown)=>Promise<unknown>,options: unknown)=>
   original(async tx=>callback(new Proxy(tx,{get(target,key){
    if(key==='auditLog')return new Proxy(target.auditLog,{get(delegate,method){
-    if(method==='create')return async()=>{throw Error('injected audit write failure');};
+    if(method==='create')return async()=>{injectedAuditFailures++;throw Error('injected audit write failure');};
     return Reflect.get(delegate,method);
    }});
    return Reflect.get(target,key);
   }})),options as never)) as typeof db.$transaction);
  try{expect((await resetPassword(request())).status).toBe(500);}finally{fault.mockRestore();}
+ expect(injectedAuditFailures).toBe(1);
  expect((await db.authToken.findUniqueOrThrow({where:{tokenHash:hashToken(raw)}})).usedAt).toBeNull();
  expect((await db.user.findUniqueOrThrow({where:{id}})).passwordHash).toBe('unused');
  expect(await db.session.count({where:{id:{in:sessionIds},revokedAt:null}})).toBe(2);
