@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { undoAction } from '@/lib/undo';
+import { listNotifications } from '@/lib/feed';
 import { updateTask } from '@/lib/tasks';
 import { archiveProject, changeMemberRole, removeMember } from '@/lib/projects';
 import type { Tx } from '@/lib/access';
@@ -101,6 +102,13 @@ it('a later edit requires confirmation; explicit override preserves unrelated fi
   try {
     await pause.ready();
     await updateTask(leader, f.taskId, { title: 'Newer', priority: 'HIGH', expectedUpdatedAt: f.version });
+    const unrelated = await db.notification.create({ data: {
+      recipientId: leader.id, projectId: f.projectId, type: 'TASK_ASSIGNED',
+      taskId: f.taskId, data: { title: 'Unrelated notice' },
+    } });
+    const beforeBell = await listNotifications(leader);
+    expect(beforeBell.items.find((item) => item.id === unrelated.id)).toMatchObject({ read: false });
+    expect(beforeBell.items.some((item) => item.text.includes('replaced your change'))).toBe(false);
     const before = await snapshot(f.projectId); pause.release();
     expect(await result).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409, extra: expect.objectContaining({ needsConfirm: 'conflict' }) }) })]);
     expect(await snapshot(f.projectId)).toEqual(before);
@@ -109,7 +117,16 @@ it('a later edit requires confirmation; explicit override preserves unrelated fi
     expect(after.title).toBe('Original'); expect(after.priority).toBe('HIGH');
     expect(after.updatedAt.getTime()).toBeGreaterThan(before.tasks[0].updatedAt.getTime());
     expect(await db.notification.count({ where: { projectId: f.projectId, recipientId: leader.id, type: 'CHANGE_OVERRIDDEN' } })).toBe(1);
+    const afterBell = await listNotifications(leader);
+    const compensation = afterBell.items.filter((item) => item.text.includes('replaced your change'));
+    expect(compensation).toHaveLength(1);
+    expect(compensation[0]).toMatchObject({ href: `/tasks/${f.taskId}`, read: false });
+    expect(afterBell.items.find((item) => item.id === unrelated.id)).toEqual(beforeBell.items.find((item) => item.id === unrelated.id));
+    await expect(undoAction(editor, f.actionId, true)).rejects.toMatchObject({ status: 409 });
+    expect((await listNotifications(leader)).items).toEqual(afterBell.items);
     expect(await db.auditLog.count({ where: { targetId: f.taskId, event: 'UNDO_OVERRIDE' } })).toBe(1);
+    mkdirSync('test-results/undo-race', { recursive: true });
+    writeFileSync('test-results/undo-race/notification-compensation.json', JSON.stringify({ fixture: prefix, projectId: f.projectId, recipientId: leader.id, unrelatedNoticeId: unrelated.id, compensationNoticeId: compensation[0].id, recipientBefore: beforeBell.items.length, recipientAfter: afterBell.items.length, compensationCount: compensation.length, replayRejected: true, unrelatedUnchanged: true }, null, 2));
     completed.push('conflict-and-explicit-override');
   } finally { pause.release(); await result; }
 });
