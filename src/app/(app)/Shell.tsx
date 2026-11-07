@@ -6,6 +6,7 @@ import "./audit-ui.css";
 import "./select-controls.css";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { AUTHORITY_CHANGED, watchAuthority } from "@/components/authority-refresh";
 import { api, initials } from "@/components/api";
 import { Bell } from "./Bell";
 import { Extras, NewTaskButton, SearchButton } from "@/components/extras/Extras";
@@ -109,6 +110,10 @@ function DensityToggle({ compact, onChange }: { compact: boolean; onChange: (v: 
 export function Shell({ user, children }: { user: Me; children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
+  useEffect(() => watchAuthority(() => {
+    window.dispatchEvent(new Event(AUTHORITY_CHANGED));
+    router.refresh();
+  }), [router]);
   const [compact, setCompact] = useState(!!user.compact);
   const chooseDensity = async (v: boolean) => {
     setCompact(v);
