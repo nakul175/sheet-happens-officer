@@ -95,10 +95,14 @@ test('SHO-REG-SEARCH-01 partial: Member search excludes foreign and trashed task
 
   const owned = await newProject(admin, later, { label: 'Search owned', members: [{ who: member, role: 'VIEWER' }] }); projects.push(owned.id);
   const foreign = await newProject(admin, later, { label: 'Search foreign' }); projects.push(foreign.id);
+  const sentinel = await newProject(admin, later, { label: 'Search unrelated sentinel' }); projects.push(sentinel.id);
   const query = zz(`search boundary ${fixture.slice(0, 8)}`);
   const ownTask = await newTask(admin, owned.id, { title: `${query} own` });
   const foreignTask = await newTask(admin, foreign.id, { title: `${query} foreign` });
   const trashedTask = await newTask(admin, owned.id, { title: `${query} trash` });
+  const sentinelTask = await newTask(admin, sentinel.id, { title: zz(`unrelated sentinel ${fixture.slice(0, 8)}`) });
+  const sentinelBefore = await admin.api.get(`/api/tasks/${sentinelTask}`);
+  expect(sentinelBefore.status).toBe(200);
   expect((await admin.api.del(`/api/tasks/${trashedTask}`)).status).toBe(204);
 
   const response = await member.api.get(`/api/search?q=${encodeURIComponent(query)}`);
@@ -113,8 +117,11 @@ test('SHO-REG-SEARCH-01 partial: Member search excludes foreign and trashed task
   await expect(member.page.locator(`a.item[href="/projects/${owned.id}?task=${ownTask}"]`)).toBeVisible();
   await expect(member.page.locator(`a.item[href="/projects/${foreign.id}?task=${foreignTask}"]`)).toHaveCount(0);
   await expect(member.page.locator(`a.item[href="/projects/${owned.id}?task=${trashedTask}"]`)).toHaveCount(0);
+  const sentinelAfter = await admin.api.get(`/api/tasks/${sentinelTask}`);
+  expect(sentinelAfter.status).toBe(200);
+  expect(sentinelAfter.json.task).toEqual(sentinelBefore.json.task);
   mkdirSync(evidenceDir, { recursive: true });
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, memberId, ownedProject: owned.id, foreignProject: foreign.id, ownTask, foreignTask, trashedTask, apiVisibleOwnOnly: true, browserVisibleOwnOnly: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, memberId, ownedProject: owned.id, foreignProject: foreign.id, sentinelProject: sentinel.id, ownTask, foreignTask, trashedTask, sentinelTask, unrelatedSentinelUnchanged: true, apiVisibleOwnOnly: true, browserVisibleOwnOnly: true }, null, 2));
 });
 
 test('SHO-REG-SEARCH-01 partial: Ideas only matches API and browser task results', async ({ admin, later }) => {
