@@ -55,6 +55,42 @@ it('wrong verifier, callback and client secret do not spend a valid code',async(
  for(const bad of badInputs)expect((await redeem(g,bad)).status).toBe(bad.client_secret?401:400);
  expect((await redeem(g)).status).toBe(200);
 });
+it('authorize rejects attacker callbacks, clients, state and PKCE method without creating a grant',async()=>{
+ const who=await account('zzsuiteattack');accounts.push(who);
+ const verifier=randomBytes(32).toString('base64url');
+ const valid=new URLSearchParams({client_id:'accounts',redirect_uri:callback('accounts'),response_type:'code',code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url'),state:randomBytes(24).toString('base64url')});
+ const attacks:[string,string][]=[
+  ['redirect_uri','https://accounts.aplyd.org/bridge/callback.evil.invalid'],
+  ['redirect_uri','https://evil.invalid/bridge/callback'],
+  ['client_id','unknown-client'],
+  ['client_id','bugoff'],
+  ['state','short'],
+  ['code_challenge_method','plain'],
+  ['code_challenge','bad'],
+ ];
+ for(const [key,value] of attacks){
+  const p=new URLSearchParams(valid);p.set(key,value);
+  const response=await fetch(BASE+'/api/suite/authorize?'+p,{headers:{cookie:who.c.cookie},redirect:'manual'});
+  expect(response.status,`${key}=${value}`).toBe(400);
+  expect(response.headers.get('location')).toBeNull();
+  expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(await response.json()).toEqual({error:'invalid_request'});
+ }
+ expect(await db.suiteGrant.count({where:{userId:who.id}})).toBe(0);
+ mkdirSync('test-results/suite-authorize-attacks',{recursive:true});
+ writeFileSync('test-results/suite-authorize-attacks/verification.json',JSON.stringify({rejectedInputs:attacks.length,redirectsIssued:0,storedGrants:0},null,2));
+});
+it('a valid Accounts code cannot be redeemed by BugOff and remains valid for Accounts',async()=>{
+ const g=await issue('accounts');
+ const denied=await redeem(g,{client_id:'bugoff',client_secret:secret('bugoff'),redirect_uri:callback('bugoff')});
+ expect(denied.status).toBe(400);
+ expect(await denied.json()).toEqual({error:'invalid_grant'});
+ const stored=await db.suiteGrant.findUnique({where:{codeHash:createHash('sha256').update(g.code).digest('hex')}});
+ expect(stored).toMatchObject({clientId:'accounts',redeemedAt:null,accessTokenHash:null});
+ expect((await redeem(g)).status).toBe(200);
+ mkdirSync('test-results/suite-authorize-attacks',{recursive:true});
+ writeFileSync('test-results/suite-authorize-attacks/client-binding.json',JSON.stringify({wrongClientDenied:true,codeUnspentAfterDenial:true,rightClientRedeemed:true},null,2));
+});
 it('concurrent code redemption has one stored winner per suite client and denies replay',async()=>{
  for(const client of ['accounts','bugoff']){
   const g=await issue(client),responses=await Promise.all(Array.from({length:4},()=>redeem(g)));
