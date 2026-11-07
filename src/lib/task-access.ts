@@ -23,13 +23,15 @@ export const TASK_UNAVAILABLE_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Task · Sheet Happens Officer</title>
+<link rel="stylesheet" href="/task-unavailable.css">
 </head>
 <body>
 <main id="main">
 <h2>This task isn't available</h2>
 <p>It may have been moved to Trash, or you may not be a member of its project.</p>
-<p><a href="/">Go to My tasks</a></p>
+<p><a href="/my-tasks">Go to My tasks</a></p>
 </main>
 </body>
 </html>

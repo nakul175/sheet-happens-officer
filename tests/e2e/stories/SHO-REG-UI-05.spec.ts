@@ -41,6 +41,7 @@ test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes u
     await expect(tab.getByRole('heading', { name: /my tasks/i }).first()).toBeVisible();
 
     expect((await admin.api.del(`/api/tasks/${taskId}`)).status).toBe(204);
+    cssResponses.length = 0;
     const unavailable = await tab.goto(`/tasks/${taskId}`);
     expect(unavailable?.status()).toBe(404);
     await expect(tab.getByRole('heading', { name: "This task isn't available" })).toBeVisible();
@@ -53,12 +54,20 @@ test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes u
       stylesheetLinks: [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')].map(link => new URL(link.href).pathname),
       loadedStylesheets: document.styleSheets.length,
     }));
+    const latoLoaded = await tab.evaluate(async () => {
+      await document.fonts.ready;
+      return document.fonts.check('16px Lato');
+    });
     expect(unavailableStyle.loadedStylesheets).toBeGreaterThan(0);
     expect(unavailableStyle.bodyMargin).toBe('0px');
-    expect(unavailableStyle.bodyFont).not.toBe('"Times New Roman"');
+    expect(unavailableStyle.bodyFont).toContain('Lato');
+    expect(latoLoaded).toBe(true);
+    await expect(tab.getByRole('link', { name: 'Go to My tasks' })).toHaveAttribute('href', '/my-tasks');
     mkdirSync(evidenceDir, { recursive: true });
     await tab.screenshot({ path: `${evidenceDir}/deleted-task-unavailable.png`, fullPage: true });
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, projectId: project.id, newTab: true, refresh: true, back: true, forward: true, deletedDocumentStatus: 404, titleHiddenAfterDelete: true, unavailableStyle, cssResponses, sentinelFingerprint, sentinelPreserved: true, privateRuntime: true }, null, 2));
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, projectId: project.id, newTab: true, refresh: true, back: true, forward: true, deletedDocumentStatus: 404, titleHiddenAfterDelete: true, unavailableStyle, latoLoaded, cssResponses, sentinelFingerprint, sentinelPreserved: true, privateRuntime: true }, null, 2));
+    await tab.getByRole('link', { name: 'Go to My tasks' }).click();
+    await expect(tab.getByRole('heading', { name: /my tasks/i }).first()).toBeVisible();
   } finally {
     await tab.close();
   }
