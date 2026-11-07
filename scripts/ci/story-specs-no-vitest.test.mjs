@@ -95,6 +95,17 @@ test("no story spec Playwright loads from tests/e2e/stories reaches vitest qa:TC
   assert.deepEqual(bad, [], `Playwright would collect 0 tests. Move Vitest suites to tests/e2e/local:\n${bad.join("\n")}`);
 });
 
+test("every SHO regression browser spec runs in local qualification", () => {
+  const workflow = readFileSync(join(ROOT, ".github/workflows/qualification.yml"), "utf8");
+  const localSpecs = workflow.match(/specs=\(([^\n]*)\)/)?.[1];
+  assert.ok(localSpecs, "local Playwright specs list is missing from qualification.yml");
+  const listed = localSpecs.match(/tests\/e2e\/stories\/SHO-REG-[\w-]+\.spec\.ts/g) ?? [];
+  const actual = readdirSync(STORIES)
+    .filter((name) => /^SHO-REG-[\w-]+\.spec\.ts$/.test(name))
+    .map((name) => `tests/e2e/stories/${name}`);
+  assert.deepEqual(listed.sort(), actual.sort(), "a regression browser spec is missing or duplicated in local qualification");
+});
+
 // APL-2892 D3: a Playwright spec that only mentions `from "vitest"` in a comment, a string or a regex is not a Vitest spec.
 const MENTIONS_ONLY = [
   "// Mentions vitest only in prose and data: this is a Playwright spec.",
