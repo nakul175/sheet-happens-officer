@@ -30,9 +30,13 @@ test("SHO-REG-TASKS-09 rapid Enter creates one dated task", async ({ admin, late
   await page.locator("#qa-proj").selectOption(project.id);
   await page.locator("#qa-date").fill("not a date");
   await expect(page.locator("#qa-date-note")).toContainText("Not a date I know");
+  await expect(page.locator("#qa-date")).toHaveAttribute("aria-invalid", "true");
+  await expect(page.locator("#qa-date")).toHaveAttribute("aria-describedby", "qa-date-note");
+  await expect(page.locator("#qa-date-note")).toHaveAttribute("role", "status");
   await expect(page.getByRole("dialog", { name: "New task" }).getByRole("button", { name: "Add task" })).toBeDisabled();
   await page.locator("#qa-date").fill("tomorrow");
   await expect(page.locator("#qa-date-note")).toContainText(/^Due /);
+  await expect(page.locator("#qa-date")).toHaveAttribute("aria-invalid", "false");
 
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
