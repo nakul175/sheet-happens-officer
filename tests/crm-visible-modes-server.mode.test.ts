@@ -48,6 +48,10 @@ function removeOutbox(dir: string) {
 const seed: {
   userIds: string[]; emails: string[]; projectId?: string; plainProjectId?: string; projectIds: string[]; orgId?: string; orgIds: string[];
 } = { userIds: [], emails: [], projectIds: [], orgIds: [] };
+let deactivationFixture: {
+  dealId: string; ordinaryId: string; organisationId: string; userIds: string[];
+  sentinel: { id: string; email: string; name: string; orgRole: string; deactivatedAt: Date | null };
+} | null = null;
 
 /**
  * Through the API, as the Super Admin: takes over as Leader where this run's people lead, archives this run's
@@ -357,7 +361,36 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
   }, 180_000);
 
   afterAll(async () => {
-    try { await cleanupSeed(); } finally {
+    try {
+      await cleanupSeed();
+      if (deactivationFixture) {
+        const fixture = deactivationFixture;
+        const [projects, organisation, users, sentinel] = await Promise.all([
+          db.project.findMany({ where: { id: { in: [fixture.dealId, fixture.ordinaryId] } }, select: { id: true, archivedAt: true } }),
+          db.organisation.findUnique({ where: { id: fixture.organisationId }, select: { archivedAt: true } }),
+          db.user.findMany({ where: { id: { in: fixture.userIds } }, select: { id: true, deactivatedAt: true } }),
+          db.user.findUnique({ where: { id: fixture.sentinel.id }, select: { id: true, email: true, name: true, orgRole: true, deactivatedAt: true } }),
+        ]);
+        expect(projects.map((p) => p.id).sort()).toEqual([fixture.dealId, fixture.ordinaryId].sort());
+        expect(projects.every((p) => p.archivedAt !== null)).toBe(true);
+        expect(organisation?.archivedAt).toBeTruthy();
+        expect(users.map((u) => u.id).sort()).toEqual([...fixture.userIds].sort());
+        expect(users.every((u) => u.deactivatedAt !== null)).toBe(true);
+        expect(sentinel).toEqual(fixture.sentinel);
+        const evidence = path.join(root, "test-results", "deal-post-deactivation");
+        mkdirSync(evidence, { recursive: true });
+        writeFileSync(path.join(evidence, "cleanup.json"), JSON.stringify({
+          projectIds: projects.map((p) => p.id).sort(),
+          projectsArchived: true,
+          organisationId: fixture.organisationId,
+          organisationArchived: true,
+          deactivatedUserIds: users.map((u) => u.id).sort(),
+          sentinelUserId: fixture.sentinel.id,
+          sentinelFingerprintUnchanged: true,
+          physicalPurge: false,
+        }, null, 2) + "\n");
+      }
+    } finally {
       for (const server of [...running.values(), ...extra.values()]) killGroup(server.pid);
       for (const dir of outboxes) removeOutbox(dir);
       await db.$disconnect();
@@ -974,6 +1007,9 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       });
       expect(task.status, task.text).toBe(201);
     }
+    const sentinelUser = await superAdminOn(open);
+    const sentinel = await db.user.findUniqueOrThrow({ where: { id: sentinelUser.id }, select: { id: true, email: true, name: true, orgRole: true, deactivatedAt: true } });
+    deactivationFixture = { dealId, ordinaryId, organisationId, userIds: [admin.id, target.id, observer.id], sentinel };
 
     // The historical deal notice exists before the person is removed. The helper
     // verifies that every seeded person and project belongs to this local ZZ-TEST run.
