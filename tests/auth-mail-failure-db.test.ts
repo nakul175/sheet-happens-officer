@@ -5,6 +5,7 @@ import { consumeToken, hashToken, issueTokenAndSend } from "@/lib/auth";
 import { getOrCreateWorkspace } from "@/lib/workspace";
 
 const mail = vi.hoisted(() => ({ send: vi.fn() }));
+vi.mock("next/server", () => ({ connection: vi.fn() }));
 vi.mock("@/lib/email", () => ({
   MailError: class MailError extends Error {},
   resetMail: () => ({ to: "synthetic@example.invalid" }),
