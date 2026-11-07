@@ -93,6 +93,23 @@ async function dueReminderRecipients(taskId: string) {
   }
 }
 
+async function taskAndMembership(taskId: string, projectId: string, userId: string) {
+  const client = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000 });
+  try {
+    await client.connect();
+    const task = await client.query<{ assigneeId: string; deletedAt: Date | null }>(
+      'SELECT "assigneeId", "deletedAt" FROM "Task" WHERE "id" = $1', [taskId],
+    );
+    const member = await client.query<{ count: number }>(
+      'SELECT count(*)::int AS count FROM "ProjectMember" WHERE "projectId" = $1 AND "userId" = $2',
+      [projectId, userId],
+    );
+    return { task: task.rows[0], memberCount: member.rows[0].count };
+  } finally {
+    await client.end();
+  }
+}
+
 /** One task due tomorrow for each holder, so each run starts with no reminder written for them. */
 async function dueTasks(label: string) {
   const holderTitle = `ZZ-TEST ${label} ${tag}`;
@@ -294,6 +311,9 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     const taskId = await task(leader, separate.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
     const removed = await leader.c.del(`/api/projects/${separate.id}/members/${holder.id}?handoverTo=${leader.id}`);
     expect(removed.status, JSON.stringify(removed.json)).toBe(204);
+    expect(await taskAndMembership(taskId, separate.id, holder.id)).toMatchObject({
+      task: { assigneeId: leader.id, deletedAt: null }, memberCount: 0,
+    });
     await postReminders(1);
     expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
     expect(await dueTomorrow(leader, taskId, title)).toHaveLength(1);
@@ -305,6 +325,7 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     const taskId = await task(leader, proj.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
     const deleted = await leader.c.del(`/api/tasks/${taskId}`);
     expect(deleted.status, JSON.stringify(deleted.json)).toBe(204);
+    expect((await taskAndMembership(taskId, proj.id, holder.id)).task.deletedAt).not.toBeNull();
     await postReminders(1);
     expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
     expect(await dueReminderRecipients(taskId)).toEqual([]);
