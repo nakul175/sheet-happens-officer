@@ -267,7 +267,7 @@ function assertBellDealName(body: string, dealName: string, visible: boolean, la
   else expect(present, `${label} notification text leaked the deal name`).toBe(false);
 }
 
-/** My tasks, search, the bell, every concierge quick action, and the deal API. */
+/** My tasks, search, the bell, and the deal API. */
 async function readPaths(base: string, cookie: string, dealId: string, name: string): Promise<Read[]> {
   const my = await call(base, cookie, "GET", "/api/my-tasks");
   const search = await call(base, cookie, "GET", `/api/search?q=${encodeURIComponent(name)}`);
@@ -465,6 +465,15 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const joined = reads.map((read) => read.text).join("\n");
       if (example.visible) expect(joined, label).toContain(dealName);
       else expect(joined, label).not.toContain(dealName);
+
+      // Activity is a separate direct link. A hidden reader must receive the same
+      // generic 404 as the deal detail, without a name or identifier in the body.
+      const activity = await call(server.base, who.cookie, "GET", `/api/projects/${dealId}/activity`);
+      expect(activity.status, `${label} activity`).toBe(example.visible ? 200 : 404);
+      if (!example.visible) {
+        expect(activity.text, `${label} activity name`).not.toContain(dealName);
+        expect(activity.text, `${label} activity id`).not.toContain(dealId);
+      }
     }
 
     // APL-2698 AC3. The open server is CRM_VISIBLE=on; crmMode() treats that as all.
