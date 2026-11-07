@@ -202,6 +202,33 @@ it("denies a document link when its SHO session is revoked after picker prefligh
   }
 }, 20_000);
 
+it("denies a link if the request switches to a different central account after picker preflight", async () => {
+  const switchedPage = randomUUID();
+  const switchedSession = await db.session.create({ data: {
+    userId: admin.id, tokenHash: `${prefix}-switched-session`,
+    expiresAt: new Date(Date.now() + 3_600_000),
+    centralLink: { create: { subject: randomUUID(), sessionUid: `${prefix}-switched` } },
+  } });
+  const beforeDefault = await db.holySheetDefault.findUnique({ where: { projectId } });
+  const pause = pauseBeforeWrite();
+  const pending = Promise.allSettled([changeDocument(admin, { kind: "projects", id: projectId }, {
+    pageId: switchedPage, subject, spaceId: `${prefix}-switched-space`, setDefault: true,
+  })]);
+  try {
+    await pause.ready();
+    authority.sessionId.mockResolvedValue(switchedSession.id);
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 401 }) })]);
+    expect(await db.holySheetLink.count({ where: { projectId, pageId: switchedPage } })).toBe(0);
+    expect(await db.holySheetDefault.findUnique({ where: { projectId } })).toEqual(beforeDefault);
+    completed.push("central-account-switch-no-link");
+  } finally {
+    pause.release(); await pending;
+    authority.sessionId.mockResolvedValue(sessionId);
+    await db.session.delete({ where: { id: switchedSession.id } });
+  }
+}, 20_000);
+
 it("denies a link when central authority expires after picker preflight", async () => {
   const expiredPage = randomUUID(), pause = pauseBeforeWrite();
   const beforeDefault = await db.holySheetDefault.findUnique({ where: { projectId } });
