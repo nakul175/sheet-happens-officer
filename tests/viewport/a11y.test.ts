@@ -142,6 +142,10 @@ describe("keyboard", () => {
       await page.keyboard.press("Tab");
       expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), `Tab ${i + 1}`).toBe(true);
     }
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press("Shift+Tab");
+      expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), `Shift+Tab ${i + 1}`).toBe(true);
+    }
     await page.keyboard.press("Escape");
     await page.waitForSelector('[role="dialog"]', { state: "detached" });
     expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("link");
