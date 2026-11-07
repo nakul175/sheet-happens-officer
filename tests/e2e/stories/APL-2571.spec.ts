@@ -73,6 +73,47 @@ test("AC2: metadata is not link-coloured; only the title is interactive", async 
   if (linkColor) expect(info.metaColors.some((c) => c === linkColor)).toBe(false);
 });
 
+test("SHO-REG-UI-06: phone density survives navigation and reload without clipping task controls", async ({ admin, later }) => {
+  const prior = await admin.api.get("/api/profile/density");
+  expect(prior.status).toBe(200);
+  const { compact } = prior.json as { compact: boolean };
+  later(() => admin.api.put("/api/profile/density", { compact }));
+  await admin.api.put("/api/profile/density", { compact: false });
+  const id = await listProject(admin, later, 2);
+  const p = admin.page;
+  await p.setViewportSize({ width: 390, height: 844 });
+  await p.goto(`/projects/${id}`);
+  const shell = p.locator(".shell");
+  await expect(shell).not.toHaveAttribute("data-density");
+  const utilities = p.getByRole("button", { name: /^Account and utilities, \S+$/ });
+  await utilities.click();
+  await p.getByRole("button", { name: /Compact/ }).click();
+  await expect(shell).toHaveAttribute("data-density", "compact");
+  await p.keyboard.press("Escape");
+  await expect.poll(async () => (await admin.api.get("/api/profile/density")).json).toEqual({ compact: true });
+  const check = async () => {
+    await expect(p.getByText(`${zz("row")} 00`).first()).toBeVisible();
+    await expect(p.getByRole("button", { name: "+ New task", exact: true })).toBeVisible();
+    await expect(p.getByRole("complementary", { name: "Concierge", exact: true })).toHaveCount(0);
+    expect(await p.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  };
+  await check();
+  await p.goto("/my-tasks");
+  await expect(shell).toHaveAttribute("data-density", "compact");
+  expect(await p.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await p.goBack();
+  await expect(p).toHaveURL(new RegExp(`/projects/${id}$`));
+  await check();
+  await p.reload();
+  await expect(shell).toHaveAttribute("data-density", "compact");
+  await check();
+  await utilities.click();
+  await p.getByRole("button", { name: /Compact/ }).click();
+  await expect(shell).not.toHaveAttribute("data-density");
+  await p.keyboard.press("Escape");
+  await expect.poll(async () => (await admin.api.get("/api/profile/density")).json).toEqual({ compact: false });
+});
+
 /** WCAG contrast of the visible text and SVG icons inside one row. Large text (24 px, or 18.66 px and bold) and icons need 3:1; other text needs 4.5:1. */
 function rowContrast(root: HTMLElement | SVGElement): string[] {
   const parse = (c: string): [number, number, number, number] | null => {
