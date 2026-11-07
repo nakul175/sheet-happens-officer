@@ -37,7 +37,9 @@ test("SHO-REG-SEARCH-04: Search page and palette open the same owned task", asyn
   await expect(page.getByRole("dialog", { name: "Task", exact: true })).toContainText(title);
 
   await page.goto("/projects");
-  await expect(page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true })).toBeVisible();
+  const newTaskButton = page.getByRole("banner").getByRole("button", { name: "+ New task", exact: true });
+  await expect(newTaskButton).toBeVisible();
+  await newTaskButton.focus();
   await page.keyboard.press("Control+k");
   const palette = page.getByRole("dialog", { name: "Search and commands" });
   await expect(palette).toHaveCount(1);
@@ -45,10 +47,20 @@ test("SHO-REG-SEARCH-04: Search page and palette open the same owned task", asyn
   const paletteResult = palette.getByRole("option").filter({ hasText: title });
   await expect(paletteResult).toBeVisible();
   await expect(paletteResult).toContainText(project.name);
+  await page.keyboard.press("Escape");
+  await expect(palette).toHaveCount(0);
+  await expect(newTaskButton).toBeFocused();
+  await page.keyboard.press("Control+k");
+  await expect(palette).toHaveCount(1);
+  await page.getByRole("combobox", { name: /Search tasks/ }).fill(word);
+  await expect(paletteResult).toBeVisible();
   await paletteResult.click();
   await expect(page).toHaveURL(new RegExp(`/tasks/${taskId}`));
   await expect(page.getByText(title, { exact: true }).first()).toBeVisible();
   await expect(palette).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/projects$/);
+  await expect(palette).toHaveCount(0);
   mkdirSync(evidenceDir, { recursive: true });
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId, taskId, pageHref: `/projects/${projectId}?task=${taskId}`, paletteHref: `/tasks/${taskId}`, sameOwnedTask: true, paletteClosed: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId, taskId, pageHref: `/projects/${projectId}?task=${taskId}`, paletteHref: `/tasks/${taskId}`, sameOwnedTask: true, escapeRestoredFocus: true, paletteClosed: true, browserBackToProjects: true }, null, 2));
 });
