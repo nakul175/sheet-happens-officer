@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { AuthMailLimitError, consumeToken, hashToken, issueTokenAndSend } from '@/lib/auth';
 vi.mock('next/server',()=>({connection:vi.fn()}));
+import { POST as resetPassword } from '@/app/api/auth/reset-password/route';
 const id='recovery-'+randomUUID();
 let safe=false;
 let workspaceId:string;
@@ -50,6 +51,40 @@ for(const type of ['RESET','VERIFY'] as const){
   expect(await consumeToken(newer,type)).toBe(id);
  });
 }
+
+it('RESET route rolls back a post-session failure and accepts the same link on retry',async()=>{
+ const raw=await issueTokenAndSend(id,'RESET',async()=>{});
+ const sessionIds=[randomUUID(),randomUUID()];
+ await db.session.createMany({data:sessionIds.map((sessionId,index)=>({id:sessionId,userId:id,tokenHash:hashToken(`${id}-session-${index}`),expiresAt:new Date(Date.now()+86400_000)}))});
+ await db.loginAttempt.create({data:{email:id+'@example.invalid',success:false}});
+ try{
+ const request=()=>new Request('http://localhost/api/auth/reset-password',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:raw,password:'NewSyntheticPassword123!',confirm:'NewSyntheticPassword123!'})});
+ const original=db.$transaction.bind(db);
+ const fault=vi.spyOn(db,'$transaction').mockImplementation(((callback: (tx: unknown)=>Promise<unknown>,options: unknown)=>
+  original(async tx=>callback(new Proxy(tx,{get(target,key){
+   if(key==='auditLog')return new Proxy(target.auditLog,{get(delegate,method){
+    if(method==='create')return async()=>{throw Error('injected audit write failure');};
+    return Reflect.get(delegate,method);
+   }});
+   return Reflect.get(target,key);
+  }})),options as never)) as typeof db.$transaction);
+ try{expect((await resetPassword(request())).status).toBe(500);}finally{fault.mockRestore();}
+ expect((await db.authToken.findUniqueOrThrow({where:{tokenHash:hashToken(raw)}})).usedAt).toBeNull();
+ expect((await db.user.findUniqueOrThrow({where:{id}})).passwordHash).toBe('unused');
+ expect(await db.session.count({where:{id:{in:sessionIds},revokedAt:null}})).toBe(2);
+ expect(await db.loginAttempt.count({where:{email:id+'@example.invalid'}})).toBe(1);
+ expect(await db.auditLog.count({where:{actorId:id,event:'PASSWORD_RESET'}})).toBe(0);
+ expect((await resetPassword(request())).status).toBe(200);
+ expect((await db.authToken.findUniqueOrThrow({where:{tokenHash:hashToken(raw)}})).usedAt).not.toBeNull();
+ expect((await db.user.findUniqueOrThrow({where:{id}})).passwordHash).not.toBe('unused');
+ expect(await db.session.count({where:{id:{in:sessionIds},revokedAt:null}})).toBe(0);
+ expect(await db.loginAttempt.count({where:{email:id+'@example.invalid'}})).toBe(0);
+ expect(await db.auditLog.count({where:{actorId:id,event:'PASSWORD_RESET'}})).toBe(1);
+ }finally{
+  await db.session.deleteMany({where:{id:{in:sessionIds}}});
+  await db.loginAttempt.deleteMany({where:{email:id+'@example.invalid'}});
+ }
+});
 
 it('concurrent real bootstrap transactions converge on the sole workspace',async()=>{
  const rows=await Promise.all(Array.from({length:12},()=>getOrCreateWorkspace()));
