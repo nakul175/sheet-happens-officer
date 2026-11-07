@@ -144,10 +144,15 @@ describe("APL-2660 approver edge cases", () => {
     const boss = await zzAccount("boss");
     const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }]);
     const t = await zzTask(lead, p.id, { title: "Ready to close", assigneeId: worker.id, approverId: boss.id });
+    const before = await taskOf(worker, t);
+    expect((await worker.c.post(`/api/tasks/${t}/complete`, await withVersion(worker, t))).status).toBe(403);
+    expect(await taskOf(worker, t)).toEqual(before);
     expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     const held = await taskOf(boss, t);
     expect(held.assignee.id).toBe(boss.id);
     expect(held.awaitingApproval).toBe(true);
+    expect((await worker.c.post(`/api/tasks/${t}/complete`, await withVersion(worker, t))).status).toBe(403);
+    expect(await taskOf(boss, t)).toEqual(held);
     // Close on the task detail posts complete.
     expect(closeControlOffered({ canEdit: true, done: false, canClose: held.canClose })).toBe(true);
     expect((await boss.c.post(`/api/tasks/${t}/complete`, await withVersion(boss, t))).status).toBe(200);
