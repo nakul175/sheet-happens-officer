@@ -54,13 +54,16 @@ it.each(cases)("SHO-REG-AUTH-08 $type $reverse: latest delivered link survives c
   let sendB: Promise<string> | undefined;
   try {
     await vi.waitFor(() => expect(rawA).not.toBe(""));
-    // Make the reservation order unambiguous even on a millisecond-resolution clock.
-    await db.authToken.update({ where: { tokenHash: hashToken(rawA) }, data: { createdAt: new Date(0) } });
+    // Keep the reserved row intact; wait for a distinct millisecond before B.
+    const first = await db.authToken.findUniqueOrThrow({ where: { tokenHash: hashToken(rawA) } });
+    await vi.waitFor(() => expect(Date.now()).toBeGreaterThan(first.createdAt.getTime() + 10));
     sendB = issueTokenAndSend(userId, type, token => {
       rawB = token;
       return gateB;
     });
     await vi.waitFor(() => expect(rawB).not.toBe(""));
+    const second = await db.authToken.findUniqueOrThrow({ where: { tokenHash: hashToken(rawB) } });
+    expect(second.createdAt.getTime()).toBeGreaterThan(first.createdAt.getTime());
     expect(await db.authToken.count({ where: { userId, type } })).toBe(2);
 
     if (reverse) {
