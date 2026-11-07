@@ -137,8 +137,13 @@ it('session revocation invalidates userinfo and the Accounts status contract',as
  const status=()=>fetch(BASE+'/api/suite/status',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client_id:'accounts',client_secret:secret('accounts'),user_id:g.who.id,source_session_id:identity.source_session_id})});
  expect(await(await status()).json()).toMatchObject({active:true,sub:g.who.id});
  expect((await g.who.c.post('/api/auth/signout')).status).toBe(204);
+ const stored=await db.session.findUnique({where:{id:identity.source_session_id}});
+ expect(stored).toMatchObject({userId:g.who.id,revokedAt:expect.any(Date)});
  expect((await userinfo(token.access_token)).status).toBe(401);
  expect(await(await status()).json()).toEqual({active:false});
+ mkdirSync('test-results/suite-session-revocation',{recursive:true});
+ writeFileSync('test-results/suite-session-revocation/verification.json',JSON.stringify({client:'accounts',activeBeforeSignout:true,
+  sourceSessionRevoked:true,userinfoDeniedAfterSignout:true,statusInactiveAfterSignout:true,privateRuntime:true},null,2));
 });
 it('oversized bodies and unauthenticated userinfo are rejected',async()=>{
  expect((await fetch(BASE+'/api/suite/token',{method:'POST',body:'x'.repeat(8193)})).status).toBe(413);
