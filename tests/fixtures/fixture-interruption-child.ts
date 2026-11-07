@@ -1,5 +1,5 @@
 // Deliberately stop after a committed fixture write, before any teardown can run.
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../src/generated/prisma/client';
 
 const url = new URL(process.env.DATABASE_URL ?? 'postgresql://invalid/invalid');
 const [workspaceId, name] = process.argv.slice(2);
@@ -10,10 +10,13 @@ if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
 }
 
 const db = new PrismaClient();
-try {
-  const project = await db.project.create({ data: { workspaceId, name } });
-  process.stdout.write(`${JSON.stringify({ id: project.id })}\n`, () => process.kill(process.pid, 'SIGKILL'));
-} catch {
-  process.stderr.write('CHILD_CREATE_FAILED\n');
-  process.exit(3);
+async function main() {
+  try {
+    const project = await db.project.create({ data: { workspaceId, name } });
+    process.stdout.write(`${JSON.stringify({ id: project.id })}\n`, () => process.kill(process.pid, 'SIGKILL'));
+  } catch {
+    process.stderr.write('CHILD_CREATE_FAILED\n');
+    process.exit(3);
+  }
 }
+void main();

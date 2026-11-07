@@ -44,11 +44,13 @@ it('cleans two interrupted run namespaces without changing an unrelated sentinel
   for (const number of [1, 2]) {
     const name = `${prefix}-${number}`;
     expect(await db.project.count({ where: { workspaceId, name } })).toBe(0);
-    const child = spawnSync(process.execPath, ['tests/fixtures/fixture-interruption-child.mjs', workspaceId, name], {
+    const child = spawnSync(process.execPath, ['--import', 'tsx', 'tests/fixtures/fixture-interruption-child.ts', workspaceId, name], {
       encoding: 'utf8', timeout: 15000, env: process.env,
     });
     expect(child.error).toBeUndefined();
-    expect(child.signal).toBe('SIGKILL');
+    const childError = child.stderr.includes('DISPOSABLE_LOCAL_SHO_TEST_REQUIRED') ? 'GUARD' :
+      child.stderr.includes('CHILD_CREATE_FAILED') ? 'CREATE' : child.stderr ? 'RUNTIME' : 'NONE';
+    expect(child.signal, `child exit status ${child.status}; error category ${childError}`).toBe('SIGKILL');
     const line = child.stdout.trim();
     const id = (JSON.parse(line) as { id: string }).id;
     expect((await db.project.findUniqueOrThrow({ where: { id } })).name).toBe(name);
