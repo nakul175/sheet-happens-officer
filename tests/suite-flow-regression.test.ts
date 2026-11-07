@@ -1,6 +1,7 @@
 // Real local HTTP/DB suite flow; redirects are inspected, never followed off-host.
 import { afterAll,beforeAll,expect,it } from 'vitest';
 import { createHash,randomBytes } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { account,BASE,type Account } from './helpers';
 const accounts:Account[]=[];
@@ -20,6 +21,12 @@ afterAll(async()=>{
  await db.auditLog.deleteMany({where:{actorId:{in:ids}}});
  await db.loginAttempt.deleteMany({where:{email:{in:emails}}});
  await db.user.deleteMany({where:{id:{in:ids}}});
+ const [grants,users]=await Promise.all([
+  db.suiteGrant.count({where:{userId:{in:ids}}}),
+  db.user.count({where:{id:{in:ids}}}),
+ ]);
+ expect({grants,users}).toEqual({grants:0,users:0});
+ if(ids.length){mkdirSync('test-results/suite-code-race',{recursive:true});writeFileSync('test-results/suite-code-race/cleanup.json',JSON.stringify({ownedUsersRemoved:ids.length,ownedGrantsRemaining:0,ownedUsersRemaining:0,disposableCiDatabase:true},null,2));}
 });
 async function issue(client:string){
  const who=await account('zzsuite'+client);accounts.push(who);
@@ -48,9 +55,22 @@ it('wrong verifier, callback and client secret do not spend a valid code',async(
  for(const bad of badInputs)expect((await redeem(g,bad)).status).toBe(bad.client_secret?401:400);
  expect((await redeem(g)).status).toBe(200);
 });
-it('concurrent code redemption has one winner',async()=>{
- const g=await issue('accounts'),responses=await Promise.all([redeem(g),redeem(g)]);
- expect(responses.map(r=>r.status).sort()).toEqual([200,400]);
+it('concurrent code redemption has one stored winner per suite client and denies replay',async()=>{
+ for(const client of ['accounts','bugoff']){
+  const g=await issue(client),responses=await Promise.all(Array.from({length:4},()=>redeem(g)));
+  expect(responses.map(r=>r.status).sort()).toEqual([200,400,400,400]);
+  const bodies=await Promise.all(responses.map(r=>r.json()));
+  expect(bodies.filter(body=>body.error==='invalid_grant')).toHaveLength(3);
+  const winner=bodies.find(body=>typeof body.access_token==='string');
+  expect(winner?.access_token).toBeTypeOf('string');
+  const grants=await db.suiteGrant.findMany({where:{codeHash:createHash('sha256').update(g.code).digest('hex')}});
+  expect(grants).toHaveLength(1);
+  expect(grants[0]).toMatchObject({clientId:client,userId:g.who.id,accessTokenHash:createHash('sha256').update(winner!.access_token).digest('hex')});
+  expect(grants[0].redeemedAt).not.toBeNull();
+  expect((await redeem(g)).status).toBe(400);
+  mkdirSync('test-results/suite-code-race',{recursive:true});
+  writeFileSync(`test-results/suite-code-race/${client}.json`,JSON.stringify({client,requests:4,issuedTokens:1,invalidGrants:3,storedGrants:1,replayDenied:true},null,2));
+ }
 });
 it('session revocation invalidates userinfo and the Accounts status contract',async()=>{
  const g=await issue('accounts'),token=await(await redeem(g)).json();
