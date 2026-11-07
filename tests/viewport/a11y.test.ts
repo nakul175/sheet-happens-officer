@@ -63,6 +63,32 @@ afterAll(async () => {
   }
 });
 
+it("Deal date-range error names both invalid inputs and clears after correction at phone width", async () => {
+  const ctx = await ctxFor("root", 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/deals", { waitUntil: "load" });
+    await page.getByRole("button", { name: "Date filters", exact: true }).click();
+    const from = page.getByLabel("From", { exact: true });
+    const through = page.getByLabel("Through", { exact: true });
+    await from.fill("2026-11-10");
+    await through.fill("2026-11-09");
+    const error = page.locator("#deal-date-range-error[role=alert]");
+    await error.waitFor();
+    expect(await error.innerText()).toBe("From must be on or before Through.");
+    for (const input of [from, through]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("true");
+      expect(await input.getAttribute("aria-describedby")).toBe("deal-date-range-error");
+    }
+    await through.fill("2026-11-10");
+    expect(await error.count()).toBe(0);
+    for (const input of [from, through]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("false");
+      expect(await input.getAttribute("aria-describedby")).toBeNull();
+    }
+  } finally { await ctx.close(); }
+});
+
 
 async function ctxFor(who: "root" | "viewer" | null, width: number) {
   const ctx = await browser.newContext({ viewport: { width, height: 800 }, baseURL: BASE });
