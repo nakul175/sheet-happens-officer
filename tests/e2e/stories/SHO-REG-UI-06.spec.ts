@@ -30,7 +30,7 @@ test("SHO-REG-UI-06: phone density survives navigation and reload without clippi
   expect(created.status, JSON.stringify(created.json)).toBe(201);
 
   const page = admin.page;
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/projects/${project.id}`);
   const shell = page.locator(".shell");
   await expect(shell).not.toHaveAttribute("data-density");
@@ -40,6 +40,7 @@ test("SHO-REG-UI-06: phone density survives navigation and reload without clippi
   await expect(shell).toHaveAttribute("data-density", "compact");
   await page.keyboard.press("Escape");
   await expect.poll(async () => (await admin.api.get("/api/profile/density")).json).toEqual({ compact: true });
+  await page.setViewportSize({ width: 390, height: 844 });
 
   const check = async () => {
     await expect(page.getByText(title).first()).toBeVisible();
@@ -57,6 +58,7 @@ test("SHO-REG-UI-06: phone density survives navigation and reload without clippi
   await page.reload();
   await expect(shell).toHaveAttribute("data-density", "compact");
   await check();
+  await page.setViewportSize({ width: 1440, height: 900 });
   await utilities.click();
   await page.getByRole("button", { name: /Compact/ }).click();
   await expect(shell).not.toHaveAttribute("data-density");
