@@ -5,6 +5,9 @@ import { db } from "@/lib/db";
 import { issueTokenAndSend } from "@/lib/auth";
 
 const deliveries = vi.hoisted(() => ({ count: 0 }));
+vi.mock("next/server", async original => ({
+  ...(await original<typeof import("next/server")>()), connection: async () => {},
+}));
 vi.mock("@/lib/email", async original => {
   const real = await original<typeof import("@/lib/email")>();
   return { ...real, sendMail: async () => { deliveries.count++; } };
