@@ -1024,7 +1024,10 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
         expect(person.text, `${label} neutral person notice`).toContain("A deal you can't view.");
         expect(person.text, `${label} ordinary person project`).toContain(ordinary);
         expect(bell.text, `${label} safe bell link`).not.toContain(`/projects/${dealId}`);
-        if (row.mode === "off") expect((person.json?.person as { openTasks?: number }).openTasks).toBe(1);
+        if (row.mode === "off") {
+          expect(bell.text, `${label} neutral bell notice`).toContain(HIDDEN_DEAL_TEXT);
+          expect((person.json?.person as { openTasks?: number }).openTasks).toBe(1);
+        }
       } else {
         expect(bell.text, `${label} visible bell`).toContain(deal);
         expect(person.text, `${label} visible person`).toContain(deal);
@@ -1043,7 +1046,7 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       await page.goto(`${off.base}/my-tasks`);
       await page.getByRole("button", { name: /^Notifications/ }).click();
       const dialog = page.getByRole("dialog", { name: "Notifications" });
-      await browserExpect(dialog.getByText(HIDDEN_DEAL_TEXT, { exact: true }).first()).toBeVisible();
+      await browserExpect(dialog.locator(".bell-main").filter({ hasText: HIDDEN_DEAL_TEXT }).first()).toBeVisible();
       expect(await dialog.innerText()).not.toContain(deal);
       expect(await dialog.locator(`a[href="/projects/${dealId}"]`).count()).toBe(0);
       await browserExpect(dialog.locator(`a[href="/projects/${ordinaryId}"]`)).toBeVisible();
