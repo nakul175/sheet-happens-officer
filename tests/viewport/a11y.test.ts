@@ -151,6 +151,29 @@ describe("keyboard", () => {
     expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("link");
     await ctx.close();
   });
+  it("Escape and browser Back close nested task dialogs without a destructive action", async () => {
+    const ctx = await ctxFor("root", 1280);
+    try {
+      const page = await ctx.newPage();
+      let deletes = 0;
+      page.on("request", (request) => {
+        if (request.method() === "DELETE" && new URL(request.url()).pathname === `/api/tasks/${ids.task}`) deletes++;
+      });
+      await page.goto(`/projects/${ids.project}?task=${ids.task}`, { waitUntil: "load" });
+      const taskDialog = page.getByRole("dialog", { name: "Task", exact: true });
+      await taskDialog.getByRole("button", { name: "Move to Trash", exact: true }).click();
+      const confirm = page.getByRole("dialog", { name: "Move to Trash?", exact: true });
+      await confirm.waitFor();
+      await page.keyboard.press("Escape");
+      await confirm.waitFor({ state: "detached" });
+      await taskDialog.waitFor();
+      await page.evaluate(() => history.back());
+      await page.waitForURL((url) => !url.searchParams.has("task"));
+      await taskDialog.waitFor({ state: "detached" });
+      expect(deletes).toBe(0);
+      expect((await ctx.request.get(`/api/tasks/${ids.task}`)).status()).toBe(200);
+    } finally { await ctx.close(); }
+  });
   it("Retry loads the screen again without a full page reload", async () => {
     const ctx = await ctxFor("root", 1280);
     const page = await ctx.newPage();
