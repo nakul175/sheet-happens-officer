@@ -82,6 +82,32 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     for (const label of ['overdue', 'today', 'later'])
       await expect(myTasksView.getByText(`ZZ-TEST ${label} ${fixture}`, { exact: true })).toBeVisible();
     await expect(myTasksView.getByText(`ZZ-TEST completed ${fixture}`, { exact: true })).toHaveCount(0);
+    // HOME-02: the Home overdue link is a URL filter; grouping is a per-user saved choice.
+    await page.getByRole('button', { name: 'By project' }).click();
+    await expect(page.getByRole('button', { name: 'By project' })).toHaveAttribute('aria-pressed', 'true');
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'By project' })).toHaveAttribute('aria-pressed', 'true');
+    await page.goBack();
+    await expect(page.getByRole('heading', { name: 'Your workspace' })).toBeVisible();
+    await summary.getByRole('link', { name: /Overdue/ }).click();
+    await expect(page).toHaveURL(/\/my-tasks\?filter=overdue$/);
+    await expect(myTasksView.getByText(`ZZ-TEST overdue ${fixture}`, { exact: true })).toBeVisible();
+    for (const label of ['today', 'later', 'completed'])
+      await expect(myTasksView.getByText(`ZZ-TEST ${label} ${fixture}`, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'By project' })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('link', { name: 'Show all My tasks' }).click();
+    await expect(page).toHaveURL(/\/my-tasks$/);
+    for (const label of ['overdue', 'today', 'later'])
+      await expect(myTasksView.getByText(`ZZ-TEST ${label} ${fixture}`, { exact: true })).toBeVisible();
+    await page.goto(`/tasks/${today}`);
+    await expect(page).toHaveURL(new RegExp(`/tasks/${today}$`));
+    await page.goBack();
+    await expect(page).toHaveURL(/\/my-tasks$/);
+    await expect(page.getByRole('button', { name: 'By project' })).toHaveAttribute('aria-pressed', 'true');
+    await page.goBack();
+    await expect(page).toHaveURL(/\/my-tasks\?filter=overdue$/);
+    await expect(myTasksView.getByText(`ZZ-TEST overdue ${fixture}`, { exact: true })).toBeVisible();
+    await expect(myTasksView.getByText(`ZZ-TEST today ${fixture}`, { exact: true })).toHaveCount(0);
     writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, open: 3, overdue: 1, awaiting: 0, projects: 1, topLevel: 4, completed: 1, myTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
   } finally { await context.close(); }
 });
