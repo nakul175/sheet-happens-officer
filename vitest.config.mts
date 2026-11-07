@@ -38,6 +38,7 @@ export default defineConfig({
       "tests/e2e/stories/SHO-REG-SEARCH-04.spec.ts", // Playwright Search page and palette parity
       "tests/e2e/stories/SHO-REG-HOME-01.spec.ts", // Playwright Home reconciliation acceptance
       "tests/e2e/stories/SHO-REG-UI-05.spec.ts", // Playwright deep-link and history acceptance
+      "tests/e2e/stories/SHO-REG-UI-06.spec.ts", // Playwright phone density audit journey
       "tests/e2e/stories/APL-2467.spec.ts",
       "tests/e2e/stories/APL-2468.spec.ts",
       "tests/e2e/stories/APL-2469.spec.ts",
