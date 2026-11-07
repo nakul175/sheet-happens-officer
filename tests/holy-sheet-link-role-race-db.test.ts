@@ -125,6 +125,36 @@ it("denies an Admin deactivated after the picker preflight", async () => {
   } finally { pause.release(); await pending; }
 }, 20_000);
 
+it("denies an Editor removed after picker preflight without writing a link or default space", async () => {
+  const removedPage = randomUUID();
+  const editorSession = await db.session.create({ data: {
+    userId: viewer.id, tokenHash: `${prefix}-editor-session`,
+    expiresAt: new Date(Date.now() + 3_600_000),
+    centralLink: { create: { subject, sessionUid: `${prefix}-editor` } },
+  } });
+  await db.projectMember.update({ where: { projectId_userId: { projectId, userId: viewer.id } }, data: { role: "EDITOR" } });
+  authority.sessionId.mockResolvedValue(editorSession.id);
+  const beforeDefault = await db.holySheetDefault.findUnique({ where: { projectId } });
+  const pause = pauseBeforeWrite();
+  const pending = Promise.allSettled([changeDocument(viewer, { kind: "tasks", id: taskId }, {
+    pageId: removedPage, subject, spaceId: `${prefix}-space`, setDefault: true,
+  })]);
+  try {
+    await pause.ready();
+    await db.projectMember.delete({ where: { projectId_userId: { projectId, userId: viewer.id } } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await db.holySheetLink.count({ where: { projectId, pageId: removedPage } })).toBe(0);
+    expect(await db.holySheetDefault.findUnique({ where: { projectId } })).toEqual(beforeDefault);
+    completed.push("removed-editor-no-partial-default");
+  } finally {
+    pause.release(); await pending;
+    await db.projectMember.upsert({ where: { projectId_userId: { projectId, userId: viewer.id } }, create: { projectId, userId: viewer.id, role: "VIEWER" }, update: { role: "VIEWER" } });
+    await db.session.delete({ where: { id: editorSession.id } });
+    authority.sessionId.mockResolvedValue(sessionId);
+  }
+}, 20_000);
+
 it("returns a retryable conflict while the Admin account role is locked", async () => {
   const lockedPage = randomUUID();
   let release!: () => void, reached!: () => void;
