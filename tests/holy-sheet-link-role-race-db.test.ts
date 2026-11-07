@@ -155,6 +155,32 @@ it("denies an Editor removed after picker preflight without writing a link or de
   }
 }, 20_000);
 
+it("denies a task link after the task moves projects during picker save", async () => {
+  const movedPage = randomUUID();
+  const original = await db.task.findUniqueOrThrow({ where: { id: taskId }, select: { projectId: true, sectionId: true } });
+  const destination = await db.project.create({ data: { workspaceId, name: `${prefix}-destination` } });
+  const destinationSection = await db.section.create({ data: { projectId: destination.id, name: `${prefix}-destination-section`, position: 0 } });
+  const beforeDefault = await db.holySheetDefault.findUnique({ where: { projectId } });
+  const pause = pauseBeforeWrite();
+  const pending = Promise.allSettled([changeDocument(admin, { kind: "tasks", id: taskId }, {
+    pageId: movedPage, subject, spaceId: `${prefix}-moved-space`, setDefault: true,
+  })]);
+  try {
+    await pause.ready();
+    await db.task.update({ where: { id: taskId }, data: { projectId: destination.id, sectionId: destinationSection.id } });
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await db.holySheetLink.count({ where: { pageId: movedPage } })).toBe(0);
+    expect(await db.holySheetDefault.findUnique({ where: { projectId } })).toEqual(beforeDefault);
+    expect(await db.holySheetDefault.findUnique({ where: { projectId: destination.id } })).toBeNull();
+    completed.push("task-move-no-wrong-source-link");
+  } finally {
+    pause.release(); await pending;
+    await db.task.update({ where: { id: taskId }, data: { projectId: original.projectId, sectionId: original.sectionId } });
+    await db.project.delete({ where: { id: destination.id } });
+  }
+}, 20_000);
+
 it("returns a retryable conflict while the Admin account role is locked", async () => {
   const lockedPage = randomUUID();
   let release!: () => void, reached!: () => void;
