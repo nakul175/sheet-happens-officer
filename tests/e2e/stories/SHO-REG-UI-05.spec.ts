@@ -23,6 +23,11 @@ test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes u
   });
 
   const tab = await admin.page.context().newPage();
+  const cssResponses: { path: string; status: number }[] = [];
+  tab.on('response', response => {
+    const url = new URL(response.url());
+    if (url.pathname.endsWith('.css')) cssResponses.push({ path: url.pathname, status: response.status() });
+  });
   try {
     await tab.goto(`/tasks/${taskId}`);
     await expect(tab.getByText(title, { exact: true }).first()).toBeVisible();
@@ -40,9 +45,17 @@ test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes u
     expect(unavailable?.status()).toBe(404);
     await expect(tab.getByRole('heading', { name: "This task isn't available" })).toBeVisible();
     await expect(tab.getByText(title, { exact: true })).toHaveCount(0);
+    const unavailableStyle = await tab.evaluate(() => ({
+      htmlClass: document.documentElement.className,
+      bodyClass: document.body.className,
+      bodyMargin: getComputedStyle(document.body).margin,
+      bodyFont: getComputedStyle(document.body).fontFamily,
+      stylesheetLinks: [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')].map(link => new URL(link.href).pathname),
+      loadedStylesheets: document.styleSheets.length,
+    }));
     mkdirSync(evidenceDir, { recursive: true });
     await tab.screenshot({ path: `${evidenceDir}/deleted-task-unavailable.png`, fullPage: true });
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, projectId: project.id, newTab: true, refresh: true, back: true, forward: true, deletedDocumentStatus: 404, titleHiddenAfterDelete: true, sentinelFingerprint, sentinelPreserved: true, privateRuntime: true }, null, 2));
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, projectId: project.id, newTab: true, refresh: true, back: true, forward: true, deletedDocumentStatus: 404, titleHiddenAfterDelete: true, unavailableStyle, cssResponses, sentinelFingerprint, sentinelPreserved: true, privateRuntime: true }, null, 2));
   } finally {
     await tab.close();
   }
