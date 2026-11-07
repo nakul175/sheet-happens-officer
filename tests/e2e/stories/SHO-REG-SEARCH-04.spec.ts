@@ -59,8 +59,9 @@ test("SHO-REG-SEARCH-04: Search page and palette open the same owned task", asyn
   await expect(page.getByText(title, { exact: true }).first()).toBeVisible();
   await expect(palette).toHaveCount(0);
   await page.goBack();
-  await expect(page).toHaveURL(/\/projects$/);
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}$`));
   await expect(palette).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Task", exact: true })).toHaveCount(0);
   mkdirSync(evidenceDir, { recursive: true });
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId, taskId, pageHref: `/projects/${projectId}?task=${taskId}`, paletteHref: `/tasks/${taskId}`, sameOwnedTask: true, escapeRestoredFocus: true, paletteClosed: true, browserBackToProjects: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId, taskId, pageHref: `/projects/${projectId}?task=${taskId}`, paletteHref: `/tasks/${taskId}`, sameOwnedTask: true, escapeRestoredFocus: true, paletteClosed: true, browserBackToProject: true }, null, 2));
 });
