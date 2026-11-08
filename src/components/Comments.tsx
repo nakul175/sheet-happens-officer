@@ -31,6 +31,7 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
   const [err, setErr] = useState<string | null>(null);
   const [closed, setClosed] = useState(false);
   const posting = useRef(false);
+  const savingEdit = useRef(false);
 
   const members = list.data?.members ?? [];
   const query = closed ? null : queryAt(text, caret);
@@ -99,11 +100,17 @@ export function Comments({ taskId, onChanged }: { taskId: string; onChanged?: ()
               {c.editedAt && <span className="hint">edited</span>}
             </div>
             {editing === c.id ? (
-              <form onSubmit={(e) => { e.preventDefault(); void send(`/api/tasks/${taskId}/comments/${c.id}`, "PATCH", { text: draft }, () => setEditing(null)); }}>
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                if (savingEdit.current) return;
+                savingEdit.current = true;
+                void send(`/api/tasks/${taskId}/comments/${c.id}`, "PATCH", { text: draft }, () => setEditing(null))
+                  .finally(() => { savingEdit.current = false; });
+              }}>
                 <label className="hint" htmlFor={`edit-${c.id}`}>Edit comment</label>
                 <textarea id={`edit-${c.id}`} className="in" rows={3} value={draft} maxLength={5000} onChange={(e) => setDraft(e.target.value)} />
                 <div className="actions">
-                  <button className="btn sm" type="submit" disabled={busy}>Save</button>
+                  <button className="btn sm" type="submit" disabled={busy} onPointerDown={pressAdd}>Save</button>
                   <button className="btn ghost sm" type="button" onClick={() => setEditing(null)}>Cancel</button>
                 </div>
               </form>
