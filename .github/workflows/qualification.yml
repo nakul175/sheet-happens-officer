@@ -107,6 +107,8 @@ jobs:
           fi
       - name: Unit tests
         run: npm test -- --reporter=default --reporter=json --outputFile=test-results/unit.json
+      - name: Deal filter browser regression
+        run: npx vitest run -c vitest.deal-filters.config.mts --reporter=default --reporter=json --outputFile=test-results/deal-filters.json
       # APL-2911. Story specs that drive this local server in Playwright Chromium (outbox mail, the CI Super Admin), so
       # staging cannot run them and npm test no longer does. Each file must collect at least one test, then every test runs.
       - name: Local Playwright story specs
