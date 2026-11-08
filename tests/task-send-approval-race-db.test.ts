@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
-import { sendBack, sendForApproval } from '@/lib/tasks';
+import { deleteTask, restoreTask, sendBack, sendForApproval } from '@/lib/tasks';
 import { deactivate } from '@/lib/team';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
@@ -124,6 +124,24 @@ it('refuses an approver changed after send preflight', async () => {
     const row = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
     expect({ holder: row.assigneeId, approver: row.approverId }).toEqual({ holder: editor.id, approver: leader.id });
     completed.push('changed-approver');
+  } finally { pause.release(); await pending; }
+});
+
+it('a send paused before its transaction cannot change a deleted task, including after restoration', async () => {
+  const f = await fixture(), pause = pauseBeforeTransactions();
+  const pending = Promise.allSettled([sendForApproval(editor, f.taskId)]);
+  try {
+    await pause.ready();
+    await deleteTask(leader, f.taskId);
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.sent_for_approval' } })).toBe(0);
+    await restoreTask(leader, f.taskId);
+    const row = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
+    expect({ deletedAt: row.deletedAt, assigneeId: row.assigneeId, previousAssigneeId: row.previousAssigneeId }).toEqual({
+      deletedAt: null, assigneeId: editor.id, previousAssigneeId: null,
+    });
+    completed.push('send-after-delete-denied');
   } finally { pause.release(); await pending; }
 });
 
