@@ -94,6 +94,9 @@ it("BD reporting-period error names both invalid inputs and clears after correct
   try {
     const page = await ctx.newPage();
     await page.goto("/bd-intelligence", { waitUntil: "load" });
+    // The tablist appears only after the client has hydrated and its data requests complete.
+    // Filling server-rendered inputs earlier can lose the first change during hydration.
+    await page.getByRole("tablist", { name: "BD panels" }).waitFor();
     const from = page.getByLabel("From", { exact: true });
     const to = page.getByLabel("To", { exact: true });
     await from.fill("2026-11-10");
