@@ -9,6 +9,7 @@ import { account, BASE, cleanupZz, istDate, PW, project, superAdmin, task, type 
 import { collect, type Finding } from "./checks";
 import { PHONE_MAX, SCREENS, TASK_TITLE, WIDTHS, type Ids, type Screen } from "./screens";
 import { openScreen, requireLocalFixtures } from "./screen-ready";
+import { finishViewportFixture } from "./teardown";
 
 const SHOTS = "test-results/viewport";
 let browser: Browser;
@@ -46,33 +47,23 @@ beforeAll(async () => {
   ids = { project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId };
 }, 60000);
 afterAll(async () => {
-  const failures: string[] = [];
-  let projectsAndPeopleCleaned = false;
-  let organisationArchived = false;
-  try {
-    await browser?.close();
-  } catch {
-    failures.push("browser close failed");
-  }
-  try {
-    if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects, ownedPeople);
-    projectsAndPeopleCleaned = true;
-  } catch {
-    failures.push("project/person cleanup failed");
-  }
-  try {
-    if (ownedOrganisation) {
-      const root = await superAdmin();
-      expect((await root.c.post(`/api/orgs/${ownedOrganisation}/archive`, { archive: true })).status).toBe(200);
-    }
-    organisationArchived = true;
-  } catch {
-    failures.push("organisation archive failed");
-  } finally {
-    mkdirSync(SHOTS, { recursive: true });
-    writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify({ projects: ownedProjects.length, people: ownedPeople.length, organisation: Boolean(ownedOrganisation), projectsAndPeopleCleaned, organisationArchived, cleanup: projectsAndPeopleCleaned && organisationArchived, failures }, null, 2));
-  }
-  if (failures.length) throw new Error(`Viewport teardown failed: ${failures.join("; ")}`);
+  await finishViewportFixture(
+    { projects: ownedProjects.length, people: ownedPeople.length, organisation: Boolean(ownedOrganisation) },
+    {
+      closeBrowser: async () => { await browser?.close(); },
+      cleanupProjectsAndPeople: async () => { if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects, ownedPeople); },
+      archiveOrganisation: async () => {
+        if (ownedOrganisation) {
+          const root = await superAdmin();
+          expect((await root.c.post(`/api/orgs/${ownedOrganisation}/archive`, { archive: true })).status).toBe(200);
+        }
+      },
+      record: (receipt) => {
+        mkdirSync(SHOTS, { recursive: true });
+        writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify(receipt, null, 2));
+      },
+    },
+  );
 });
 
 async function signedIn(width: number, who: "root" | "viewer" | null) {
