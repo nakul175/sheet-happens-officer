@@ -801,13 +801,29 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
     if (freshAccess.project.typeId === WORKSTREAM_DEAL || current.parentId || current.completedAt || (current.approverId && current.assigneeId === current.approverId)) {
       throw new ApiError(409, "This task cannot be converted now. Reload it.", { stale: true });
     }
-    // A buyer can be archived after dialog preflight. Hold its row until commit so
-    // the deal cannot be created against an organisation already archived then.
-    const [lockedBuyer] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Organisation" WHERE "id" = ${input.organisationId!} FOR SHARE`;
+    // Serialize duplicate checks for this Buyer across direct creation and
+    // conversion, while also holding the row against an archive until commit.
+    const [lockedBuyer] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Organisation" WHERE "id" = ${input.organisationId!} FOR UPDATE`;
     if (!lockedBuyer) throw new ApiError(400, "Choose an organisation.");
     const buyer = await tx.organisation.findUnique({ where: { id: input.organisationId! } });
     if (!buyer || buyer.workspaceId !== actor.workspaceId) throw new ApiError(400, "Choose an organisation.");
     if (buyer.archivedAt) throw new ApiError(400, "That organisation is archived.");
+    // The dialog's duplicate lookup may have gone stale before this task was
+    // locked. Check again after taking the same Buyer lock as createDeal.
+    // project-lookup-ok: taskAccess and requireWrite authorized conversion; this workspace-and-Buyer lookup enforces its duplicate warning.
+    const currentDuplicate = await tx.project.findFirst({
+      where: {
+        workspaceId: actor.workspaceId, typeId: WORKSTREAM_DEAL,
+        name: { equals: name, mode: "insensitive" },
+        parties: { some: { organisationId: buyer.id, role: "BUYER" } },
+      },
+      select: { id: true },
+    });
+    if (currentDuplicate && !input.force) {
+      throw new ApiError(409, `A deal called "${name}" already exists for ${buyer.name}.`, {
+        needsConfirm: "duplicate", existingId: currentDuplicate.id,
+      });
+    }
     const project = await tx.project.create({
       data: { workspaceId: u.workspaceId, name, typeId: WORKSTREAM_DEAL, pipelineId: pipeline!.id, stageId: first.id, stageChangedAt: new Date() },
     });
