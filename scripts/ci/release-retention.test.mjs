@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pruneReleases } from '../../deploy/prune-releases.mjs';
 
-function fixture() {
+function fixture({ legacyPrevious = false } = {}) {
   const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'sho-retention-')));
   const root = path.join(dir, 'releases');
   mkdirSync(root);
@@ -25,7 +25,12 @@ function fixture() {
   mkdirSync(outside);writeFileSync(path.join(outside, 'marker'), 'preserve');
   symlinkSync(outside, path.join(root, '9'.repeat(40)));
   const active = path.join(root, names[4]);
-  const previous = path.join(root, names[0]); // Older than the retention window, still protected.
+  const previous = legacyPrevious ? path.join(root, `e1-2642-${names[0]}`) : path.join(root, names[0]);
+  if (legacyPrevious) {
+    mkdirSync(path.join(previous, '.next'), { recursive: true });
+    writeFileSync(path.join(previous, 'COMMIT'), names[0]);
+    writeFileSync(path.join(previous, '.next/BUILD_ID'), 'legacy-build');
+  }
   symlinkSync(active, path.join(dir, 'current'));
   return { dir, root, names, active, previous, incomplete, unknown, outside };
 }
@@ -41,6 +46,16 @@ test('retention removes only old complete releases and protects active, rollback
     assert.equal(existsSync(f.incomplete), true);
     assert.equal(readFileSync(path.join(f.unknown, 'marker'), 'utf8'), 'preserve');
     assert.equal(readFileSync(path.join(f.outside, 'marker'), 'utf8'), 'preserve');
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('a verified legacy rollback release is protected but never auto-pruned', async () => {
+  const f = fixture({ legacyPrevious: true });
+  try {
+    const result = await pruneReleases(f.root, f.active, f.previous, 3);
+    assert.deepEqual(result.removed, [f.names[1], f.names[0]]);
+    assert.equal(readFileSync(path.join(f.previous, 'COMMIT'), 'utf8'), f.names[0]);
+    assert.equal(existsSync(f.incomplete), true);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
 

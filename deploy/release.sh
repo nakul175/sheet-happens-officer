@@ -53,10 +53,18 @@ trap recover ERR
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 [ "$PREV" != "$REL" ] || { echo "Refusing to rebuild the active release"; exit 1; }
 [ -n "$PREV" ] && [ -d "$PREV" ] || { echo "Verified previous release required"; exit 1; }
-[ "$(dirname "$PREV")" = "$ROOT/releases" ] && [[ "$(basename "$PREV")" =~ ^[0-9a-f]{40}$ ]] || { echo "Previous release is outside the release directory"; exit 1; }
+[ "$(dirname "$PREV")" = "$ROOT/releases" ] || { echo "Previous release is outside the release directory"; exit 1; }
+PREV_NAME="$(basename "$PREV")"
+if [[ "$PREV_NAME" =~ ^[0-9a-f]{40}$ ]]; then
+  PREV_EXPECTED_SHA="$PREV_NAME"
+elif [[ "$PREV_NAME" =~ ^e1-[a-z0-9][a-z0-9-]*-([0-9a-f]{40})$ ]]; then
+  PREV_EXPECTED_SHA="${BASH_REMATCH[1]}" # Existing story-specific release layout.
+else
+  echo "Previous release directory has an unknown identity"; exit 1
+fi
 [ -f "$PREV/COMMIT" ] && [ ! -L "$PREV/COMMIT" ] || { echo "Previous release identity missing"; exit 1; }
 PREV_SHA="$(cat "$PREV/COMMIT")"
-[ "$PREV_SHA" = "$(basename "$PREV")" ] || { echo "Previous release identity does not match its directory"; exit 1; }
+[ "$PREV_SHA" = "$PREV_EXPECTED_SHA" ] || { echo "Previous release identity does not match its directory"; exit 1; }
 cd "$REL"
 set -a
 # shellcheck disable=SC1091

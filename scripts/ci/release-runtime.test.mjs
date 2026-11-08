@@ -8,7 +8,7 @@ const sha='a'.repeat(40);
 function exercise(failure='') {
  const dir=realpathSync(mkdtempSync(path.join(tmpdir(),'sho-release-test-')));
  try {
-  const root=path.join(dir,'sho'),bin=path.join(dir,'bin'),rel=path.join(root,'releases',sha),prev=path.join(root,'releases','b'.repeat(40));
+  const root=path.join(dir,'sho'),bin=path.join(dir,'bin'),rel=path.join(root,'releases',sha),prev=path.join(root,'releases',failure==='legacy-previous'?'e1-2642-'+'b'.repeat(40):'b'.repeat(40));
   mkdirSync(rel,{recursive:true});mkdirSync(prev,{recursive:true});mkdirSync(bin);symlinkSync(prev,path.join(root,'current'));
   writeFileSync(path.join(prev,'COMMIT'),'b'.repeat(40));
   if(failure==='candidate-symlink'){rmSync(rel,{recursive:true});symlinkSync(prev,rel);}
@@ -40,6 +40,10 @@ test('successful app cut invokes no migration apply or scheduler commands',()=>{
  const r=exercise();assert.equal(r.status,0,r.output);assert.equal(r.current,r.candidate);
  assert.equal(r.calls.some(c=>['crontab','install'].includes(c.cmd)),false);
  assert.equal(r.calls.some(c=>c.cmd==='npx'&&c.args.includes('deploy')),false);
+});
+test('existing e1-story-full-SHA release is accepted as the verified rollback target',()=>{
+ const r=exercise('legacy-previous');assert.equal(r.status,0,r.output);assert.equal(r.current,r.candidate);
+ assert.equal(r.previousCommit,'b'.repeat(40));
 });
 test('retention failure is reported without rolling back a verified healthy release',()=>{
  const r=exercise('prune');assert.equal(r.status,0,r.output);assert.equal(r.current,r.candidate);
