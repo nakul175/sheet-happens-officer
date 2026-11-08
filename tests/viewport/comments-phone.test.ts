@@ -2,10 +2,11 @@
 // textarea blur and swallow the pointerup. Needs Chromium (PW_CHROMIUM, or Playwright's build)
 // and a local server. When that server has ff_task_comments off, this starts a second one.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { account, BASE, project, superAdmin, task, type Account } from "../helpers";
+import { account, BASE, cleanupZz, project, superAdmin, task, type Account } from "../helpers";
+import { requireLocalFixtures } from "./screen-ready";
 
 const SHOTS = "test-results/viewport";
 let browser: Browser;
@@ -20,6 +21,7 @@ let viewerEmail = "";
 const RUN = Date.now().toString(36);
 let root: Account | null = null;
 const made: Account[] = [];
+const CLEANUP = "test-results/viewport/comments/cleanup.json";
 
 async function up(url: string) {
   for (let i = 0; i < 40; i++) {
@@ -33,15 +35,17 @@ async function up(url: string) {
 }
 
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the phone comment test against ${BASE}.`);
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   mkdirSync(SHOTS, { recursive: true });
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const writer = await account("phonewriter", `nakul17+zztest-apl2590-phone-writer-${RUN}@aplyd.com`, "ZZ-TEST phone writer");
+  made.push(writer);
   email = writer.email;
   const colleague = await account("phonecolleague", `nakul17+zztest-apl2590-phone-colleague-${RUN}@aplyd.com`, "ZZ-TEST phone colleague");
+  made.push(colleague);
   const viewer = await account("phoneviewer", `nakul17+zztest-apl2590-phone-viewer-${RUN}@aplyd.com`, "ZZ-TEST phone viewer");
+  made.push(viewer);
   viewerEmail = viewer.email;
-  made.push(writer, colleague, viewer);
   root = await superAdmin();
   const p = await project(root, root, [{ who: writer, role: "EDITOR" }, { who: colleague, role: "EDITOR" }, { who: viewer, role: "VIEWER" }], `ZZ-TEST phone ${RUN}`);
   projectId = p.id;
@@ -60,18 +64,15 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
+  let cleanup = false;
   try {
-    // Clean-up through the API: deactivate this run's people, then archive its project.
-    if (root) {
-      for (const who of made) {
-        const off = await root.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
-        expect(off.status, `deactivate ${who.name}`).toBe(200);
-      }
-      if (projectId) expect((await root.c.post(`/api/projects/${projectId}/archive`)).status, "archive the project").toBe(200);
-    }
+    if (projectId || made.length) await cleanupZz(projectId ? [projectId] : [], made);
+    cleanup = true;
   } finally {
     await browser?.close();
     if (child && !child.killed) child.kill();
+    mkdirSync("test-results/viewport/comments", { recursive: true });
+    writeFileSync(CLEANUP, JSON.stringify({ projects: Number(Boolean(projectId)), people: made.length, cleanup }, null, 2));
   }
 });
 
