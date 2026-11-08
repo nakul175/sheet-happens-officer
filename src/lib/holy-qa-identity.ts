@@ -1,3 +1,4 @@
+import { invitedTestRealm } from "@/lib/invited-central-identity";
 /** Deliberate isolated QA RP. Never derives origins/client IDs from a request. */
 export function holyQaIdentity(env: Record<string, string | undefined> = process.env) {
     if (env.SHO_HOLY_QA !== '1')
@@ -30,5 +31,5 @@ export function holyQaRealm(env: Record<string, string | undefined> = process.en
  return {origin:qa.origin,schema:schema!};
 }
 export function centralIdentityIssuer(env: Record<string, string | undefined> = process.env) {
- return holyQaRealm(env)?.origin ?? 'https://accounts.aplyd.org';
+ return invitedTestRealm(env)?.issuer ?? holyQaRealm(env)?.origin ?? 'https://accounts.aplyd.org';
 }

@@ -1,3 +1,4 @@
+import { invitedNativeId } from "@/lib/invited-central-identity";
 import { db } from "@/lib/db";
 import { audit, consumeToken, hashPassword } from "@/lib/auth";
 import { ApiError, handle, parseBody } from "@/lib/http";
@@ -7,6 +8,7 @@ import { resetInput } from "@/lib/schemas";
 export const POST = handle(async (req: Request) => {
   const { token, password } = await parseBody(req, resetInput);
   const userId = await consumeToken(token, "RESET");
+  if (invitedNativeId(userId)) throw new ApiError(403, "Manage your password in Aplyd.");
   if (!userId) throw new ApiError(400, "This link has expired or was already used.");
   const user = await db.user.findUniqueOrThrow({ where: { id: userId } });
   await db.$transaction([
