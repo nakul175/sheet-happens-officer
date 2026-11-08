@@ -999,11 +999,20 @@ async function waitingSince(ids: string[]) {
 
 /** SHO-US-13.2: Editors flag or unflag an idea; logged with before and after, undoable. */
 export async function setIdea(user: Actor, id: string, isIdea: boolean) {
-  const { t } = await loadTask(user, id, { write: true });
-  if (t.parentId) throw new ApiError(400, "Only a top-level task can be an idea.");
-  if (t.isIdea === isIdea) return;
+  // Keep the ordinary early access answer, then repeat it under locks. A role
+  // change or removal may commit between this read and the idea write.
+  await loadTask(user, id, { write: true });
   await db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ projectId: string }[]>`SELECT "projectId" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, locked.projectId, [user.id]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t, a } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== a.project.workspaceId) throw notFound("Task");
+    if (t.parentId) throw new ApiError(400, "Only a top-level task can be an idea.");
+    if (t.isIdea === isIdea) return;
     await tx.task.update({ where: { id }, data: { isIdea } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.idea_changed", before: { isIdea: t.isIdea }, after: { isIdea } });
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
