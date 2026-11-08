@@ -660,8 +660,11 @@ export async function replaceBuyer(user: Actor, projectId: string, input: BuyerR
   try {
     return await db.$transaction(async (tx) => {
       // A Leader seat or account can change after the form's preflight check.
-      // Recheck under locks before the Buyer row or its history can change.
+      // Lock the proposed Buyer as the first statement, so the serializable
+      // snapshot and duplicate lookup agree with createDeal and conversion.
+      // Recheck access under locks before the Buyer row or history can change.
       try {
+        await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${input.organisationId} FOR UPDATE NOWAIT`;
         const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
         if (!locked) throw notFound("Project");
         await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;

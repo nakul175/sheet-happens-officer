@@ -236,24 +236,25 @@ it("two unconfirmed replacements to the same Buyer and deal name have one winner
   } finally { pause.release(); await pending; }
 }, 20_000);
 
-it("does not bypass the duplicate warning when creation commits after replacement lookup", async () => {
+it("simultaneous creation and Buyer replacement have one winner for the same case", async () => {
   const f = await fixture();
   const pause = pauseAfterDuplicateLookup(f.projectId);
   const pending = Promise.allSettled([replaceBuyer(leader, f.projectId, f.input)]);
   try {
     await pause.ready();
-    const created = await createDeal(leader, {
+    const [creation] = await Promise.allSettled([createDeal(leader, {
       name: prefix, organisationId: f.newOrgId, pipelineId, leaderId: leader.id,
       whyPursue: "Same case", nextStep: { title: "Follow up", dueDate: "2026-12-01" },
-    });
-    projects.push(created.id);
+    })]);
+    if (creation.status === "fulfilled") projects.push(creation.value.id);
     pause.release();
-    expect(await pending).toEqual([
-      expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 409, extra: expect.objectContaining({ needsConfirm: "duplicate" }) }) }),
+    const replacement = (await pending)[0];
+    expect([creation, replacement].filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect([creation, replacement].filter((result) => result.status === "rejected")).toEqual([
+      expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 409 }) }),
     ]);
-    expect((await state(f.projectId)).parties).toEqual([expect.objectContaining({ id: f.partyId, organisationId: f.oldOrgId })]);
     expect(await db.dealParty.count({ where: {
-      projectId: { in: [f.projectId, created.id] }, organisationId: f.newOrgId, role: "BUYER",
+      projectId: { in: projects }, organisationId: f.newOrgId, role: "BUYER",
     } })).toBe(1);
   } finally { pause.release(); await pending; }
 }, 20_000);
