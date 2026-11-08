@@ -17,6 +17,7 @@ let ids: Ids;
 let viewerEmail = "";
 const ownedProjects: string[] = [], ownedPeople: Account[] = [];
 let ownedOrganisation = "";
+const interactiveWidths: number[] = [];
 
 beforeAll(async () => {
   // The suite creates accounts and data, so it only runs against a server on this machine (a test database), never a live site.
@@ -60,7 +61,7 @@ afterAll(async () => {
       },
       record: (receipt) => {
         mkdirSync(SHOTS, { recursive: true });
-        writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify(receipt, null, 2));
+        writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify({ ...receipt, interactiveWidths }, null, 2));
       },
     },
   );
@@ -127,6 +128,46 @@ for (const width of WIDTHS) {
         }
         await page.close();
       });
+    }
+  });
+}
+
+// The screen scan above sees only the resting page. Exercise the task form at
+// each supported width, including its validation state and modal controls.
+for (const width of WIDTHS) {
+  it(`New task form stays usable and cancels without a write @ ${width} px`, async () => {
+    const ctx = await signedIn(width, "root");
+    const page = await ctx.newPage();
+    let writes = 0;
+    try {
+      await page.route("**/api/projects/*/tasks", async (route) => {
+        if (route.request().method() === "POST") writes++;
+        await route.continue();
+      });
+      await page.goto("/");
+      await page.getByRole("heading", { name: "Your workspace" }).waitFor();
+      await page.locator("#main").getByRole("button", { name: "+ New task" }).click();
+      const dialog = page.getByRole("dialog", { name: "New task" });
+      await dialog.waitFor({ state: "visible" });
+      await dialog.getByLabel("Title").fill("Viewport form check");
+      await dialog.getByLabel("Due date").fill("not a date");
+      expect(await dialog.getByLabel("Due date").getAttribute("aria-invalid")).toBe("true");
+      expect(await dialog.getByRole("button", { name: "Add task" }).isEnabled()).toBe(false);
+      await dialog.getByLabel("Due date").fill("tomorrow");
+      expect(await dialog.getByLabel("Due date").getAttribute("aria-invalid")).toBe("false");
+      expect(await dialog.getByRole("button", { name: "Add task" }).isEnabled()).toBe(true);
+      const found: Finding[] = await page.evaluate(collect, { phone: width < PHONE_MAX, width });
+      if (found.length) {
+        const shot = `${SHOTS}/new-task-form-${width}.png`;
+        await page.screenshot({ path: shot, fullPage: true });
+        expect.fail(`New task form at ${width} px has ${found.length} problem(s): ${JSON.stringify(found.slice(0, 12))}; screenshot: ${shot}`);
+      }
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await dialog.waitFor({ state: "detached" });
+      expect(writes).toBe(0);
+      interactiveWidths.push(width);
+    } finally {
+      await ctx.close();
     }
   });
 }
