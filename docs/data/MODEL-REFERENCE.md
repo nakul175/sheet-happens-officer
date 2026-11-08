@@ -605,9 +605,28 @@ CREATE UNIQUE INDEX "ProjectMember_one_leader_per_project"
 CREATE UNIQUE INDEX "Section_one_done_per_project"
   ON "Section" ("projectId") WHERE "isDone" = true;
 CREATE FUNCTION "enforce_max_sections"() RETURNS trigger AS $$
+BEGIN
+  PERFORM 1 FROM "Project" WHERE "id" = NEW."projectId" FOR UPDATE;
+  IF (SELECT count(*) FROM "Section" WHERE "projectId" = NEW."projectId") >= 8 THEN
+    RAISE EXCEPTION 'A project has at most 8 sections' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 CREATE TRIGGER "Section_max_8"
+  BEFORE INSERT ON "Section"
+  FOR EACH ROW EXECUTE FUNCTION "enforce_max_sections"();
 CREATE FUNCTION "enforce_task_section_in_project"() RETURNS trigger AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "Section" WHERE "id" = NEW."sectionId" AND "projectId" = NEW."projectId") THEN
+    RAISE EXCEPTION 'Section does not belong to the task''s project' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 CREATE TRIGGER "Task_section_in_project"
+  BEFORE INSERT OR UPDATE OF "sectionId", "projectId" ON "Task"
+  FOR EACH ROW EXECUTE FUNCTION "enforce_task_section_in_project"();
 ALTER TABLE "User" ADD CONSTRAINT "User_email_lowercase" CHECK ("email" = lower("email"));
 ```
 
@@ -615,6 +634,7 @@ ALTER TABLE "User" ADD CONSTRAINT "User_email_lowercase" CHECK ("email" = lower(
 
 ```sql
 CREATE UNIQUE INDEX "DealParty_one_buyer_per_deal" ON "DealParty"("projectId") WHERE "role" = 'BUYER';
+ALTER TABLE "TaskLink" ADD CONSTRAINT "TaskLink_exactly_one_target"
   CHECK (("organisationId" IS NOT NULL)::int + ("contactId" IS NOT NULL)::int = 1);
 CREATE UNIQUE INDEX "TaskLink_unique_org" ON "TaskLink"("taskId","organisationId") WHERE "organisationId" IS NOT NULL;
 CREATE UNIQUE INDEX "TaskLink_unique_contact" ON "TaskLink"("taskId","contactId") WHERE "contactId" IS NOT NULL;
@@ -627,12 +647,33 @@ ALTER TABLE "Project" ADD CONSTRAINT "Project_stage_needs_pipeline" CHECK ("stag
 
 ```sql
 CREATE OR REPLACE FUNCTION "enforce_max_sections"() RETURNS trigger AS $$
+BEGIN
+  PERFORM 1 FROM "Project" WHERE "id" = NEW."projectId" FOR UPDATE;
+  IF (SELECT count(*) FROM "Section" WHERE "projectId" = NEW."projectId") >= 8 THEN
+    RAISE EXCEPTION 'A project has at most 8 sections' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+ALTER FUNCTION "enforce_max_sections"() SET search_path FROM CURRENT;
 CREATE OR REPLACE FUNCTION "enforce_task_section_in_project"() RETURNS trigger AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "Section" WHERE "id" = NEW."sectionId" AND "projectId" = NEW."projectId") THEN
+    RAISE EXCEPTION 'Section does not belong to the task''s project' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+ALTER FUNCTION "enforce_task_section_in_project"() SET search_path FROM CURRENT;
 ```
 
 ### 20261024101000_deal_classification_revenue
 
 ```sql
+ALTER TABLE "DealDetails"
+  ADD COLUMN "opportunityType" "OpportunityType",
+  ADD COLUMN "athenaEntity" "AthenaEntity",
+  ADD COLUMN "netFeeRevenueUsd" DECIMAL(15,2),
   ADD CONSTRAINT "DealDetails_netFeeRevenueUsd_nonnegative" CHECK ("netFeeRevenueUsd" >= 0 AND "netFeeRevenueUsd" <> 'NaN'::numeric);
 ```
 
@@ -645,8 +686,20 @@ CREATE UNIQUE INDEX "Project_live_vertical_name_idx" ON "Project"("workspaceId",
 ### 20261027120000_holy_sheet_links
 
 ```sql
+CREATE TABLE "HolySheetLink" (
+ "id" TEXT PRIMARY KEY, "projectId" TEXT NOT NULL REFERENCES "Project"("id") ON DELETE CASCADE,
+ "taskId" TEXT REFERENCES "Task"("id") ON DELETE CASCADE,
+ "originKey" TEXT NOT NULL, "pageId" TEXT NOT NULL,
+ "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
  CONSTRAINT "HolySheetLink_origin_check" CHECK (("taskId" IS NULL AND "originKey"='project') OR ("taskId" IS NOT NULL AND "originKey"='task:'||"taskId"))
+);
 CREATE FUNCTION holy_sheet_task_move() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ UPDATE "HolySheetLink" SET "projectId"=NEW."projectId" WHERE "taskId"=NEW.id;
+ RETURN NEW;
+END $$;
+ALTER FUNCTION holy_sheet_task_move() SET search_path FROM CURRENT;
 CREATE TRIGGER holy_sheet_task_move AFTER UPDATE OF "projectId" ON "Task"
+FOR EACH ROW WHEN (OLD."projectId" IS DISTINCT FROM NEW."projectId") EXECUTE FUNCTION holy_sheet_task_move();
 ```
 

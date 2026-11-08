@@ -20,3 +20,10 @@ test('maintainer data reference retains multiline project and section partial in
  assert.match(reference,/CREATE UNIQUE INDEX "ProjectMember_one_leader_per_project"\s+ON "ProjectMember" \("projectId"\) WHERE "role" = 'LEADER';/);
  assert.match(reference,/CREATE UNIQUE INDEX "Section_one_done_per_project"\s+ON "Section" \("projectId"\) WHERE "isDone" = true;/);
 });
+test('maintainer data reference includes complete custom trigger definitions and search-path pins',()=>{
+ const reference=readFileSync('docs/data/MODEL-REFERENCE.md','utf8');
+ assert.match(reference,/CREATE OR REPLACE FUNCTION "enforce_max_sections"\(\)[\s\S]*?RETURN NEW;\s*END;\s*\$\$ LANGUAGE plpgsql;\s*ALTER FUNCTION "enforce_max_sections"\(\) SET search_path FROM CURRENT;/);
+ assert.match(reference,/CREATE OR REPLACE FUNCTION "enforce_task_section_in_project"\(\)[\s\S]*?RETURN NEW;\s*END;\s*\$\$ LANGUAGE plpgsql;\s*ALTER FUNCTION "enforce_task_section_in_project"\(\) SET search_path FROM CURRENT;/);
+ assert.match(reference,/CREATE FUNCTION holy_sheet_task_move\(\)[\s\S]*?RETURN NEW;\s*END \$\$;\s*ALTER FUNCTION holy_sheet_task_move\(\) SET search_path FROM CURRENT;\s*CREATE TRIGGER holy_sheet_task_move[\s\S]*?EXECUTE FUNCTION holy_sheet_task_move\(\);/);
+ assert.match(reference,/ALTER TABLE "TaskLink" ADD CONSTRAINT "TaskLink_exactly_one_target"\s+CHECK \(\("organisationId" IS NOT NULL\)::int \+ \("contactId" IS NOT NULL\)::int = 1\);/);
+});

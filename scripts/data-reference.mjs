@@ -10,15 +10,18 @@ for(const [,name,body] of models){
 text+='## Custom SQL inventory\n\nRead definitions in migration order; later ALTER/replacements take precedence. This inventory includes checks, partial indexes, triggers and functions.\n\n';
 for(const dir of fs.readdirSync('prisma/migrations',{withFileTypes:true}).filter(x=>x.isDirectory()).sort((a,b)=>a.name.localeCompare(b.name))){
  const sql=fs.readFileSync(`prisma/migrations/${dir.name}/migration.sql`,'utf8');
- const entries=[];let offset=0;
- for(const line of sql.split('\n')){
-  if(/CREATE (OR REPLACE )?(FUNCTION|TRIGGER|CONSTRAINT TRIGGER)|CHECK\s*\(/i.test(line))entries.push({offset,text:line});
-  offset+=line.length+1;
- }
- // Partial indexes may put WHERE on a later line. Keep the complete definition.
- for(const match of sql.matchAll(/CREATE UNIQUE INDEX[\s\S]*?;/gi)){
-  if(/\bWHERE\b/i.test(match[0]))entries.push({offset:match.index,text:match[0]});
- }
+ const entries=[];
+ const include=(pattern,select=()=>true)=>{
+  for(const match of sql.matchAll(pattern))if(select(match[0]))entries.push({offset:match.index,text:match[0].trim()});
+ };
+ // Keep complete definitions: the first line alone hides trigger behavior and
+ // the later search_path pin that is required in preview schemas.
+ include(/CREATE (?:OR REPLACE )?FUNCTION[\s\S]*?\$\$\s*(?:LANGUAGE\s+\w+)?\s*;/gi);
+ include(/ALTER FUNCTION[^;]*;/gi);
+ include(/CREATE (?:CONSTRAINT )?TRIGGER[\s\S]*?;/gi);
+ include(/CREATE UNIQUE INDEX[\s\S]*?;/gi,(statement)=>/\bWHERE\b/i.test(statement));
+ include(/ALTER TABLE[\s\S]*?;/gi,(statement)=>/\bADD CONSTRAINT\b[\s\S]*?\bCHECK\s*\(/i.test(statement));
+ include(/CREATE TABLE[\s\S]*?;/gi,(statement)=>/\bCONSTRAINT\b[\s\S]*?\bCHECK\s*\(/i.test(statement));
  const statements=entries.sort((a,b)=>a.offset-b.offset).map(entry=>entry.text);
  if(statements.length)text+=`### ${dir.name}\n\n\`\`\`sql\n${statements.join('\n')}\n\`\`\`\n\n`;
 }
