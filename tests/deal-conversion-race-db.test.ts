@@ -12,8 +12,8 @@ vi.mock('next/server', () => ({ connection: vi.fn() }));
 
 const prefix = 'conversion-race-' + randomUUID();
 const actor = { id: prefix + '-leader', orgRole: 'MEMBER' as const };
-let safe = false, workspaceId: string, sourceId: string, sentinelId: string, taskId: string, organisationId: string, pipelineId: string;
-let completed = false;
+let safe = false, workspaceId: string, sourceId: string, sectionId: string, sentinelId: string, taskId: string, organisationId: string, pipelineId: string;
+const completed: string[] = [];
 
 beforeAll(async () => {
   assertLocalFixture(process.env.DATABASE_URL);
@@ -27,6 +27,7 @@ beforeAll(async () => {
   sourceId = (await db.project.create({ data: { workspaceId, name: prefix + '-source' } })).id;
   await db.projectMember.create({ data: { projectId: sourceId, userId: actor.id, role: 'LEADER' } });
   const section = await db.section.create({ data: { projectId: sourceId, name: 'To do', position: 0 } });
+  sectionId = section.id;
   taskId = (await db.task.create({ data: { workspaceId, projectId: sourceId, sectionId: section.id, title: prefix + '-task', assigneeId: actor.id, createdById: actor.id, isIdea: true } })).id;
   organisationId = (await db.organisation.create({ data: { workspaceId, name: prefix + '-buyer', createdById: actor.id } })).id;
 });
@@ -82,9 +83,50 @@ it('has one winner and no orphan deal when two clients convert the same task', a
     const deals = await db.project.findMany({ where: { workspaceId, name: prefix + '-task', typeId: 'wst_deal' } });
     expect(deals).toHaveLength(1);
     expect((await db.task.findUniqueOrThrow({ where: { id: taskId } })).projectId).toBe(deals[0].id);
-    completed = true;
+    completed.push('one-winner-no-orphan');
   } finally {
     pause.release();
     await pending;
+  }
+});
+
+async function freshTask(label: string) {
+  return db.task.create({ data: { workspaceId, projectId: sourceId, sectionId, title: prefix + '-' + label, assigneeId: actor.id, createdById: actor.id, isIdea: true } });
+}
+
+it('rejects an edit after conversion preflight without creating a deal', async () => {
+  const task = await freshTask('stale-edit');
+  const pause = pauseBeforeTransactions(1);
+  const pending = convertTaskToDeal(actor, task.id, { organisationId, pipelineId, whyPursue: 'Fits our work', dueDate: '2026-11-30' });
+  try {
+    await pause.ready();
+    await db.task.update({ where: { id: task.id }, data: { title: prefix + '-edited' } });
+    pause.release();
+    await expect(pending).rejects.toMatchObject({ status: 409 });
+    expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).projectId).toBe(sourceId);
+    expect(await db.project.count({ where: { workspaceId, name: prefix + '-stale-edit', typeId: 'wst_deal' } })).toBe(0);
+    completed.push('stale-edit-denied');
+  } finally {
+    pause.release();
+    await pending.catch(() => undefined);
+  }
+});
+
+it('rejects a removed source-project member after preflight without creating a deal', async () => {
+  const task = await freshTask('former-member');
+  const pause = pauseBeforeTransactions(1);
+  const pending = convertTaskToDeal(actor, task.id, { organisationId, pipelineId, whyPursue: 'Fits our work', dueDate: '2026-11-30' });
+  try {
+    await pause.ready();
+    await db.projectMember.delete({ where: { projectId_userId: { projectId: sourceId, userId: actor.id } } });
+    pause.release();
+    await expect(pending).rejects.toMatchObject({ status: 404 });
+    expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).projectId).toBe(sourceId);
+    expect(await db.project.count({ where: { workspaceId, name: prefix + '-former-member', typeId: 'wst_deal' } })).toBe(0);
+    completed.push('former-member-denied');
+  } finally {
+    pause.release();
+    await pending.catch(() => undefined);
+    await db.projectMember.upsert({ where: { projectId_userId: { projectId: sourceId, userId: actor.id } }, create: { projectId: sourceId, userId: actor.id, role: 'LEADER' }, update: { role: 'LEADER' } });
   }
 });
