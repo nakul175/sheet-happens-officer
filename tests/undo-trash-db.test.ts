@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { undoAction } from '@/lib/undo';
 import { deleteTask, restoreTask } from '@/lib/tasks';
+import { addComment } from '@/lib/comments';
 import { removeMember } from '@/lib/projects';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
@@ -144,6 +145,30 @@ it('task deletion Undo restores trashed work to the Leader after its assignee le
     expect(after.actions.find(a => a.id === f.actionId)?.undoneById).toBe(leader.id);
     completed.push('recipient-removed-after-preflight');
   } finally { pause.release(); await result; }
+});
+it('a comment paused before its write cannot attach to a deleted task or reappear after Undo', async () => {
+  const originalFlag = process.env.FF_TASK_COMMENTS;
+  process.env.FF_TASK_COMMENTS = 'true';
+  const f = await fixture('task.created');
+  const pause = pauseBeforeTransactions(1);
+  const result = Promise.allSettled([addComment(editor, f.taskId, { text: 'Should not attach after deletion' })]);
+  try {
+    await pause.ready();
+    await deleteTask(leader, f.taskId);
+    const deleted = await db.actionLog.findFirstOrThrow({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.deleted' } });
+    pause.release();
+    expect(await result).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 404 }) })]);
+    expect(await db.comment.count({ where: { taskId: f.taskId } })).toBe(0);
+    await undoAction(leader, deleted.id);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).deletedAt).toBeNull();
+    expect(await db.comment.count({ where: { taskId: f.taskId } })).toBe(0);
+    expect(await db.actionLog.count({ where: { targetId: f.taskId, action: 'comment.added' } })).toBe(0);
+    completed.push('comment-after-delete-denied');
+  } finally {
+    pause.release(); await result;
+    if (originalFlag === undefined) delete process.env.FF_TASK_COMMENTS;
+    else process.env.FF_TASK_COMMENTS = originalFlag;
+  }
 });
 it('direct delete and restore still work with their own transactions', async () => {
   const f = await fixture('task.created');
