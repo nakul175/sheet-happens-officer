@@ -41,6 +41,26 @@ function pauseBeforeTransaction() {
   };
 }
 
+function pauseTwoBeforeTransaction() {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let arrived = 0;
+  const spy = vi.spyOn(db, "$transaction").mockImplementation((async (
+    callback: (tx: Tx) => Promise<unknown>, options?: Parameters<typeof db.$transaction>[1],
+  ) => {
+    arrived++;
+    await gate;
+    return transact(callback, options);
+  }) as typeof db.$transaction);
+  return {
+    async ready() {
+      await vi.waitFor(() => expect(arrived).toBe(2), { timeout: 5000 });
+      spy.mockRestore();
+    },
+    release,
+  };
+}
+
 function input() {
   return {
     name: `${prefix}-${randomUUID()}`,
@@ -156,3 +176,19 @@ it("allows an unchanged active creator, Leader and Buyer", async () => {
   expect(result.name).toBe(data.name);
   expect((await created(data.name)).map((p) => p.id)).toEqual([result.id]);
 });
+
+it("two unconfirmed creates with the same name and Buyer have one winner", async () => {
+  const data = input();
+  const pause = pauseTwoBeforeTransaction();
+  const pending = Promise.allSettled([createDeal(actor, data), createDeal(actor, data)]);
+  try {
+    await pause.ready();
+    pause.release();
+    const results = await pending;
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toEqual([
+      expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 409 }) }),
+    ]);
+    expect(await created(data.name)).toHaveLength(1);
+  } finally { pause.release(); await pending; }
+}, 20_000);
