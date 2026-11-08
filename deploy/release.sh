@@ -47,13 +47,16 @@ recover() {
 }
 trap recover ERR
 
-[ -d "$REL" ] || { echo "No release folder at $REL"; exit 1; }
+[ -d "$ROOT/releases" ] && [ ! -L "$ROOT/releases" ] || { echo "Release parent is missing or symlinked"; exit 1; }
+[ -d "$REL" ] && [ ! -L "$REL" ] && [ "$(readlink -f "$REL")" = "$REL" ] || { echo "Release folder is missing or resolves outside its reserved path"; exit 1; }
 [ -f /etc/sho/app.env ] || { echo "/etc/sho/app.env is missing"; exit 1; }
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 [ "$PREV" != "$REL" ] || { echo "Refusing to rebuild the active release"; exit 1; }
 [ -n "$PREV" ] && [ -d "$PREV" ] || { echo "Verified previous release required"; exit 1; }
+[ "$(dirname "$PREV")" = "$ROOT/releases" ] && [[ "$(basename "$PREV")" =~ ^[0-9a-f]{40}$ ]] || { echo "Previous release is outside the release directory"; exit 1; }
+[ -f "$PREV/COMMIT" ] && [ ! -L "$PREV/COMMIT" ] || { echo "Previous release identity missing"; exit 1; }
 PREV_SHA="$(cat "$PREV/COMMIT")"
-[[ "$PREV_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Previous release identity missing"; exit 1; }
+[ "$PREV_SHA" = "$(basename "$PREV")" ] || { echo "Previous release identity does not match its directory"; exit 1; }
 cd "$REL"
 set -a
 # shellcheck disable=SC1091
