@@ -573,8 +573,32 @@ export async function removeParty(user: Actor, projectId: string, partyId: strin
   if (!row) throw notFound("Party");
   if (row.role === "BUYER") throw new ApiError(400, "The Buyer cannot be removed. Every deal has one.");
   await db.$transaction(async (tx) => {
+    // The editor's seat can change between selecting the party and deletion.
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "DealParty" WHERE "id" = ${partyId} FOR UPDATE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor)) throw notFound("Project");
+    const currentActor = { ...user, orgRole: actor.orgRole };
+    requireCrm(currentActor);
+    const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (fresh.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only deals have parties.");
+    const currentParty = await tx.dealParty.findFirst({ where: { id: partyId, projectId }, include: { organisation: { select: { name: true } } } });
+    if (!currentParty) throw notFound("Party");
+    if (currentParty.role === "BUYER") throw new ApiError(400, "The Buyer cannot be removed. Every deal has one.");
     await tx.dealParty.delete({ where: { id: partyId } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_removed", before: { organisation: row.organisation.name, role: row.role } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_removed", before: { organisation: currentParty.organisation.name, role: currentParty.role } });
   });
 }
 
