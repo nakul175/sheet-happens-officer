@@ -627,6 +627,24 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
 
   const first = pipeline!.stages[0];
   return db.$transaction(async (tx) => {
+    // The dialog may have been open while another request moved or edited this task.
+    // Lock before creating the deal: otherwise two conversions can both create a deal
+    // and the second move leaves the first one orphaned.
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const current = await tx.task.findUnique({ where: { id: taskId } });
+    if (!current || current.deletedAt) throw notFound("Task");
+    if (current.projectId !== t.projectId || current.updatedAt.getTime() !== t.updatedAt.getTime()) {
+      throw new ApiError(409, "This task changed. Reload before converting it.", { stale: true });
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id } });
+    if (!actor || !isActive(actor) || actor.workspaceId !== current.workspaceId) throw new ApiError(401, "Sign in with an active account.");
+    requireCrm(actor);
+    const freshAccess = await taskAccess({ ...user, orgRole: actor.orgRole }, current.projectId, { write: true, tx });
+    requireWrite(freshAccess);
+    if (freshAccess.project.typeId === WORKSTREAM_DEAL || current.parentId || current.completedAt || (current.approverId && current.assigneeId === current.approverId)) {
+      throw new ApiError(409, "This task cannot be converted now. Reload it.", { stale: true });
+    }
     const project = await tx.project.create({
       data: { workspaceId: u.workspaceId, name, typeId: WORKSTREAM_DEAL, pipelineId: pipeline!.id, stageId: first.id, stageChangedAt: new Date() },
     });
