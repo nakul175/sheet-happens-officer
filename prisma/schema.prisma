@@ -696,3 +696,13 @@ model CentralSessionLink {
   sessionUid String
   createdAt DateTime @default(now())
 }
+
+// Private connector idempotency/audit evidence; not an authorization source.
+model PortalOrgRoleReceipt {
+  id          String @id @db.Uuid
+  actorId     String
+  targetId    String
+  workspaceId String
+  result      Json
+  createdAt   DateTime @default(now())
+}
