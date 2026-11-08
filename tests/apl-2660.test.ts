@@ -129,12 +129,15 @@ describe("APL-2660 approver edge cases", () => {
       const logOffset = existsSync('server.log') ? statSync('server.log').size : 0;
       const response = await creator.c.put(`/api/tasks/${t}/approver`, await withVersion(creator, t, { approverId: id }));
       // The CI failure tail can lose the relevant line during the rest of the suite.
-      // Retain only the handler's fixed label and allowlisted Prisma codes; never raw log text.
+      // Match the handler's random error ID to this response; concurrent tests
+      // can write to the same log interval. Never retain raw log text.
       if (response.status === 500 && existsSync('server.log')) {
         const recent = readFileSync('server.log').subarray(logOffset).toString();
-        const safeCodes = [...recent.matchAll(/unexpected error(?: (P\d{4}))?/g)].map(match => match[1] ?? 'UNKNOWN');
+        const errorId = response.headers.get('x-error-id');
+        const matches = [...recent.matchAll(/unexpected error (P\d{4}|UNKNOWN) ([0-9a-f-]{36})/g)];
+        const safeCodes = errorId ? matches.filter(match => match[2] === errorId).map(match => match[1]) : [];
         mkdirSync('test-results/approver-valid-swap', { recursive: true });
-        writeFileSync('test-results/approver-valid-swap/diagnostic.json', JSON.stringify({ status: 500, safeCodes, logBytesSinceRequest: Buffer.byteLength(recent), attribution: 'shared server interval; other concurrent tests may log here' }, null, 2));
+        writeFileSync('test-results/approver-valid-swap/diagnostic.json', JSON.stringify({ status: 500, errorId: errorId && /^[0-9a-f-]{36}$/.test(errorId) ? errorId : null, safeCodes, logBytesSinceRequest: Buffer.byteLength(recent), attribution: safeCodes.length ? 'matched response ID' : 'no matching sanitized server line' }, null, 2));
       }
       return response;
     };
