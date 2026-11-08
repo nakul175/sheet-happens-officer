@@ -134,3 +134,22 @@ it('rejects a removed source-project member after preflight without creating a d
     await db.projectMember.upsert({ where: { projectId_userId: { projectId: sourceId, userId: actor.id } }, create: { projectId: sourceId, userId: actor.id, role: 'LEADER' }, update: { role: 'LEADER' } });
   }
 });
+
+it('rejects a buyer archived after preflight without creating a deal', async () => {
+  const task = await freshTask('archived-buyer');
+  const pause = pauseBeforeTransactions(1);
+  const pending = convertTaskToDeal(actor, task.id, { organisationId, pipelineId, whyPursue: 'Fits our work', dueDate: '2026-11-30' });
+  try {
+    await pause.ready();
+    await db.organisation.update({ where: { id: organisationId }, data: { archivedAt: new Date() } });
+    pause.release();
+    await expect(pending).rejects.toMatchObject({ status: 400 });
+    expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).projectId).toBe(sourceId);
+    expect(await db.project.count({ where: { workspaceId, name: task.title, typeId: 'wst_deal' } })).toBe(0);
+    completed.push('archived-buyer-denied');
+  } finally {
+    pause.release();
+    await pending.catch(() => undefined);
+    await db.organisation.update({ where: { id: organisationId }, data: { archivedAt: null } });
+  }
+});
