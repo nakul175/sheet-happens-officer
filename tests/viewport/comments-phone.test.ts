@@ -153,6 +153,50 @@ describe("phone comments", () => {
     }
   });
 
+  it("edits and deletes an owned comment in the phone UI with escaped text and server readback", async () => {
+    const { ctx, page } = await phone();
+    const original = `ZZ-TEST edit phone ${RUN}`;
+    const edited = `ZZ-TEST edited <img src=x onerror=alert(1)> ${RUN}`;
+    const url = `/api/tasks/${taskId}/comments`;
+    try {
+      await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+      await page.getByRole("dialog", { name: "Task", exact: true }).waitFor();
+      await page.getByLabel("Add a comment").fill(original);
+      await page.getByRole("button", { name: "Add comment" }).click();
+      const comment = page.locator("article.comment").filter({ hasText: original });
+      await comment.waitFor();
+      const created = await ctx.request.get(url);
+      expect(created.status()).toBe(200);
+      const id = (await created.json()).comments.find((item: { id: string; text: string }) => item.text === original)?.id as string | undefined;
+      expect(id).toBeTruthy();
+
+      await comment.getByRole("button", { name: "Edit comment" }).click();
+      await comment.getByLabel("Edit comment").fill(edited);
+      const [patch] = await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith(`${url}/${id}`) && response.request().method() === "PATCH"),
+        comment.getByRole("button", { name: "Save" }).click(),
+      ]);
+      expect(patch.status()).toBe(200);
+      const changed = page.locator("article.comment").filter({ hasText: edited });
+      await changed.waitFor();
+      expect(await changed.locator("img").count()).toBe(0);
+      expect((await (await ctx.request.get(url)).json()).comments.some((item: { id: string; text: string }) => item.id === id && item.text === edited)).toBe(true);
+
+      const [deleted] = await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith(`${url}/${id}`) && response.request().method() === "DELETE"),
+        changed.getByRole("button", { name: "Delete comment" }).click(),
+      ]);
+      expect(deleted.status()).toBe(204);
+      await changed.waitFor({ state: "detached" });
+      expect((await (await ctx.request.get(url)).json()).comments.some((item: { id: string }) => item.id === id)).toBe(false);
+    } catch (error) {
+      await page.screenshot({ path: `${SHOTS}/phone-edit-delete-comment.png`, fullPage: true }).catch(() => {});
+      throw error;
+    } finally {
+      await ctx.close();
+    }
+  });
+
   it("qa:TC missing N1: posts a comment from a 390x800 viewport", async () => {
     const { ctx, page } = await phone();
     const text = `ZZ-TEST phone ${Date.now().toString(36)}`;
