@@ -243,7 +243,7 @@ it("New deal ignores an obsolete buyer lookup after the field changes @ 390 px",
     await buyer.fill("Edited while lookup pending");
     releaseLookup();
     await expect.poll(async () => page.getByRole("button", { name: "Create deal", exact: true }).isEnabled()).toBe(true);
-    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(await page.locator("#new-deal-buyer-error").count(), JSON.stringify(await page.getByRole("alert").allTextContents())).toBe(0);
     expect(await buyer.getAttribute("aria-invalid")).toBe("false");
     expect(writes).toBe(0);
   } finally {

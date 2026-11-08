@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { api, todayIST, useGet } from "@/components/api";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { Field } from "@/components/ui";
@@ -21,6 +21,7 @@ function Form() {
   const [v, setV] = useState({ name: "", organisationId: initialOrgId, buyerName: "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", partner: "", athenaRole: "", budgetUsd: "", pwinAdjustedNfrUsd: "" });
   const [err, setErr] = useState<string | null>(null);
   const [buyerError, setBuyerError] = useState(false);
+  const buyerRevision = useRef(0);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
@@ -29,6 +30,7 @@ function Form() {
   const selectedBuyer = organisations.find((o) => o.id === v.organisationId);
   const buyerName = (v.buyerName || selectedBuyer?.name || "").trim();
   function setBuyer(e: React.ChangeEvent<HTMLInputElement>) {
+    buyerRevision.current += 1;
     const name = e.target.value;
     const match = organisations.find((o) => o.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0);
     setV({ ...v, buyerName: name, organisationId: match?.id ?? "" });
@@ -39,12 +41,14 @@ function Form() {
   async function submit(e: React.FormEvent, force = false, createBuyer = false) {
     if (createBuyer && !(e.currentTarget as HTMLButtonElement).form?.reportValidity()) return;
     e.preventDefault(); setBusy(true); setErr(null); setBuyerError(false);
+    const submittedBuyerRevision = buyerRevision.current;
     let organisationId = v.organisationId;
     if (!organisationId) {
       if (!buyerName) { setBusy(false); setBuyerError(true); setErr("Type or choose a buyer."); return; }
       // Typing may beat the initial Account fetch (and that list is capped).
       // Resolve the current name before claiming it does not exist.
       const found = await api("GET", `/api/orgs?q=${encodeURIComponent(buyerName)}`);
+      if (buyerRevision.current !== submittedBuyerRevision) { setBusy(false); return; }
       if (!found.ok) { setBusy(false); setErr(found.error ?? "Could not check existing buyer Accounts. Try again."); return; }
       organisationId = found.data.organisations.find((o: { id: string; name: string }) => o.name.localeCompare(buyerName, undefined, { sensitivity: "accent" }) === 0)?.id ?? "";
     }
