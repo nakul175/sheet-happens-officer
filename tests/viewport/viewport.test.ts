@@ -213,6 +213,45 @@ it("New deal buyer mismatch identifies its field and clears on edit @ 390 px", a
   }
 });
 
+it("New deal ignores an obsolete buyer lookup after the field changes @ 390 px", async () => {
+  const ctx = await signedIn(390, "root");
+  const page = await ctx.newPage();
+  let releaseLookup = () => {};
+  let lookupStarted = () => {};
+  const heldLookup = new Promise<void>((resolve) => { releaseLookup = resolve; });
+  const intercepted = new Promise<void>((resolve) => { lookupStarted = resolve; });
+  let writes = 0;
+  try {
+    await page.route("**/api/deals", async (route) => {
+      if (route.request().method() === "POST") writes++;
+      await route.continue();
+    });
+    await page.goto("/deals/new");
+    await page.getByLabel("Pipeline").selectOption({ label: "Proactive" });
+    await page.getByLabel("Deal name").fill("Obsolete buyer lookup check");
+    const buyer = page.getByLabel("Client / Buyer");
+    await buyer.fill(`ZZ-OLD-BUYER-${Date.now()}`);
+    await page.getByLabel("Why are we pursuing this?").fill("Check stale lookup");
+    await page.getByLabel("First next step").fill("Review buyer");
+    await page.route(/\/api\/orgs\?q=/, async (route) => {
+      lookupStarted();
+      await heldLookup;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ organisations: [] }) });
+    });
+    await page.getByRole("button", { name: "Create deal", exact: true }).click();
+    await intercepted;
+    await buyer.fill("Edited while lookup pending");
+    releaseLookup();
+    await expect.poll(async () => page.getByRole("button", { name: "Create deal", exact: true }).isEnabled()).toBe(true);
+    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(await buyer.getAttribute("aria-invalid")).toBe("false");
+    expect(writes).toBe(0);
+  } finally {
+    releaseLookup();
+    await ctx.close();
+  }
+});
+
 // The checks must catch what they claim to catch (SHO-US-22.11 AC2): a 400 px fixed-width element on a 320 px screen.
 describe("the checks themselves", () => {
   const html = (body: string, meta = "width=device-width, initial-scale=1, viewport-fit=cover") =>
