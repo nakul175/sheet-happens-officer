@@ -124,6 +124,27 @@ it('removed actor cannot undo task creation after preflight', async () => {
     expect(await snapshot(f.projectId)).toEqual(before); completed.push('removed-after-preflight');
   } finally { pause.release(); await result; }
 });
+it('task deletion Undo restores trashed work to the Leader after its assignee leaves during preflight', async () => {
+  const f = await fixture('task.deleted');
+  await db.task.updateMany({ where: { projectId: f.projectId }, data: { assigneeId: editor.id } });
+  const pause = pauseBeforeTransactions(1);
+  const result = Promise.allSettled([undoAction(leader, f.actionId)]);
+  try {
+    await pause.ready();
+    await removeMember(leader, f.projectId, editor.id);
+    const before = await db.task.findMany({ where: { projectId: f.projectId } });
+    expect(before).toHaveLength(2);
+    expect(before.every(t => t.deletedAt && t.assigneeId === editor.id)).toBe(true);
+    pause.release();
+    expect((await result)[0].status).toBe('fulfilled');
+    const after = await snapshot(f.projectId);
+    expect(after.tasks).toHaveLength(2);
+    expect(after.tasks.every(t => !t.deletedAt && t.assigneeId === leader.id)).toBe(true);
+    expect(after.actions.filter(a => a.action === 'undo')).toHaveLength(1);
+    expect(after.actions.find(a => a.id === f.actionId)?.undoneById).toBe(leader.id);
+    completed.push('recipient-removed-after-preflight');
+  } finally { pause.release(); await result; }
+});
 it('direct delete and restore still work with their own transactions', async () => {
   const f = await fixture('task.created');
   await deleteTask(leader, f.taskId);
