@@ -174,7 +174,7 @@ describe("phone comments", () => {
       await comment.getByLabel("Edit comment").fill(edited);
       const [patch] = await Promise.all([
         page.waitForResponse((response) => response.url().endsWith(`${url}/${id}`) && response.request().method() === "PATCH"),
-        comment.getByRole("button", { name: "Save" }).click(),
+        page.getByRole("dialog", { name: "Task", exact: true }).getByRole("button", { name: "Save", exact: true }).click(),
       ]);
       expect(patch.status()).toBe(200);
       const changed = page.locator("article.comment").filter({ hasText: edited });
