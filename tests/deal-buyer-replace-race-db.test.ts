@@ -60,6 +60,26 @@ function pauseBeforeTransaction() {
   };
 }
 
+function pauseTwoBeforeTransaction() {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let arrived = 0;
+  const spy = vi.spyOn(db, "$transaction").mockImplementation((async (
+    callback: (tx: Tx) => Promise<unknown>, options?: Parameters<typeof db.$transaction>[1],
+  ) => {
+    arrived++;
+    await gate;
+    return transact(callback, options);
+  }) as typeof db.$transaction);
+  return {
+    async ready() {
+      await vi.waitFor(() => expect(arrived).toBe(2), { timeout: 5000 });
+      spy.mockRestore();
+    },
+    release,
+  };
+}
+
 async function state(projectId: string) {
   const [parties, actions] = await Promise.all([
     db.dealParty.findMany({ where: { projectId }, orderBy: { id: "asc" } }),
@@ -157,3 +177,27 @@ it("an eligible Leader replaces the Buyer once and records one action", async ()
   expect(after.parties.filter((p) => p.role === "BUYER")).toEqual([expect.objectContaining({ id: f.partyId, organisationId: f.newOrgId })]);
   expect(after.actions.filter((a) => a.action === "deal.buyer_replaced")).toHaveLength(1);
 });
+
+it("two unconfirmed replacements to the same Buyer and deal name have one winner", async () => {
+  const first = await fixture();
+  const second = await fixture();
+  const secondInput = { ...second.input, organisationId: first.newOrgId };
+  const pause = pauseTwoBeforeTransaction();
+  const pending = Promise.allSettled([
+    replaceBuyer(leader, first.projectId, first.input),
+    replaceBuyer(leader, second.projectId, secondInput),
+  ]);
+  try {
+    await pause.ready();
+    pause.release();
+    const results = await pending;
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toEqual([
+      expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 409 }) }),
+    ]);
+    expect(await db.dealParty.count({ where: {
+      projectId: { in: [first.projectId, second.projectId] },
+      organisationId: first.newOrgId, role: "BUYER",
+    } })).toBe(1);
+  } finally { pause.release(); await pending; }
+}, 20_000);
