@@ -533,8 +533,35 @@ export async function addParty(user: Actor, projectId: string, organisationId: s
   const dup = await db.dealParty.findFirst({ where: { projectId, organisationId, role } });
   if (dup) throw new ApiError(409, "That organisation already has this role on the deal.");
   await db.$transaction(async (tx) => {
+    // A seat can be revoked or an organisation archived after the picker preview.
+    // Hold both rows while checking the current actor and duplicate state.
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${organisationId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor)) throw notFound("Project");
+    const currentActor = { ...user, orgRole: actor.orgRole };
+    requireCrm(currentActor);
+    const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (fresh.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only deals have parties.");
+    const activeOrg = await tx.organisation.findFirst({ where: { id: organisationId, workspaceId: actor.workspaceId, archivedAt: null }, select: { name: true } });
+    if (!activeOrg) throw new ApiError(400, "That organisation is archived or unavailable and cannot be added to a deal.");
+    if (await tx.dealParty.findFirst({ where: { projectId, organisationId, role }, select: { id: true } })) {
+      throw new ApiError(409, "That organisation already has this role on the deal.");
+    }
     const row = await tx.dealParty.create({ data: { projectId, organisationId, role } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_added", after: { partyId: row.id, organisation: org.name, role } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_added", after: { partyId: row.id, organisation: activeOrg.name, role } });
   });
 }
 
