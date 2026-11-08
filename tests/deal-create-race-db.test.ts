@@ -110,7 +110,7 @@ it("refuses creation after the creator is deactivated following preflight", asyn
     await pause.ready();
     await db.user.update({ where: { id: actor.id }, data: { deactivatedAt: new Date() } });
     pause.release();
-    expect(await pending).toEqual([expect.objectContaining({ status: "rejected" })]);
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 404 }) })]);
     expect(await created(data.name)).toEqual([]);
   } finally {
     pause.release(); await pending;
@@ -126,7 +126,7 @@ it("refuses creation after the Buyer is archived following preflight", async () 
     await pause.ready();
     await db.organisation.update({ where: { id: organisationId }, data: { archivedAt: new Date() } });
     pause.release();
-    expect(await pending).toEqual([expect.objectContaining({ status: "rejected" })]);
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 400 }) })]);
     expect(await created(data.name)).toEqual([]);
   } finally {
     pause.release(); await pending;
@@ -142,7 +142,7 @@ it("refuses creation after the chosen Leader is deactivated following preflight"
     await pause.ready();
     await db.user.update({ where: { id: leaderId }, data: { deactivatedAt: new Date() } });
     pause.release();
-    expect(await pending).toEqual([expect.objectContaining({ status: "rejected" })]);
+    expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 400 }) })]);
     expect(await created(data.name)).toEqual([]);
   } finally {
     pause.release(); await pending;

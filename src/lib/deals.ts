@@ -99,6 +99,33 @@ export async function createDeal(
   if (dup && !input.force) throw new ApiError(409, `A deal called "${name}" already exists for ${org.name}.`, { needsConfirm: "duplicate", existingId: dup.id });
 
   return db.$transaction(async (tx) => {
+    // Preflight reads can become stale before the first write. Hold the creator,
+    // chosen Leader and Buyer steady through the whole create transaction.
+    try {
+      for (const personId of [...new Set([user.id, leader.id])].sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${org.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Deal people or Buyer are changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const [currentActor, currentLeader, currentBuyer] = await Promise.all([
+      tx.user.findUnique({ where: { id: user.id } }),
+      tx.user.findUnique({ where: { id: leader.id } }),
+      tx.organisation.findUnique({ where: { id: org.id } }),
+    ]);
+    if (!currentActor || !isActive(currentActor) || currentActor.workspaceId !== u.workspaceId) throw notFound("Deal");
+    requireCrm({ ...user, orgRole: currentActor.orgRole });
+    if (!currentLeader || !isActive(currentLeader) || currentLeader.workspaceId !== currentActor.workspaceId) {
+      throw new ApiError(400, "Choose an active person as Leader.");
+    }
+    if (!currentBuyer || currentBuyer.workspaceId !== currentActor.workspaceId || currentBuyer.archivedAt) {
+      throw new ApiError(400, "Choose an active organisation as Buyer.");
+    }
     const project = await tx.project.create({
       data: { workspaceId: u.workspaceId, name, typeId: WORKSTREAM_DEAL, pipelineId: pipeline.id, stageId: first.id, stageChangedAt: new Date() },
     });
