@@ -343,6 +343,55 @@ export async function removeNote(user: Actor, id: string) {
 }
 
 // ---------------------------------------------------------------- task links (11.4)
+async function lockedTaskLinkWriter(tx: Tx, user: Actor, taskId: string) {
+  let projectId: string;
+  try {
+    const [row] = await tx.$queryRaw<{ projectId: string }[]>`SELECT "projectId" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
+    if (!row) throw notFound("Task");
+    projectId = row.projectId;
+    // Membership departure can take its member lock before reaching the task.
+    // NOWAIT avoids holding the task while waiting in the reverse order.
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
+    await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+  } catch (error) {
+    if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+      throw new ApiError(409, "This task link or its access is changing. Reload and try again.");
+    }
+    throw error;
+  }
+  const account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+  if (!account || !isActive(account)) throw notFound("Task");
+  const currentActor = { ...user, orgRole: account.orgRole };
+  requireCrm(currentActor);
+  const task = await tx.task.findUnique({ where: { id: taskId } });
+  if (!task || task.deletedAt) throw notFound("Task");
+  const access = await taskAccess(currentActor, task.projectId, { write: true, tx });
+  if (account.workspaceId !== access.project.workspaceId || task.workspaceId !== account.workspaceId) throw notFound("Task");
+  requireWrite(access);
+  return task;
+}
+
+async function currentTaskLinkLabel(tx: Tx, workspaceId: string, input: { organisationId?: string | null; contactId?: string | null }) {
+  try {
+    if (input.organisationId) {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${input.organisationId} FOR SHARE NOWAIT`;
+      const org = await tx.organisation.findFirst({ where: { id: input.organisationId, workspaceId } });
+      if (!org) throw notFound("Organisation");
+      return org.name;
+    }
+    await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${input.contactId!} FOR SHARE NOWAIT`;
+    const contact = await tx.contact.findFirst({ where: { id: input.contactId!, workspaceId, removedAt: null } });
+    if (!contact) throw notFound("Contact");
+    return contact.name;
+  } catch (error) {
+    if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+      throw new ApiError(409, "The linked record is changing. Reload and try again.");
+    }
+    throw error;
+  }
+}
+
 export async function addTaskLink(user: Actor, taskId: string, input: { organisationId?: string | null; contactId?: string | null }) {
   requireCrm(user);
   const t = await db.task.findUnique({ where: { id: taskId } });
@@ -350,16 +399,20 @@ export async function addTaskLink(user: Actor, taskId: string, input: { organisa
   const a = await taskAccess(user, t.projectId, { write: true });
   requireWrite(a);
   if (!!input.organisationId === !!input.contactId) throw new ApiError(400, "Link either an organisation or a contact.");
-  let label = "";
-  if (input.organisationId) label = (await orgOf(user, input.organisationId)).name;
-  else label = (await contactOf(user, input.contactId!)).name;
+  if (input.organisationId) await orgOf(user, input.organisationId);
+  else await contactOf(user, input.contactId!);
   const dup = await db.taskLink.findFirst({ where: { taskId, organisationId: input.organisationId ?? null, contactId: input.contactId ?? null } });
   if (dup) throw new ApiError(409, "This task is already linked there.");
   return db.$transaction(async (tx) => {
+    const current = await lockedTaskLinkWriter(tx, user, taskId);
+    const label = await currentTaskLinkLabel(tx, current.workspaceId, input);
+    if (await tx.taskLink.findFirst({ where: { taskId, organisationId: input.organisationId ?? null, contactId: input.contactId ?? null } })) {
+      throw new ApiError(409, "This task is already linked there.");
+    }
     const l = await tx.taskLink.create({ data: { taskId, organisationId: input.organisationId ?? null, contactId: input.contactId ?? null } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: taskId, action: "task.link_added", after: { linkId: l.id, organisationId: l.organisationId, contactId: l.contactId, label } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: taskId, action: "task.link_added", after: { linkId: l.id, organisationId: l.organisationId, contactId: l.contactId, label } });
     return l;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function removeTaskLink(user: Actor, taskId: string, linkId: string) {
@@ -371,9 +424,12 @@ export async function removeTaskLink(user: Actor, taskId: string, linkId: string
   const l = await db.taskLink.findFirst({ where: { id: linkId, taskId } });
   if (!l) throw notFound("Link");
   await db.$transaction(async (tx) => {
+    const current = await lockedTaskLinkWriter(tx, user, taskId);
+    const fresh = await tx.taskLink.findFirst({ where: { id: linkId, taskId } });
+    if (!fresh) throw notFound("Link");
     await tx.taskLink.delete({ where: { id: linkId } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: taskId, action: "task.link_removed", before: { linkId, organisationId: l.organisationId, contactId: l.contactId } });
-  });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: taskId, action: "task.link_removed", before: { linkId, organisationId: fresh.organisationId, contactId: fresh.contactId } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function linksOfTask(taskId: string) {

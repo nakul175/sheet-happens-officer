@@ -161,6 +161,7 @@ it("two concurrent adds of the same task link have one winner and one action", a
     const results = await pending;
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
+    expect(((results.find((r) => r.status === "rejected") as PromiseRejectedResult).reason as { status?: number }).status).toBe(409);
     const after = await state(f.projectId, f.taskId);
     expect(after.links).toHaveLength(1);
     expect(after.actions.filter((a) => a.action === "task.link_added")).toHaveLength(1);
