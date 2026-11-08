@@ -1,4 +1,4 @@
-import {mkdirSync} from 'node:fs';
+import {mkdirSync,writeFileSync} from 'node:fs';
 import {beforeAll,afterAll,it,expect} from 'vitest';
 import {chromium,type Browser} from 'playwright-core';
 import {superAdmin,cleanupZz,istDate,type Account} from './helpers';
@@ -33,7 +33,7 @@ beforeAll(async()=>{
   expect(r.status,`create fixture${i}`).toBe(201);const id=r.json.deal.id;ids.push(id);
   if(stage.id!==first.id)expect((await sa.c.post(`/api/projects/${id}/stage`,{stageId:stage.id,reason:'ZZ-TEST filter fixture'})).status).toBe(200);
  }
- mkdirSync('reports/3134-shots',{recursive:true});
+ mkdirSync('test-results/deal-filters',{recursive:true});
  browser=await chromium.launch({executablePath:process.env.PW_CHROMIUM,args:['--no-sandbox']});
 },180000);
 afterAll(async()=>{
@@ -46,6 +46,8 @@ afterAll(async()=>{
  }
  if(sa&&org)expect((await sa.c.post(`/api/orgs/${org}/archive`,{archive:true})).status).toBe(200);
  if(sa&&org){const read=await sa.c.get(`/api/orgs/${org}`);expect(read.status).toBe(200);expect(read.json.organisation.archived).toBe(true);}
+ expect(ids).toHaveLength(6);expect(org).toBeTruthy();
+ writeFileSync('test-results/deal-filters/cleanup.json',JSON.stringify({ownedDeals:ids.length,ownedOrganisation:Boolean(org),archivedReadback:true},null,2));
 },120000);
 for(const width of [390,1280])it(`Existing opportunity/stage multi-select filters board and list at${width}px`,async()=>{
  const ctx=await browser.newContext({viewport:{width,height:844},baseURL:base});
@@ -72,9 +74,9 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   await control('Stages').locator('summary').click();
   await waitIds([ids[0],ids[1]]);
   expect(await control('Opportunity types').locator('summary').innerText()).toContain('2 selected');
-  await page.screenshot({path:`reports/3134-shots/board-${width}.png`,fullPage:true});
+  await page.screenshot({path:`test-results/deal-filters/board-${width}.png`,fullPage:true});
   await page.getByRole('button',{name:'List',exact:true}).click();await waitIds([ids[0],ids[1]]);
-  await page.screenshot({path:`reports/3134-shots/list-${width}.png`,fullPage:true});
+  await page.screenshot({path:`test-results/deal-filters/list-${width}.png`,fullPage:true});
   await page.getByRole('button',{name:'Clear filters',exact:true}).click();await waitIds(ids);
   const results=page.locator('.deal-results');
   const baselineCount=Number((await results.innerText()).match(/^(\d+) deals/)?.[1]);
@@ -108,5 +110,6 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   await page.getByRole('tab',{name:pipeName,exact:true}).click();
   await waitIds(ids);
   expect(await results.innerText()).toContain(`${baselineCount} deals`);
- }catch(error){await page.screenshot({path:`reports/3134-shots/failure-${width}.png`,fullPage:true});throw error;}finally{await ctx.close();}
+  writeFileSync(`test-results/deal-filters/verification-${width}.json`,JSON.stringify({width,ownedDeals:ids.length,baselineCount,typeStageIntersection:true,dateEmptyAndRecovery:true,nameSortBothDirections:true,reloadAndBackRecovery:true},null,2));
+ }catch(error){await page.screenshot({path:`test-results/deal-filters/failure-${width}.png`,fullPage:true});throw error;}finally{await ctx.close();}
 });
