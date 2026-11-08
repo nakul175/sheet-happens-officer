@@ -194,6 +194,30 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   }
 
   return db.$transaction(async (tx) => {
+    // Membership or account authority can change after the stage preview.
+    // Hold the deal while rechecking the current actor before any stage,
+    // detail, notice or history write commits.
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor)) throw notFound("Project");
+    const currentActor = { ...user, orgRole: actor.orgRole };
+    requireCrm(currentActor);
+    const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (fresh.project.typeId !== WORKSTREAM_DEAL || fresh.project.pipelineId !== a.project.pipelineId) {
+      throw new ApiError(409, "This deal changed. Refresh it before changing its stage.");
+    }
     // Claim the snapshot before changing details or emitting history/notifications. A stale
     // transition rolls the entire transaction back, including optional detail edits.
     // Delivery still requires the row to be Bid Won so a concurrent commercial move cannot bypass that gate.
@@ -211,11 +235,11 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
         : "This deal changed. Refresh it before changing its stage.");
     }
     if (input.fields && Object.keys(stripUndefined(input.fields)).length) await applyDetails(tx, projectId, input.fields, details);
-    const leader = a.project.members.find((m) => m.role === "LEADER")!.userId;
-    await notify(tx, [leader], "DEAL_STAGE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, stage: stage.name } });
+    const leader = fresh.project.members.find((m) => m.role === "LEADER")!.userId;
+    await notify(tx, [leader], "DEAL_STAGE_CHANGED", { actorId: user.id, projectId, data: { project: fresh.project.name, stage: stage.name } });
     await logAction(tx, {
       actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.stage_changed",
-      before: { stageId: cur?.id ?? null, stage: cur?.name ?? null, reason: a.project.stageReason ?? null },
+      before: { stageId: cur?.id ?? null, stage: cur?.name ?? null, reason: fresh.project.stageReason ?? null },
       after: { stageId: stage.id, stage: stage.name, reason },
     });
     if (stage.category === "DONE" || stage.category === "LOST") {
