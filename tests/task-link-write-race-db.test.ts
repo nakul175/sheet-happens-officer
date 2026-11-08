@@ -177,3 +177,13 @@ it("an eligible Editor can add and remove one link with matching action history"
   expect(after.links).toHaveLength(0);
   expect(after.actions.filter((a) => a.action.startsWith("task.link_"))).toHaveLength(2);
 });
+
+it("refuses another task's link ID without changing either task or its activity", async () => {
+  const first = await fixture(true);
+  const second = await fixture(true);
+  const beforeFirst = await state(first.projectId, first.taskId);
+  const beforeSecond = await state(second.projectId, second.taskId);
+  await expect(removeTaskLink(editor, first.taskId, second.linkId)).rejects.toMatchObject({ status: 404 });
+  expect(await state(first.projectId, first.taskId)).toEqual(beforeFirst);
+  expect(await state(second.projectId, second.taskId)).toEqual(beforeSecond);
+});
