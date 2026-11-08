@@ -620,6 +620,27 @@ export async function replaceBuyer(user: Actor, projectId: string, input: BuyerR
   const actor = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
   try {
     return await db.$transaction(async (tx) => {
+      // A Leader seat or account can change after the form's preflight check.
+      // Recheck under locks before the Buyer row or its history can change.
+      try {
+        const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+        if (!locked) throw notFound("Project");
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      const currentAccount = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      if (!currentAccount || !isActive(currentAccount)) throw notFound("Project");
+      const currentActor = { ...user, orgRole: currentAccount.orgRole };
+      requireCrm(currentActor);
+      const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+      if (currentAccount.workspaceId !== fresh.project.workspaceId || actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+      requireManage(fresh);
+      if (fresh.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only a deal has a Buyer.");
       const current = await tx.dealParty.findFirst({
         where: { projectId, role: "BUYER" },
         include: { organisation: { select: { id: true, name: true } } },
@@ -629,7 +650,7 @@ export async function replaceBuyer(user: Actor, projectId: string, input: BuyerR
         throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
       }
       const replacement = await tx.organisation.findFirst({
-        where: { id: input.organisationId, workspaceId: actor.workspaceId, archivedAt: null },
+        where: { id: input.organisationId, workspaceId: currentAccount.workspaceId, archivedAt: null },
         select: { id: true, name: true },
       });
       if (!replacement) throw new ApiError(400, "Choose an active organisation in this workspace.");
@@ -637,14 +658,14 @@ export async function replaceBuyer(user: Actor, projectId: string, input: BuyerR
       // project-lookup-ok: the duplicate warning deliberately checks every deal in this workspace for the proposed Buyer
       const duplicate = await tx.project.findFirst({
         where: {
-          id: { not: projectId }, workspaceId: actor.workspaceId, typeId: WORKSTREAM_DEAL,
-          name: { equals: access.project.name, mode: "insensitive" },
+          id: { not: projectId }, workspaceId: currentAccount.workspaceId, typeId: WORKSTREAM_DEAL,
+          name: { equals: fresh.project.name, mode: "insensitive" },
           parties: { some: { organisationId: replacement.id, role: "BUYER" } },
         },
         select: { id: true },
       });
       if (duplicate && !input.force) {
-        throw new ApiError(409, `A deal called "${access.project.name}" already exists for ${replacement.name}.`, { needsConfirm: "duplicate", existingId: duplicate.id });
+        throw new ApiError(409, `A deal called "${fresh.project.name}" already exists for ${replacement.name}.`, { needsConfirm: "duplicate", existingId: duplicate.id });
       }
 
       const changed = await tx.dealParty.updateMany({
