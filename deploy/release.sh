@@ -83,5 +83,10 @@ log "restarting the app"
 sudo -n systemctl restart sho
 healthy "$REL" "$SHA" || { log "health check failed"; false; }
 log "healthy: $SHA is live"
-# Keep both the active and rollback release even if older than the retention window.
-find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- | { grep -vx "$REL" || true; } | { grep -vx "$PREV" || true; } | xargs -r rm -rf
+# Retention is best effort after a verified cut. A cleanup failure must not
+# roll back a healthy release; incomplete or unknown directories are preserved.
+if node "$REL/deploy/prune-releases.mjs" "$ROOT/releases" "$REL" "$PREV" "$KEEP"; then
+  log "release retention checked"
+else
+  log "release retention deferred for operator review"
+fi
