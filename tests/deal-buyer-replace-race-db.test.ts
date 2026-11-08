@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { getOrCreateWorkspace } from "@/lib/workspace";
-import { replaceBuyer } from "@/lib/deals";
+import { createDeal, replaceBuyer } from "@/lib/deals";
 import { changeLeader } from "@/lib/projects";
 import type { Tx } from "@/lib/access";
 import { assertLocalFixture } from "./e2e/local-fixture-guard";
@@ -74,6 +74,40 @@ function pauseTwoBeforeTransaction() {
   return {
     async ready() {
       await vi.waitFor(() => expect(arrived).toBe(2), { timeout: 5000 });
+      spy.mockRestore();
+    },
+    release,
+  };
+}
+
+function pauseAfterDuplicateLookup(projectId: string) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let arrived = false;
+  const spy = vi.spyOn(db, "$transaction").mockImplementation((async (
+    callback: (tx: Tx) => Promise<unknown>, options?: Parameters<typeof db.$transaction>[1],
+  ) => transact(async (tx) => {
+    const project = new Proxy(tx.project, {
+      get(target, property) {
+        if (property !== "findFirst") return Reflect.get(target, property);
+        return async (query: Parameters<typeof tx.project.findFirst>[0]) => {
+          const found = await tx.project.findFirst(query);
+          if (query?.where?.id && typeof query.where.id === "object" && "not" in query.where.id && query.where.id.not === projectId) {
+            arrived = true;
+            await gate;
+          }
+          return found;
+        };
+      },
+    });
+    const wrapped = new Proxy(tx, { get(target, property) {
+      return property === "project" ? project : Reflect.get(target, property);
+    } });
+    return callback(wrapped);
+  }, options)) as typeof db.$transaction);
+  return {
+    async ready() {
+      await vi.waitFor(() => expect(arrived).toBe(true), { timeout: 5000 });
       spy.mockRestore();
     },
     release,
@@ -198,6 +232,28 @@ it("two unconfirmed replacements to the same Buyer and deal name have one winner
     expect(await db.dealParty.count({ where: {
       projectId: { in: [first.projectId, second.projectId] },
       organisationId: first.newOrgId, role: "BUYER",
+    } })).toBe(1);
+  } finally { pause.release(); await pending; }
+}, 20_000);
+
+it("does not bypass the duplicate warning when creation commits after replacement lookup", async () => {
+  const f = await fixture();
+  const pause = pauseAfterDuplicateLookup(f.projectId);
+  const pending = Promise.allSettled([replaceBuyer(leader, f.projectId, f.input)]);
+  try {
+    await pause.ready();
+    const created = await createDeal(leader, {
+      name: prefix, organisationId: f.newOrgId, pipelineId, leaderId: leader.id,
+      whyPursue: "Same case", nextStep: { title: "Follow up", dueDate: "2026-12-01" },
+    });
+    projects.push(created.id);
+    pause.release();
+    expect(await pending).toEqual([
+      expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 409, extra: expect.objectContaining({ needsConfirm: "duplicate" }) }) }),
+    ]);
+    expect((await state(f.projectId)).parties).toEqual([expect.objectContaining({ id: f.partyId, organisationId: f.oldOrgId })]);
+    expect(await db.dealParty.count({ where: {
+      projectId: { in: [f.projectId, created.id] }, organisationId: f.newOrgId, role: "BUYER",
     } })).toBe(1);
   } finally { pause.release(); await pending; }
 }, 20_000);
