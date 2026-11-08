@@ -80,7 +80,7 @@ export async function sendReminders(now = new Date()) {
       select: { id: true },
     })).map((t) => t.id);
     if (!candidateIds.length) return { sent: 0 };
-    // Lock the task and the two eligibility rows. A completion, reassignment, archive or
+    // Lock the task and the two eligibility rows. A deletion, completion, reassignment, archive or
     // deactivation committed before these locks is reflected by the fresh query below;
     // one attempted after the locks waits until this reminder transaction commits.
     await tx.$queryRaw(Prisma.sql`

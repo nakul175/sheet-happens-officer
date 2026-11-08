@@ -138,7 +138,7 @@ async function dueTasks(label: string) {
   ];
 }
 
-type EligibilityChange = "reassign" | "archive" | "deactivate";
+type EligibilityChange = "reassign" | "archive" | "deactivate" | "delete";
 
 /** Commit a competing eligibility change while a reminder job waits on its row/insert. */
 async function raceEligibilityChange(change: EligibilityChange, taskId: string) {
@@ -174,6 +174,7 @@ async function raceEligibilityChange(change: EligibilityChange, taskId: string) 
     }
     expect(waiting, `reminder job reached the held ${row.table} row or notification insert`).toBe(true);
     if (change === "reassign") await gate.query('UPDATE "Task" SET "assigneeId" = $2 WHERE "id" = $1', [taskId, leader.id]);
+    if (change === "delete") await gate.query('UPDATE "Task" SET "deletedAt" = $2 WHERE "id" = $1', [taskId, new Date()]);
     if (change === "archive") await gate.query('UPDATE "Project" SET "archivedAt" = $2 WHERE "id" = $1', [proj.id, new Date()]);
     if (change === "deactivate") await gate.query('UPDATE "User" SET "deactivatedAt" = $2 WHERE "id" = $1', [holder.id, new Date()]);
     await gate.query("COMMIT");
@@ -307,7 +308,7 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
   }, 60_000);
 
-  it.each(["reassign", "archive", "deactivate"] as const)(
+  it.each(["reassign", "archive", "deactivate", "delete"] as const)(
     "rechecks task eligibility after a concurrent %s",
     async (change) => {
       const title = `ZZ-TEST ${change} during reminder ${tag}`;
