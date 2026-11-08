@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { account, BASE, cleanupZz, project, superAdmin, task, type Account } from "../helpers";
+import { account, BASE, cleanupZz, project, PW, superAdmin, task, type Account } from "../helpers";
 import { requireLocalFixtures } from "./screen-ready";
 
 const SHOTS = "test-results/viewport";
@@ -90,6 +90,40 @@ async function phone(): Promise<{ ctx: BrowserContext; page: Page }> {
 }
 
 describe("phone comments", () => {
+  it("feature OFF hides an existing comment from routes, task UI and search without deleting it", async () => {
+    expect(app, "the default fixture server must have comments OFF; the second server has them ON").not.toBe(BASE);
+    const on = await browser.newContext({ baseURL: app });
+    const off = await browser.newContext({ baseURL: BASE });
+    const token = `ZZ-TEST-flag-off-${RUN}`;
+    const url = `/api/tasks/${taskId}/comments`;
+    try {
+      for (const ctx of [on, off]) {
+        expect((await ctx.request.post("/api/auth/signin", { data: { email, password: PW } })).status()).toBe(200);
+      }
+      const created = await on.request.post(url, { data: { text: token } });
+      expect(created.status()).toBe(201);
+      const commentId = (await created.json()).comment.id as string;
+      expect((await off.request.get(url)).status()).toBe(404);
+      expect((await off.request.post(url, { data: { text: "ZZ-TEST denied while OFF" } })).status()).toBe(404);
+      expect((await off.request.patch(`${url}/${commentId}`, { data: { text: "ZZ-TEST denied edit while OFF" } })).status()).toBe(404);
+      expect((await off.request.delete(`${url}/${commentId}`)).status()).toBe(404);
+      const search = await off.request.get(`/api/search?q=${encodeURIComponent(token)}`);
+      expect(search.status()).toBe(200);
+      expect((await search.json()).tasks).toEqual([]);
+      const page = await off.newPage();
+      await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+      await page.getByRole("dialog", { name: "Task", exact: true }).waitFor();
+      expect(await page.getByRole("heading", { name: /Comments/ }).count()).toBe(0);
+      expect(await page.getByText(token).count()).toBe(0);
+      const retained = await on.request.get(url);
+      expect(retained.status()).toBe(200);
+      expect((await retained.json()).comments.some((comment: { id: string; text: string }) => comment.id === commentId && comment.text === token)).toBe(true);
+    } finally {
+      await on.close();
+      await off.close();
+    }
+  });
+
   it("denies signed-in Viewer comment writes on the feature-enabled server without changing the visible list", async () => {
     const writer = await browser.newContext({ baseURL: app });
     const viewer = await browser.newContext({ baseURL: app });
