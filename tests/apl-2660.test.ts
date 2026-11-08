@@ -4,6 +4,7 @@
 // the projects and deactivates the people. Self-signup only accepts @aplyd.com, so the alias is
 // nakul17+…@aplyd.com.
 import { afterAll, describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
 import { account, superAdmin, task, withVersion, type Account } from "./helpers";
 
@@ -124,7 +125,19 @@ describe("APL-2660 approver edge cases", () => {
       { who: creator }, { who: worker }, { who: editor }, { who: gone }, { who: viewer, role: "VIEWER" },
     ]);
     const t = await zzTask(creator, p.id, { title: "Plain creator", assigneeId: worker.id });
-    const put = async (id: string) => creator.c.put(`/api/tasks/${t}/approver`, await withVersion(creator, t, { approverId: id }));
+    const put = async (id: string) => {
+      const logOffset = existsSync('server.log') ? statSync('server.log').size : 0;
+      const response = await creator.c.put(`/api/tasks/${t}/approver`, await withVersion(creator, t, { approverId: id }));
+      // The CI failure tail can lose the relevant line during the rest of the suite.
+      // Retain only the handler's fixed label and allowlisted Prisma codes; never raw log text.
+      if (response.status === 500 && existsSync('server.log')) {
+        const recent = readFileSync('server.log').subarray(logOffset).toString();
+        const safeCodes = [...recent.matchAll(/unexpected error(?: (P\d{4}))?/g)].map(match => match[1] ?? 'UNKNOWN');
+        mkdirSync('test-results/approver-valid-swap', { recursive: true });
+        writeFileSync('test-results/approver-valid-swap/diagnostic.json', JSON.stringify({ status: 500, safeCodes, logBytesSinceRequest: Buffer.byteLength(recent), attribution: 'shared server interval; other concurrent tests may log here' }, null, 2));
+      }
+      return response;
+    };
 
     expect((await put(editor.id)).status).toBe(200);
     expect((await taskOf(creator, t)).approver?.id).toBe(editor.id);
