@@ -103,6 +103,11 @@ describe("phone comments", () => {
       const created = await on.request.post(url, { data: { text: token } });
       expect(created.status()).toBe(201);
       const commentId = (await created.json()).comment.id as string;
+      const enabledSearch = await on.request.get(`/api/search?q=${encodeURIComponent(token)}`);
+      expect(enabledSearch.status()).toBe(200);
+      const enabledResults = await enabledSearch.json();
+      expect(enabledResults.tasks.map((found: { id: string }) => found.id)).toContain(taskId);
+      expect(JSON.stringify(enabledResults)).not.toContain(token);
       expect((await off.request.get(url)).status()).toBe(404);
       expect((await off.request.post(url, { data: { text: "ZZ-TEST denied while OFF" } })).status()).toBe(404);
       expect((await off.request.patch(`${url}/${commentId}`, { data: { text: "ZZ-TEST denied edit while OFF" } })).status()).toBe(404);
