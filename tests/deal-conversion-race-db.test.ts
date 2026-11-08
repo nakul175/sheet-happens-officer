@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
-import { convertTaskToDeal } from '@/lib/deals';
+import { convertTaskToDeal, createDeal } from '@/lib/deals';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
@@ -153,3 +153,31 @@ it('rejects a buyer archived after preflight without creating a deal', async () 
     await db.organisation.update({ where: { id: organisationId }, data: { archivedAt: null } });
   }
 });
+
+it('does not bypass the duplicate warning when a same-name deal is created after conversion preflight', async () => {
+  const task = await freshTask('cross-writer-duplicate');
+  const input = { organisationId, pipelineId, whyPursue: 'Fits our work', dueDate: '2026-11-30' };
+  const pause = pauseBeforeTransactions(1);
+  const pending = Promise.allSettled([convertTaskToDeal(actor, task.id, input)]);
+  try {
+    await pause.ready();
+    const created = await createDeal(actor, {
+      name: task.title, organisationId, pipelineId, leaderId: actor.id,
+      whyPursue: 'Fits our work', nextStep: { title: 'Follow up', dueDate: '2026-11-30' },
+    });
+    pause.release();
+    expect(await pending).toEqual([
+      expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 409, extra: expect.objectContaining({ needsConfirm: 'duplicate' }) }) }),
+    ]);
+    expect(await db.project.count({ where: {
+      workspaceId, name: task.title, typeId: 'wst_deal',
+      parties: { some: { organisationId, role: 'BUYER' } },
+    } })).toBe(1);
+    expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).projectId).toBe(sourceId);
+    expect(created.name).toBe(task.title);
+    completed.push('create-conversion-duplicate-one-winner');
+  } finally {
+    pause.release();
+    await pending;
+  }
+}, 20_000);
