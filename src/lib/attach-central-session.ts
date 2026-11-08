@@ -1,3 +1,4 @@
+import { invitedNativeId, invitedSessionsEnabled } from "@/lib/invited-central-identity";
 import { randomBytes, createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { centralSessionActive } from "@/lib/central-status";
@@ -36,4 +37,18 @@ export async function attachQaCentralSession(userId: string, subject: string, se
         await tx.session.create({ data: { userId, tokenHash: createHash('sha256').update(token).digest('hex'), expiresAt: expires, centralLink: { create: { subject, sessionUid } } } });
     });
     (await cookies()).set('sho_session', token, { httpOnly: true, sameSite: 'lax', path: '/', expires, secure: true });
+}
+
+/** New invited native humans never rotate or adopt a pre-existing SHO source session. */
+export async function attachInvitedCentralSession(userId: string, subject: string, sessionUid: string) {
+    if (!invitedSessionsEnabled() || !invitedNativeId(userId) || !await centralSessionActive(subject, sessionUid, userId))
+        throw Error('Invited central identity unavailable');
+    const token = randomBytes(32).toString('base64url'), expires = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    await db.$transaction(async tx => {
+        const user = await tx.user.findUnique({where:{id:userId}});
+        if (!user || user.deactivatedAt || !user.emailVerifiedAt || user.tempPasswordAt || user.passwordHash !== '!central-invitation-only!')
+            throw Error('Invited account unavailable');
+        await tx.session.create({data:{userId,tokenHash:createHash('sha256').update(token).digest('hex'),expiresAt:expires,centralLink:{create:{subject,sessionUid}}}});
+    });
+    (await cookies()).set('sho_session',token,{httpOnly:true,sameSite:'lax',path:'/',expires,secure:true});
 }

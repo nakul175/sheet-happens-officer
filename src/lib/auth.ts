@@ -1,3 +1,4 @@
+import { invitedNativeId, invitedSessionsEnabled } from "@/lib/invited-central-identity";
 import { nativeSessionActive } from "@/lib/native-session-status";
 import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
@@ -91,6 +92,7 @@ export function deviceLabel(ua?: string | null) {
 }
 
 export async function startSession(userId: string, userAgent?: string | null) {
+  if (invitedNativeId(userId)) throw new ApiError(403, "Sign in through Aplyd.");
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * HOUR);
   await db.session.create({ data: { userId, tokenHash: sha256(token), expiresAt, userAgent: userAgent?.slice(0, 300) ?? null } });
@@ -130,6 +132,7 @@ export async function sessionUser(token: string | undefined, opts: { allowTempPa
     throw new ApiError(401, "Not signed in");
   }
   const central = await db.centralSessionLink.findUnique({ where: { sessionId: session.id } });
+  if (invitedNativeId(u.id) && (!invitedSessionsEnabled() || !central)) throw new ApiError(401, "Sign in through Aplyd.");
   if (central && !(await centralSessionActive(central.subject, central.sessionUid, u.id))) throw new ApiError(401, "Central session expired. Sign in again.");
   if (!central && !await nativeSessionActive(u.id, session.createdAt)) throw new ApiError(401, "Suite session ended. Sign in again.");
   // Last-active time for the Profile screen; written at most every 5 minutes.

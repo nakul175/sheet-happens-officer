@@ -1,3 +1,4 @@
+import { invitedNativeId } from "@/lib/invited-central-identity";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { activeMember, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
@@ -180,6 +181,7 @@ async function sendDetails(to: string, firstName: string, by: string, password: 
 
 /** SHO-US-15.3. New password, old one dead, every session signed out. The Super Admin never sees it. */
 export async function resendSignIn(actor: Actor & { name?: string }, targetId: string) {
+  if (invitedNativeId(targetId)) throw new ApiError(409, "Manage this invited account through Aplyd Accounts.");
   if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can resend sign-in details.");
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Person");
