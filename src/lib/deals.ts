@@ -105,7 +105,9 @@ export async function createDeal(
       for (const personId of [...new Set([user.id, leader.id])].sort()) {
         await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
       }
-      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${org.id} FOR SHARE NOWAIT`;
+      // Serialize unconfirmed creations for the same Buyer. Without this lock,
+      // two requests can both pass the duplicate preflight and insert together.
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${org.id} FOR UPDATE NOWAIT`;
     } catch (error) {
       const failure = error as { code?: string; meta?: { code?: string } } | null;
       if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
@@ -125,6 +127,16 @@ export async function createDeal(
     }
     if (!currentBuyer || currentBuyer.workspaceId !== currentActor.workspaceId || currentBuyer.archivedAt) {
       throw new ApiError(400, "Choose an active organisation as Buyer.");
+    }
+    if (!input.force) {
+      // The earlier warning is only for fast feedback; this is the decision
+      // made after acquiring the Buyer lock and seeing the latest committed deal.
+      // project-lookup-ok: Same-workspace Buyer/name duplicate warning; the selected Buyer was authorized and locked above.
+      const currentDuplicate = await tx.project.findFirst({
+        where: { workspaceId: currentActor.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: currentBuyer.id, role: "BUYER" } } },
+        select: { id: true },
+      });
+      if (currentDuplicate) throw new ApiError(409, `A deal called "${name}" already exists for ${currentBuyer.name}.`, { needsConfirm: "duplicate", existingId: currentDuplicate.id });
     }
     const project = await tx.project.create({
       data: { workspaceId: u.workspaceId, name, typeId: WORKSTREAM_DEAL, pipelineId: pipeline.id, stageId: first.id, stageChangedAt: new Date() },

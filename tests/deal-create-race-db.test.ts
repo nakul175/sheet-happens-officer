@@ -190,5 +190,6 @@ it("two unconfirmed creates with the same name and Buyer have one winner", async
       expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 409 }) }),
     ]);
     expect(await created(data.name)).toHaveLength(1);
+    await expect(createDeal(actor, data)).rejects.toMatchObject({ status: 409, extra: { needsConfirm: "duplicate" } });
   } finally { pause.release(); await pending; }
 }, 20_000);
