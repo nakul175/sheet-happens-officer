@@ -105,7 +105,11 @@ it('rejects an edit after conversion preflight without creating a deal', async (
     await expect(pending).rejects.toMatchObject({ status: 409 });
     expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).projectId).toBe(sourceId);
     expect(await db.project.count({ where: { workspaceId, name: prefix + '-stale-edit', typeId: 'wst_deal' } })).toBe(0);
-    completed.push('stale-edit-denied');
+    const retried = await convertTaskToDeal(actor, task.id, { organisationId, pipelineId, whyPursue: 'Fits our work', dueDate: '2026-11-30' });
+    expect(retried.name).toBe(prefix + '-edited');
+    expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).projectId).toBe(retried.id);
+    expect(await db.project.count({ where: { workspaceId, name: retried.name, typeId: 'wst_deal' } })).toBe(1);
+    completed.push('stale-edit-denied-and-retried');
   } finally {
     pause.release();
     await pending.catch(() => undefined);
