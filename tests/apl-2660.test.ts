@@ -131,12 +131,21 @@ describe("APL-2660 approver edge cases", () => {
     expect((await put(lead.id)).status).toBe(200);
     expect((await taskOf(creator, t)).approver?.id).toBe(lead.id);
 
+    // HR-93: one exact-head CI attempt returned 500 on the second valid change.
+    // Exercise repeated versioned swaps in this owned project before denial checks.
+    for (let i = 0; i < 24; i++) {
+      const next = i % 2 === 0 ? editor.id : lead.id;
+      const reply = await put(next);
+      expect(reply.status, `valid approver swap ${i + 1}: ${JSON.stringify(reply.json)}`).toBe(200);
+      expect((await taskOf(creator, t)).approver?.id).toBe(next);
+    }
+
     expect((await sa.c.post(`/api/team/${gone.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
     for (const id of [viewer.id, outsider.id, gone.id, worker.id]) {
       expect((await put(id)).status).toBe(400);
     }
     expect((await taskOf(creator, t)).approver?.id).toBe(lead.id);
-  });
+  }, 90000);
 
   it("AC2 (close by the approver): the approver holds the task and selects Close, and the task completes", async () => {
     const lead = await zzAccount("lead");
