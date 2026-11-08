@@ -87,6 +87,7 @@ jobs:
             test-results/viewport/comments/cleanup.json
             test-results/viewport/shell/cleanup.json
             test-results/viewport/won-dialog/cleanup.json
+            test-results/viewport/accounts/cleanup.json
           if-no-files-found: error
           retention-days: 14
       - name: Negative-control evidence

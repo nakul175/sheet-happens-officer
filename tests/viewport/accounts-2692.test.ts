@@ -1,9 +1,11 @@
 // APL-2692 (APL-2536 AC5): the organisation page and the Accounts list must not
 // scroll the document sideways at 390x844. A wide table may scroll inside its
 // own region, and that region has to be reached with Tab. Desktop stays one row.
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { BASE, istDate, PW, SUPER_EMAIL, superAdmin, type Account } from "../helpers";
+import { requireLocalFixtures } from "./screen-ready";
 
 const PHONE = { width: 390, height: 844 };
 const DESK = { width: 1280, height: 800 };
@@ -16,7 +18,7 @@ let orgName = "";
 let dealName = "";
 
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run against ${BASE}: use a local server with a test database.`);
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   root = await superAdmin();
   const stamp = Date.now();
@@ -35,6 +37,7 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
+  let cleanup = false;
   try {
     // Archive only the organisation and deal this file created. Nothing else is touched.
     if (root && dealId) {
@@ -48,8 +51,11 @@ afterAll(async () => {
       const names = (left.json?.organisations ?? []) as { id: string; name: string }[];
       expect(names.filter((o) => o.id === orgId)).toEqual([]);
     }
+    cleanup = true;
   } finally {
     await browser?.close();
+    mkdirSync("test-results/viewport/accounts", { recursive: true });
+    writeFileSync("test-results/viewport/accounts/cleanup.json", JSON.stringify({ deals: Number(Boolean(dealId)), organisations: Number(Boolean(orgId)), cleanup }, null, 2));
   }
 });
 
