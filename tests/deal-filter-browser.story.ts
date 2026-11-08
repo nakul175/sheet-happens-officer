@@ -92,11 +92,11 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   await page.getByLabel('No date').selectOption('only');
   await waitIds(ids);
   await page.getByRole('button',{name:'Clear timeline filter'}).click();
-  await page.getByLabel('Sort').selectOption('name-desc');
+  await page.locator('.deal-filter-control select').selectOption('name-desc');
   const rows=page.getByRole('table',{name:'RFP/RFA + OTC sales table'}).locator('tbody tr td:first-child a');
   const descending=await rows.allTextContents();
   expect(descending).toEqual([...descending].sort((a,b)=>b.localeCompare(a,'en',{sensitivity:'base'})));
-  await page.getByLabel('Sort').selectOption('name-asc');
+  await page.locator('.deal-filter-control select').selectOption('name-asc');
   const ascending=await rows.allTextContents();
   expect(ascending).toEqual([...ascending].sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'})));
   await page.reload();
