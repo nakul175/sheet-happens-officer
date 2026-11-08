@@ -129,6 +129,17 @@ it("does not write a comment or notify a mention removed after preflight", async
   } finally { pause.release(); await result; }
 });
 
+it("does not notify a departed previous assignee about later comments on an approval task", async () => {
+  const { projectId, taskId } = await fixture();
+  await db.task.update({ where: { id: taskId }, data: {
+    approverId: leader.id, assigneeId: leader.id, previousAssigneeId: editor.id,
+  } });
+  await removeMember(leader, projectId, editor.id);
+  await addComment(leader, taskId, { text: "Private update after handover" });
+  expect(await db.notification.count({ where: { taskId, recipientId: editor.id, type: "COMMENT_ADDED" } })).toBe(0);
+  expect((await db.task.findUniqueOrThrow({ where: { id: taskId } })).previousAssigneeId).toBeNull();
+});
+
 it("does not replace an edited comment with a mention removed after preflight", async () => {
   const { projectId, taskId } = await fixture();
   const comment = await addComment(editor, taskId, { text: "Original text" });
