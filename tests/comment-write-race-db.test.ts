@@ -129,6 +129,21 @@ it("does not write a comment or notify a mention removed after preflight", async
   } finally { pause.release(); await result; }
 });
 
+it("does not replace an edited comment with a mention removed after preflight", async () => {
+  const { projectId, taskId } = await fixture();
+  const comment = await addComment(editor, taskId, { text: "Original text" });
+  const pause = pauseBeforeTransaction();
+  const result = Promise.allSettled([editComment(editor, taskId, comment.id, { text: "Changed text", mentions: [mentioned.id] })]);
+  try {
+    await pause.ready();
+    await removeMember(leader, projectId, mentioned.id);
+    pause.release();
+    expect(await result).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 409 }) })]);
+    const stored = await db.comment.findUniqueOrThrow({ where: { id: comment.id } });
+    expect({ text: stored.text, mentions: stored.mentions }).toEqual({ text: "Original text", mentions: [] });
+  } finally { pause.release(); await result; }
+});
+
 it("Viewer downgrade committed after preflight denies an in-flight comment edit", async () => {
   const { projectId, taskId } = await fixture();
   const comment = await addComment(editor, taskId, { text: "Keep original" });

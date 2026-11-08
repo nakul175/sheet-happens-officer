@@ -112,6 +112,32 @@ async function lockedComment(tx: Tx, taskId: string, commentId: string) {
   return comment;
 }
 
+/** A mention chosen before the write must still be a member when it commits.
+ * Hold selected memberships and accounts through comment/notice creation so
+ * a concurrent removal or deactivation cannot receive a new task title. */
+async function verifyMentionRecipients(tx: Tx, projectId: string, ids: string[]) {
+  if (!ids.length) return;
+  try {
+    for (const id of [...ids].sort()) {
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${id} FOR SHARE NOWAIT`;
+    }
+  } catch (error) {
+    const failure = error as { code?: string; meta?: { code?: string } } | null;
+    if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+      throw new ApiError(409, "Mention recipients changed. Reload and try again.");
+    }
+    throw error;
+  }
+  const rows = await tx.projectMember.findMany({
+    where: { projectId, userId: { in: ids } },
+    include: { user: { select: { deactivatedAt: true, emailVerifiedAt: true } } },
+  });
+  if (rows.length !== ids.length || rows.some((row) => !isActive(row.user))) {
+    throw new ApiError(409, "Mention recipients changed. Reload and try again.");
+  }
+}
+
 /** @Name matches, longest name first, plus explicit ids. Distinct. Unknown explicit ids still count toward the cap. */
 export function resolveMentions(text: string, members: { id: string; name: string }[], explicit: string[] = []) {
   const byLength = [...members].sort((a, b) => b.name.length - a.name.length);
@@ -195,6 +221,7 @@ export async function addComment(user: Actor, taskId: string, input: { text?: st
   return db.$transaction(async (tx) => {
     await assertCommentRoom(tx, taskId, true); // APL-2590 D3: the locked count is the one that holds the cap
     const { task: t } = await freshCommentWrite(tx, user, taskId);
+    await verifyMentionRecipients(tx, t.projectId, resolved);
     const c = await tx.comment.create({
       data: { taskId, authorId: user.id, text: body, mentions: resolved },
     });
@@ -221,6 +248,7 @@ export async function editComment(user: Actor, taskId: string, commentId: string
   return db.$transaction(async (tx) => {
     const { task: t } = await freshCommentWrite(tx, user, taskId);
     await lockedComment(tx, taskId, commentId);
+    await verifyMentionRecipients(tx, t.projectId, resolved);
     const row = await tx.comment.update({ where: { id: c.id }, data: { text: body, mentions: resolved, editedAt: new Date() } });
     await logAction(tx, {
       actorId: user.id, projectId: t.projectId, targetType: "task", targetId: t.id,
