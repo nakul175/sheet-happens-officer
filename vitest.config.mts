@@ -32,6 +32,7 @@ export default defineConfig({
       "tests/e2e/stories/SHO-REG-TASKS-06.spec.ts", // Playwright approver recovery audit
       "tests/e2e/stories/SHO-REG-TASKS-08.spec.ts", // Playwright mixed bulk and Undo audit
       "tests/e2e/stories/SHO-REG-TASKS-09.spec.ts", // Playwright quick-add double submit audit
+      "tests/e2e/stories/SHO-REG-TASKS-12.spec.ts", // Playwright conversion cancellation audit
       "tests/e2e/stories/SHO-REG-PROJECTS-06.spec.ts", // Playwright saved-view ownership journey
       "tests/e2e/stories/SHO-REG-AUTH-01.spec.ts", // Playwright production-mode cookie journey
       "tests/e2e/stories/SHO-REG-AUTH-05.spec.ts", // Playwright verification scanner and replay journey
