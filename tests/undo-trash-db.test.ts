@@ -170,6 +170,43 @@ it('a comment paused before its write cannot attach to a deleted task or reappea
     else process.env.FF_TASK_COMMENTS = originalFlag;
   }
 });
+it('a comment committed before task deletion remains after deletion Undo', async () => {
+  const originalFlag = process.env.FF_TASK_COMMENTS;
+  process.env.FF_TASK_COMMENTS = 'true';
+  const f = await fixture('task.created');
+  const release = latch();
+  let afterWrite = false;
+  const spy = vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>, options?: Parameters<typeof db.$transaction>[1]) =>
+    transact(async (tx) => {
+      const value = await callback(tx);
+      afterWrite = true;
+      await release.promise; // The comment and its action exist but are not committed yet.
+      return value;
+    }, options)) as typeof db.$transaction);
+  const addition = addComment(editor, f.taskId, { text: 'Committed before the task went to Trash' });
+  let deletion: Promise<unknown> | undefined;
+  try {
+    await vi.waitFor(() => expect(afterWrite).toBe(true), { timeout: 5000 });
+    spy.mockRestore();
+    await expect(db.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${f.taskId} FOR UPDATE NOWAIT`).rejects.toMatchObject({ code: 'P2010', meta: { code: '55P03' } });
+    deletion = deleteTask(leader, f.taskId);
+    release.release();
+    const comment = await addition;
+    await deletion;
+    const deleted = await db.actionLog.findFirstOrThrow({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.deleted' } });
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).deletedAt).not.toBeNull();
+    await undoAction(leader, deleted.id);
+    expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).deletedAt).toBeNull();
+    expect((await db.comment.findUniqueOrThrow({ where: { id: comment.id } })).removedAt).toBeNull();
+    expect(await db.actionLog.count({ where: { targetId: f.taskId, action: 'comment.added' } })).toBe(1);
+    completed.push('comment-before-delete-preserved');
+  } finally {
+    spy.mockRestore(); release.release();
+    await Promise.allSettled([addition, ...(deletion ? [deletion] : [])]);
+    if (originalFlag === undefined) delete process.env.FF_TASK_COMMENTS;
+    else process.env.FF_TASK_COMMENTS = originalFlag;
+  }
+});
 it('direct delete and restore still work with their own transactions', async () => {
   const f = await fixture('task.created');
   await deleteTask(leader, f.taskId);
