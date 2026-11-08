@@ -46,19 +46,33 @@ beforeAll(async () => {
   ids = { project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId };
 }, 60000);
 afterAll(async () => {
-  await browser?.close();
-  let cleanup = false;
+  const failures: string[] = [];
+  let projectsAndPeopleCleaned = false;
+  let organisationArchived = false;
+  try {
+    await browser?.close();
+  } catch {
+    failures.push("browser close failed");
+  }
   try {
     if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects, ownedPeople);
+    projectsAndPeopleCleaned = true;
+  } catch {
+    failures.push("project/person cleanup failed");
+  }
+  try {
     if (ownedOrganisation) {
       const root = await superAdmin();
       expect((await root.c.post(`/api/orgs/${ownedOrganisation}/archive`, { archive: true })).status).toBe(200);
     }
-    cleanup = true;
+    organisationArchived = true;
+  } catch {
+    failures.push("organisation archive failed");
   } finally {
     mkdirSync(SHOTS, { recursive: true });
-    writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify({ projects: ownedProjects.length, people: ownedPeople.length, organisation: Boolean(ownedOrganisation), cleanup }, null, 2));
+    writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify({ projects: ownedProjects.length, people: ownedPeople.length, organisation: Boolean(ownedOrganisation), projectsAndPeopleCleaned, organisationArchived, cleanup: projectsAndPeopleCleaned && organisationArchived, failures }, null, 2));
   }
+  if (failures.length) throw new Error(`Viewport teardown failed: ${failures.join("; ")}`);
 });
 
 async function signedIn(width: number, who: "root" | "viewer" | null) {
