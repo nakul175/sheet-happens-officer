@@ -120,7 +120,7 @@ export async function zzProject(leader: Account, label: string) {
  * restores anything left in Trash and archives each project, then deactivates each person.
  * The API has no hard delete for people or projects.
  */
-export async function cleanupZz(projectIds: string[], people: Account[]) {
+export async function cleanupZz(projectIds: string[], people: Pick<Account, "id" | "email">[]) {
   const sa = await superAdmin();
   const problems: string[] = [];
   for (const id of projectIds) {
