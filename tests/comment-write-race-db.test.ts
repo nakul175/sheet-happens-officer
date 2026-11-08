@@ -14,6 +14,7 @@ vi.mock("next/server", () => ({ connection: vi.fn() }));
 const prefix = `comment-race-${randomUUID()}`;
 const leader = { id: `${prefix}-leader`, orgRole: "MEMBER" as const };
 const editor = { id: `${prefix}-editor`, orgRole: "MEMBER" as const };
+const mentioned = { id: `${prefix}-mentioned`, orgRole: "MEMBER" as const };
 const projects: string[] = [];
 let workspaceId = "";
 let safe = false;
@@ -27,6 +28,7 @@ async function fixture() {
   await db.projectMember.createMany({ data: [
     { projectId: project.id, userId: leader.id, role: "LEADER" },
     { projectId: project.id, userId: editor.id, role: "EDITOR" },
+    { projectId: project.id, userId: mentioned.id, role: "EDITOR" },
   ] });
   const section = await db.section.create({ data: { projectId: project.id, name: "To do", position: 0 } });
   const task = await db.task.create({ data: {
@@ -60,7 +62,7 @@ beforeAll(async () => {
   assertLocalFixture(process.env.DATABASE_URL);
   safe = true;
   workspaceId = (await getOrCreateWorkspace()).id;
-  for (const person of [leader, editor]) {
+  for (const person of [leader, editor, mentioned]) {
     await db.user.create({ data: {
       id: person.id, workspaceId, name: person.id, email: `${person.id}@example.invalid`,
       passwordHash: "unused", emailVerifiedAt: new Date(),
@@ -85,13 +87,13 @@ afterAll(async () => {
       await db.notification.deleteMany({ where: { projectId: { in: projects } } });
       await db.actionLog.deleteMany({ where: { projectId: { in: projects } } });
       await db.project.deleteMany({ where: { id: { in: projects } } });
-      await db.user.deleteMany({ where: { id: { in: [leader.id, editor.id] } } });
+      await db.user.deleteMany({ where: { id: { in: [leader.id, editor.id, mentioned.id] } } });
       expect(await db.project.count({ where: { id: { in: projects } } })).toBe(0);
-      expect(await db.user.count({ where: { id: { in: [leader.id, editor.id] } } })).toBe(0);
+      expect(await db.user.count({ where: { id: { in: [leader.id, editor.id, mentioned.id] } } })).toBe(0);
       cleanup = true;
     } finally {
       mkdirSync("test-results/comment-race", { recursive: true });
-      writeFileSync("test-results/comment-race/cleanup.json", JSON.stringify({ fixture: prefix, cleanup, projects: projects.length, people: 2 }, null, 2));
+      writeFileSync("test-results/comment-race/cleanup.json", JSON.stringify({ fixture: prefix, cleanup, projects: projects.length, people: 3 }, null, 2));
     }
   }
 });
@@ -109,6 +111,21 @@ it("membership removal committed after preflight denies an in-flight comment add
     expect(await db.comment.count({ where: { taskId } })).toBe(0);
     expect(await db.actionLog.count({ where: { targetId: taskId, action: "comment.added" } })).toBe(0);
     expect(await db.notification.count({ where: { taskId } })).toBe(notices);
+  } finally { pause.release(); await result; }
+});
+
+it("does not write a comment or notify a mention removed after preflight", async () => {
+  const { projectId, taskId } = await fixture();
+  const pause = pauseBeforeTransaction();
+  const result = Promise.allSettled([addComment(editor, taskId, { text: "Review with teammate", mentions: [mentioned.id] })]);
+  try {
+    await pause.ready();
+    await removeMember(leader, projectId, mentioned.id);
+    const noticesBefore = await db.notification.count({ where: { taskId, recipientId: mentioned.id } });
+    pause.release();
+    expect(await result).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 409 }) })]);
+    expect(await db.comment.count({ where: { taskId } })).toBe(0);
+    expect(await db.notification.count({ where: { taskId, recipientId: mentioned.id } })).toBe(noticesBefore);
   } finally { pause.release(); await result; }
 });
 
