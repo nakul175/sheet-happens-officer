@@ -172,6 +172,47 @@ for (const width of WIDTHS) {
   });
 }
 
+it("New deal buyer mismatch identifies its field and clears on edit @ 390 px", async () => {
+  const ctx = await signedIn(390, "root");
+  const page = await ctx.newPage();
+  let writes = 0;
+  try {
+    await page.route("**/api/deals", async (route) => {
+      if (route.request().method() === "POST") writes++;
+      await route.continue();
+    });
+    await page.route("**/api/orgs", async (route) => {
+      if (route.request().method() === "POST") writes++;
+      await route.continue();
+    });
+    await page.goto("/deals/new");
+    await page.getByRole("heading", { name: "New deal" }).waitFor();
+    await page.getByLabel("Deal name").fill("Buyer error accessibility check");
+    await page.getByLabel("Pipeline").selectOption({ label: "Proactive" });
+    const buyer = page.getByLabel("Client / Buyer");
+    await buyer.fill(`ZZ-MISSING-BUYER-${Date.now()}`);
+    await page.getByLabel("Why are we pursuing this?").fill("Check field error association");
+    await page.getByLabel("First next step").fill("Review buyer");
+    await page.getByRole("button", { name: "Create deal", exact: true }).click();
+    const alert = page.locator("#new-deal-buyer-error");
+    await alert.waitFor();
+    expect(await alert.getAttribute("role")).toBe("alert");
+    expect(await alert.textContent()).toMatch(/No existing organisation exactly matches/);
+    expect(await buyer.getAttribute("aria-invalid")).toBe("true");
+    expect(await buyer.getAttribute("aria-describedby")).toBe("new-deal-buyer-error");
+    expect(await alert.getAttribute("id")).toBe("new-deal-buyer-error");
+    const found: Finding[] = await page.evaluate(collect, { phone: true, width: 390 });
+    expect(found).toEqual([]);
+    await buyer.fill("Edited buyer name");
+    await alert.waitFor({ state: "detached" });
+    expect(await buyer.getAttribute("aria-invalid")).toBe("false");
+    expect(await buyer.getAttribute("aria-describedby")).toBe(null);
+    expect(writes).toBe(0);
+  } finally {
+    await ctx.close();
+  }
+});
+
 // The checks must catch what they claim to catch (SHO-US-22.11 AC2): a 400 px fixed-width element on a 320 px screen.
 describe("the checks themselves", () => {
   const html = (body: string, meta = "width=device-width, initial-scale=1, viewport-fit=cover") =>
