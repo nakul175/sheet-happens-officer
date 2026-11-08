@@ -89,6 +89,31 @@ it("Deal date-range error names both invalid inputs and clears after correction 
   } finally { await ctx.close(); }
 });
 
+it("BD reporting-period error names both invalid inputs and clears after correction at phone width", async () => {
+  const ctx = await ctxFor("root", 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/bd-intelligence", { waitUntil: "load" });
+    const from = page.getByLabel("From", { exact: true });
+    const to = page.getByLabel("To", { exact: true });
+    await from.fill("2026-11-10");
+    await to.fill("2026-11-09");
+    const error = page.locator("#bd-date-range-error[role=alert]");
+    await error.waitFor();
+    expect(await error.innerText()).toBe("From must be on or before To.");
+    for (const input of [from, to]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("true");
+      expect(await input.getAttribute("aria-describedby")).toBe("bd-date-range-error");
+    }
+    await to.fill("2026-11-10");
+    await error.waitFor({ state: "detached" });
+    for (const input of [from, to]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("false");
+      expect(await input.getAttribute("aria-describedby")).toBeNull();
+    }
+  } finally { await ctx.close(); }
+});
+
 
 async function ctxFor(who: "root" | "viewer" | null, width: number) {
   const ctx = await browser.newContext({ viewport: { width, height: 800 }, baseURL: BASE });
