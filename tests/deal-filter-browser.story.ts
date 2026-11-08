@@ -39,7 +39,13 @@ beforeAll(async()=>{
 afterAll(async()=>{
  await browser?.close();
  if(sa&&ids.length)await cleanupZz(ids,[]);
+ for(const id of ids){
+  const read=await sa.c.get(`/api/projects/${id}`);
+  expect(read.status).toBe(200);
+  expect(read.json.project.archived).toBe(true);
+ }
  if(sa&&org)expect((await sa.c.post(`/api/orgs/${org}/archive`,{archive:true})).status).toBe(200);
+ if(sa&&org){const read=await sa.c.get(`/api/orgs/${org}`);expect(read.status).toBe(200);expect(read.json.organisation.archived).toBe(true);}
 },120000);
 for(const width of [390,1280])it(`Existing opportunity/stage multi-select filters board and list at${width}px`,async()=>{
  const ctx=await browser.newContext({viewport:{width,height:844},baseURL:base});
@@ -70,5 +76,30 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   await page.getByRole('button',{name:'List',exact:true}).click();await waitIds([ids[0],ids[1]]);
   await page.screenshot({path:`reports/3134-shots/list-${width}.png`,fullPage:true});
   await page.getByRole('button',{name:'Clear filters',exact:true}).click();await waitIds(ids);
+  const results=page.locator('.deal-results');
+  expect(await results.innerText()).toContain('6 deals');
+  await page.getByRole('button',{name:'Date filters'}).click();
+  await page.getByLabel('No date').selectOption('exclude');
+  await waitIds([]);
+  expect(await results.innerText()).toContain('0 deals');
+  expect(await page.getByRole('region',{name:'No matching deals'}).isVisible()).toBe(true);
+  await page.getByLabel('No date').selectOption('only');
+  await waitIds(ids);
+  expect(await results.innerText()).toContain('6 deals');
+  await page.getByRole('button',{name:'Clear timeline filter'}).click();
+  await page.getByLabel('Sort').selectOption('name-desc');
+  const rows=page.getByRole('table',{name:'RFP/RFA + OTC sales table'}).locator('tbody tr td:first-child a');
+  expect(await rows.allTextContents()).toEqual([names[4],names[3],names[1],names[0]]);
+  await page.getByLabel('Sort').selectOption('name-asc');
+  expect(await rows.allTextContents()).toEqual([names[0],names[1],names[3],names[4]]);
+  await page.reload();
+  await page.getByRole('tab',{name:pipeName,exact:true}).click();
+  await waitIds(ids);
+  expect(await results.innerText()).toContain('6 deals');
+  await page.goto('/search');
+  await page.goBack();
+  await page.getByRole('tab',{name:pipeName,exact:true}).click();
+  await waitIds(ids);
+  expect(await results.innerText()).toContain('6 deals');
  }catch(error){await page.screenshot({path:`reports/3134-shots/failure-${width}.png`,fullPage:true});throw error;}finally{await ctx.close();}
 });
