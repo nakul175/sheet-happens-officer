@@ -2,9 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { test, local2691 } from "../helpers/2691-admin";
 import { newProject, newTask, postTaskCurrent } from "../helpers/migration-2731";
-import { expect, zz } from "./qa";
+import { account, PW } from "../local-api";
+import { expect, signInAs, zz } from "./qa";
 
-test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal and Undo", async ({ admin, later }) => {
+test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal and Undo", async ({ admin, later, browser }) => {
   if (!local2691) throw new Error("Contact audit requires the guarded local test database.");
   test.setTimeout(180_000);
   const fixture = randomUUID();
@@ -59,6 +60,29 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
     if (loaded.status === 200) expect((await admin.api.del(`/api/contacts/${contactId}`)).status).toBe(204);
     else expect(loaded.status).toBe(404);
   });
+  const observer = await account(zz("contact observer"), `nakul17+zz-crm-02-${fixture}@aplyd.com`);
+  later(async () => {
+    expect((await admin.api.post(`/api/team/${observer.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+  });
+  const beforeDenied = await admin.api.get(`/api/contacts/${contactId}`);
+  expect(beforeDenied.status).toBe(200);
+  const contactHash = createHash("sha256").update(JSON.stringify(beforeDenied.json.contact)).digest("hex");
+  const observerList = await observer.c.get(`/api/orgs/${orgId}/contacts`);
+  expect(observerList.status).toBe(200);
+  expect(observerList.json.contacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: contactId, canEdit: false })]));
+  expect((await observer.c.patch(`/api/contacts/${contactId}`, { role: "unauthorised" })).status).toBe(403);
+  expect((await observer.c.del(`/api/contacts/${contactId}`)).status).toBe(403);
+  const deniedAfter = await admin.api.get(`/api/contacts/${contactId}`);
+  expect(createHash("sha256").update(JSON.stringify(deniedAfter.json.contact)).digest("hex")).toBe(contactHash);
+  const observerSession = await signInAs(browser, observer.email, PW);
+  try {
+    await observerSession.page.goto(`/accounts/${orgId}?tab=contacts`);
+    const observerRow = observerSession.page.getByRole("region", { name: "Organisation contacts", exact: true })
+      .getByRole("row").filter({ has: observerSession.page.getByText(name, { exact: true }) });
+    await expect(observerRow).toBeVisible();
+    await expect(observerRow.getByRole("button", { name: /^Edit / })).toHaveCount(0);
+    await expect(observerRow.getByRole("button", { name: /^Remove / })).toHaveCount(0);
+  } finally { await observerSession.ctx.close(); }
   const linked = await postTaskCurrent(admin, taskId, "links", { contactId });
   expect(linked.status).toBe(201);
   const linkedTask = await admin.api.get(`/api/tasks/${taskId}`);
@@ -105,5 +129,5 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.links).toEqual([expect.objectContaining({ contact: expect.objectContaining({ id: contactId, organisationId: orgId }) })]);
   expect(createHash("sha256").update(JSON.stringify((await admin.api.get(`/api/orgs/${sentinelId}`)).json.organisation)).digest("hex")).toBe(sentinelHash);
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, orgId, sentinelId, projectId: project.id, taskId, contactId, mobileWidth: 390,
-    originalOrganisationFixed: true, linkedTaskHiddenOnRemoval: true, linkedTaskRestoredOnUndo: true, replayRejected: true, sentinelPreserved: true }, null, 2));
+    originalOrganisationFixed: true, nonCreatorReadOnly: true, deniedWritesPreservedContact: true, linkedTaskHiddenOnRemoval: true, linkedTaskRestoredOnUndo: true, replayRejected: true, sentinelPreserved: true }, null, 2));
 });
