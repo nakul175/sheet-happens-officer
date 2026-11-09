@@ -1,3 +1,4 @@
+import { multiWorkspaceEnabled, workspaceScope, workspacePeopleWhere, personInWorkspace, requireOriginalAccountAdministration } from "@/lib/workspace-authority";
 import { invitedNativeId } from "@/lib/invited-central-identity";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
@@ -14,9 +15,16 @@ import { releasePerson } from "@/lib/people";
  * Members see active names only; Admins see everything.
  */
 export async function listTeam(user: Actor) {
-  const users = await db.user.findMany({ orderBy: { name: "asc" } });
+  const users = await db.user.findMany({ where: multiWorkspaceEnabled() ? workspacePeopleWhere(user.workspaceId!) : {}, orderBy: { name: "asc" } });
+  if (multiWorkspaceEnabled()) {
+    const memberships=await db.workspaceMembership.findMany({where:{workspaceId:user.workspaceId,revokedAt:null}});
+    for (const person of users) if(person.workspaceId!==user.workspaceId) {
+      const membership=memberships.find(m=>m.userId===person.id);
+      if (membership) person.orgRole=membership.role;
+    }
+  }
   const led = await db.projectMember.findMany({
-    where: { role: "LEADER", project: { archivedAt: null, typeId: "wst_project", ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }) } },
+    where: { role: "LEADER", project: { ...workspaceScope(user), archivedAt: null, typeId: "wst_project", ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }) } },
     select: { userId: true, project: { select: { id: true, name: true } } },
     orderBy: { project: { name: "asc" } },
   });
@@ -44,6 +52,7 @@ export function assertCanSetOrgRole(actor: Actor) {
 
 /** SHO-US-2.2. Only the Super Admin; Super Admin itself can never be granted or removed here. */
 export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" | "ADMIN") {
+  await requireOriginalAccountAdministration(actor, targetId);
   assertCanSetOrgRole(actor);
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Person");
@@ -66,6 +75,7 @@ export function mayAct(actor: Actor, target: { orgRole: string; email: string })
 
 /** SHO-US-2.3 and 2.4. `reassign` is a person's id, or "leaders" for each project's Leader. */
 export async function deactivate(actor: Actor, targetId: string, reassign: string) {
+  await requireOriginalAccountAdministration(actor, targetId);
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Person");
   if (!mayAct(actor, target)) throw new ApiError(403, "You cannot deactivate this person.");
@@ -125,6 +135,7 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
 
 /** Restores sign-in only; reassigned tasks are not moved back (SHO-US-2.3 AC3). */
 export async function reactivate(actor: Actor, targetId: string) {
+  await requireOriginalAccountAdministration(actor, targetId);
   const target = await db.user.findUnique({ where: { id: targetId } });
   if (!target) throw notFound("Person");
   if (!mayAct(actor, target)) throw new ApiError(403, "You cannot reactivate this person.");
@@ -139,6 +150,7 @@ type AddInput = { firstName: string; lastName: string; email: string; role: "MEM
 
 /** SHO-US-15.2. Super Admin only. The account is active at once; the password goes out by email and is never stored in clear. */
 export async function addPerson(actor: Actor & { name?: string }, input: AddInput) {
+  await requireOriginalAccountAdministration(actor);
   if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can add people.");
   const existing = await db.user.findUnique({ where: { email: input.email } });
   if (existing) {
@@ -147,7 +159,7 @@ export async function addPerson(actor: Actor & { name?: string }, input: AddInpu
     });
   }
   const workspace =
-    (await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await db.workspace.create({ data: { name: "Workspace" } }));
+    (multiWorkspaceEnabled() ? await db.workspace.findUniqueOrThrow({where:{id:actor.workspaceId!}}) : await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await db.workspace.create({ data: { name: "Workspace" } }));
   const password = generatePassword();
   const now = new Date();
   const user = await db.$transaction(async (tx) => {
@@ -181,6 +193,7 @@ async function sendDetails(to: string, firstName: string, by: string, password: 
 
 /** SHO-US-15.3. New password, old one dead, every session signed out. The Super Admin never sees it. */
 export async function resendSignIn(actor: Actor & { name?: string }, targetId: string) {
+  await requireOriginalAccountAdministration(actor, targetId);
   if (invitedNativeId(targetId)) throw new ApiError(409, "Manage this invited account through Aplyd Accounts.");
   if (actor.orgRole !== "SUPER_ADMIN") throw new ApiError(403, "Only the Super Admin can resend sign-in details.");
   const target = await db.user.findUnique({ where: { id: targetId } });
@@ -209,7 +222,7 @@ const hiddenDealNotice = () => [{ name: HIDDEN_DEAL_LABEL, href: null as null }]
 
 /** SHO-US-15.4. Members see a name and shared projects. Admins see the rest. A hidden deal is one sentence (APL-2728). */
 export async function getPerson(actor: Actor, targetId: string) {
-  const target = await db.user.findUnique({ where: { id: targetId } });
+  const target = multiWorkspaceEnabled() ? await personInWorkspace(targetId,actor.workspaceId!) : await db.user.findUnique({ where: { id: targetId } });
   const admin = isAdmin(actor);
   if (!target || (!admin && !isActive(target))) throw notFound("Person");
   const mine = admin ? null : new Set((await db.projectMember.findMany({ where: { userId: actor.id }, select: { projectId: true } })).map((m) => m.projectId));
@@ -219,7 +232,7 @@ export async function getPerson(actor: Actor, targetId: string) {
     where: {
       userId: targetId,
       ...(mine ? { projectId: { in: [...mine] } } : {}),
-      project: { archivedAt: null },
+      project: { ...workspaceScope(actor), archivedAt: null },
     },
     select: { role: true, projectId: true, project: { select: { id: true, name: true, typeId: true } } },
     orderBy: { project: { name: "asc" } },
@@ -232,7 +245,7 @@ export async function getPerson(actor: Actor, targetId: string) {
   const open = await db.task.groupBy({
     by: ["projectId"],
     where: {
-      assigneeId: targetId,
+      ...workspaceScope(actor), assigneeId: targetId,
       completedAt: null,
       deletedAt: null,
       parentId: null,

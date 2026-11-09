@@ -1,3 +1,4 @@
+import { scopedUser, workspaceScope, multiWorkspaceEnabled, personInWorkspace, workspacePeopleWhere } from "@/lib/workspace-authority";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
@@ -18,7 +19,7 @@ async function validateVertical(id: string, workspaceId: string) {
 
 export const VERTICAL_SUGGESTIONS = ["Growth", "Marketing", "Founder's Office"] as const;
 export async function listVerticals(user: Actor) {
-  const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  const me = await scopedUser(user);
   // project-lookup-ok: only vocabulary labels in the actor's workspace; board access still uses projectAccess.
   const rows = await db.project.findMany({ where: { workspaceId: me.workspaceId, typeId: WORKSTREAM_PROJECT, isVertical: true, deletedAt: null }, orderBy: { name: "asc" }, select: { id: true, name: true, archivedAt: true } });
   return rows.map(row => ({ id: row.id, name: row.name, retired: !!row.archivedAt }));
@@ -28,7 +29,7 @@ export async function classifyProject(user: Actor, projectId: string, isVertical
   if (!isAdmin(user)) throw new ApiError(403, "Only Admins classify vertical boards.");
   const a = await projectAccess(user, projectId, { write: true });
   if (a.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Deals cannot become vertical boards.");
-  const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  const me = await scopedUser(user);
   if (a.project.workspaceId !== me.workspaceId) throw notFound("Project");
   // project-lookup-ok: count references to the already-authorized workspace board to prevent dangling classifications.
   if (!isVertical && await db.project.count({ where: { verticalId: projectId } })) throw new ApiError(409, "Reclassify linked delivery projects before changing this vertical board.");
@@ -43,14 +44,15 @@ export async function createProject(user: Actor, input: { name: string; descript
   if (input.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins manage verticals.");
   const leader = await db.user.findUnique({ where: { id: input.leaderId } });
   if (!leader || !isActive(leader)) throw new ApiError(400, "Choose an active person as Leader.");
-  const me = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  const me = await scopedUser(user);
+  if (multiWorkspaceEnabled() && !await personInWorkspace(leader.id,me.workspaceId)) throw new ApiError(400,"Choose a person in this workspace.");
   if (input.verticalId) await validateVertical(input.verticalId, me.workspaceId);
   if (input.isVertical && input.verticalId) throw new ApiError(400, "A vertical board cannot belong to another vertical.");
   // SHO-US-14.17: the people added with the project must be active; the Leader and the creator already have a seat.
   const wanted = new Map<string, "EDITOR" | "VIEWER">();
   for (const m of input.members ?? []) if (m.userId !== leader.id && m.userId !== user.id) wanted.set(m.userId, m.role);
   if (wanted.size) {
-    const found = await db.user.findMany({ where: { id: { in: [...wanted.keys()] } } });
+    const found = await db.user.findMany({ where: { id: { in: [...wanted.keys()] }, ...(multiWorkspaceEnabled() ? workspacePeopleWhere(me.workspaceId) : {}) } });
     if (found.length !== wanted.size || !found.every(isActive)) throw new ApiError(400, "Choose active people to add.");
   }
   return db.$transaction(async (tx) => {
@@ -79,6 +81,7 @@ export async function listProjects(user: Actor, archived: boolean, deleted = fal
   const projects = await db.project.findMany({
     where: {
       // SHO-US-10.4: deals have their own place; this list is for type Project only.
+      ...workspaceScope(user),
       typeId: WORKSTREAM_PROJECT,
       deletedAt: deleted ? { not: null } : null,
       ...(deleted ? {} : { archivedAt: archived ? { not: null } : null }),
@@ -220,7 +223,7 @@ export async function restoreProject(user: Actor, projectId: string) {
 export async function addMember(user: Actor, projectId: string, userId: string, role: "EDITOR" | "VIEWER") {
   const a = await projectAccess(user, projectId, { write: true });
   requireManage(a);
-  const person = await db.user.findUnique({ where: { id: userId } });
+  const person = multiWorkspaceEnabled() ? await personInWorkspace(userId,a.project.workspaceId) : await db.user.findUnique({ where: { id: userId } });
   if (!person || !isActive(person)) throw new ApiError(400, "Choose an active person.");
   if (a.project.members.some((m) => m.userId === userId)) throw new ApiError(409, "This person is already a member.");
   await db.$transaction(async (tx) => {
@@ -334,10 +337,10 @@ export async function searchWorkspacePeople(user: Actor, projectId: string, text
   requireManage(a);
   const q = text.trim();
   if (q.length < 2) return { people: [], canAdd: true };
-  const actor = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  const actor = await scopedUser(user);
   const people = await db.user.findMany({
     where: {
-      workspaceId: actor.workspaceId,
+      ...workspacePeopleWhere(actor.workspaceId),
       deactivatedAt: null,
       emailVerifiedAt: { not: null },
       OR: [{ name: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }],

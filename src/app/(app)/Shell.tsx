@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
 import Image from "next/image";
 import "./nav-header.css";
 import "./audit-ui.css";
@@ -22,7 +23,7 @@ function followOverlayLink(e: React.MouseEvent, close: (after?: () => void) => v
   e.preventDefault(); close(() => push(`${url.pathname}${url.search}${url.hash}`));
 }
 
-export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; workload?: boolean; compact?: boolean; startGuide?: boolean };
+export type Me = { id: string; name: string; email: string; orgRole: "MEMBER" | "ADMIN" | "SUPER_ADMIN"; crm?: boolean; review?: boolean; workload?: boolean; compact?: boolean; startGuide?: boolean; multiWorkspace?: boolean };
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
 export const roleLabel = (r: Me["orgRole"]) => (r === "SUPER_ADMIN" ? "Super Admin" : r === "ADMIN" ? "Admin" : "Member");
@@ -200,6 +201,7 @@ export function Shell({ user, children }: { user: Me; children: React.ReactNode 
               <button className="account-trigger" aria-label={`Account and utilities, ${initials(user.name)}`} aria-expanded={utilityOpen} aria-controls="account-utilities" onClick={() => { if (utilityOpen) closeUtility(); else closeTopOverlayThen(() => { setUtilityAt(path); utility.current?.querySelector<HTMLButtonElement>(".account-trigger")?.focus(); }); }}><span className="av">{initials(user.name)}</span></button>
               {utilityOpen && <div className="account-options" id="account-utilities" aria-label="Account and utilities" onClickCapture={e => followOverlayLink(e, closeUtility, href => router.push(href))}>
                 <strong>{user.name}</strong><small>{roleLabel(user.orgRole)}</small>
+                {user.multiWorkspace && <WorkspaceSwitcher />}
                 <Link href="/profile">Profile</Link>
                 {items.filter(([h]) => h === "/audit").map(([h,l]) => <Link href={h} key={h}>{l}</Link>)}
                 <DensityToggle compact={compact} onChange={chooseDensity} />

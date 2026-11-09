@@ -1,3 +1,4 @@
+import { workspaceScope } from "@/lib/workspace-authority";
 // SHO-US-13.3: the Monday pipeline review. Everything is limited to what the viewer may see.
 import { db } from "@/lib/db";
 import { isAdmin, type Actor } from "@/lib/access";
@@ -23,7 +24,7 @@ function inTimeline(deadline: string | null | undefined, timeline: ReviewTimelin
 export async function leadsAnyDeal(user: Actor) {
   if (!crmVisible(user)) return false;
   if (isAdmin(user)) return true;
-  return !!(await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { typeId: WORKSTREAM_DEAL, archivedAt: null } }, select: { projectId: true } }));
+  return !!(await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { ...workspaceScope(user), typeId: WORKSTREAM_DEAL, archivedAt: null } }, select: { projectId: true } }));
 }
 
 export async function pipelineReview(user: Actor, timeline: ReviewTimeline = "all", now = Date.now()) {
@@ -41,7 +42,7 @@ export async function pipelineReview(user: Actor, timeline: ReviewTimeline = "al
   const ideaRows = await db.task.findMany({
     where: {
       isIdea: true, completedAt: null, deletedAt: null, parentId: null, createdAt: { lt: cutoff },
-      project: { archivedAt: null, typeId: { not: WORKSTREAM_DEAL }, ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }) },
+      project: { ...workspaceScope(user), archivedAt: null, typeId: { not: WORKSTREAM_DEAL }, ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }) },
     },
     orderBy: { createdAt: "asc" }, take: 100,
     include: { assignee: { select: { id: true, name: true } }, project: { select: { id: true, name: true, members: { where: { userId: user.id }, select: { role: true } } } } },

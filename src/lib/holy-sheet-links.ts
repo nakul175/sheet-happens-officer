@@ -1,3 +1,4 @@
+import { scopedUser, multiWorkspaceEnabled } from '@/lib/workspace-authority';
 import { holyQaIdentity } from "@/lib/holy-qa-identity";
 import { Prisma } from '@/generated/prisma/client';
 import { currentSessionId } from '@/lib/auth';
@@ -59,7 +60,9 @@ export async function changeDocument(actor: Actor, origin: DocumentOrigin, input
         await tx.$queryRaw `SELECT "userId" FROM ${table('ProjectMember')} WHERE "projectId"=${c.projectId} FOR SHARE`;
         // project-lookup-ok: Re-read the previously authorized source under Project/ProjectMember locks; membership/write checks immediately follow.
         const project = await tx.project.findUnique({ where: { id: c.projectId }, include: { members: true } });
-        const role = actor.orgRole !== 'MEMBER' ? 'LEADER' : project?.members.find(m => m.userId === actor.id)?.role;
+        const freshActor = multiWorkspaceEnabled() ? await scopedUser(actor, tx) : actor;
+        if (multiWorkspaceEnabled() && project?.workspaceId !== freshActor.workspaceId) throw notFound();
+        const role = freshActor.orgRole !== 'MEMBER' ? 'LEADER' : project?.members.find(m => m.userId === actor.id)?.role;
         if (!project || project.deletedAt || !role)
             throw notFound();
         if (project.archivedAt)

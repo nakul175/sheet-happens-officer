@@ -1,3 +1,4 @@
+import { scopedUser } from "@/lib/workspace-authority";
 // SHO-US-11.1: organisations with a parent tree. Visible to every signed-in Member (owner decision
 // 17 Oct 2026); only the creator and Admins edit or archive. Changes are logged with no project.
 import { db } from "@/lib/db";
@@ -12,7 +13,7 @@ export type OrgInput = {
 };
 
 async function me(user: Actor) {
-  return db.user.findUniqueOrThrow({ where: { id: user.id }, select: { id: true, workspaceId: true, orgRole: true } });
+  return scopedUser(user);
 }
 
 /** Loads an organisation in the person's workspace, or "not found". */

@@ -54,14 +54,14 @@ async function taskDocumentUnavailable(request: NextRequest): Promise<Response |
   try {
     user = await sessionUser(token, { allowTempPassword: true });
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) return null;
+    if (err instanceof ApiError && (err.status === 401 || err.extra?.code === "WORKSPACE_UNAVAILABLE")) return null;
     throw err;
   }
   // The password wall replaces every page. A 404 here would hide that screen.
   if (user.tempPasswordAt) return null;
   const { assertTaskReadable, TASK_UNAVAILABLE_HTML } = await import("@/lib/task-access");
   try {
-    await assertTaskReadable({ id: user.id, orgRole: user.orgRole }, id);
+    await assertTaskReadable(user, id);
     return null;
   } catch (err) {
     if (!(err instanceof ApiError && err.status === 404)) throw err;

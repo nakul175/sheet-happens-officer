@@ -1,3 +1,4 @@
+import { multiWorkspaceEnabled } from "@/lib/workspace-authority";
 import { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { crmProjectWhere, crmVisible, isAdmin, WORKSTREAM_PROJECT, type Actor } from "@/lib/access";
@@ -85,7 +86,7 @@ export async function dashboardActivity(user: Actor, now = new Date()) {
     const ids = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
       SELECT a.id FROM "ActionLog" a JOIN "Project" p ON p.id = a."projectId"
       JOIN "ProjectMember" m ON m."projectId" = p.id AND m."userId" = ${user.id}
-      WHERE p."deletedAt" IS NULL AND p."archivedAt" IS NULL AND a."createdAt" >= ${cutoff}
+      WHERE (${!multiWorkspaceEnabled()} OR p."workspaceId"=${user.workspaceId ?? ""}) AND p."deletedAt" IS NULL AND p."archivedAt" IS NULL AND a."createdAt" >= ${cutoff}
       AND (${crmVisible(user)} OR p."typeId" <> 'wst_deal')
       AND (${isAdmin(user)} OR m.role = 'LEADER' OR EXISTS (
         SELECT 1 FROM "ActionLog" creation WHERE creation."projectId" = p.id AND creation."actorId" = ${user.id} AND creation.action IN ('project.created','deal.created'))

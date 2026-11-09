@@ -117,7 +117,7 @@ describe("a real failure still shows LoadFailed", () => {
       const page = await open(s.path(), s.api(), (route) => route.abort("internetdisconnected"));
       try {
         await loadFailed(page).waitFor({ state: "visible", timeout: 15000 });
-        expect(await page.getByRole("button", { name: "Retry" }).count()).toBe(1);
+        await expect.poll(() => page.getByRole("button", { name: "Retry" }).count(), { timeout: 15000 }).toBe(1);
       } finally { await page.close(); }
     });
     it(`${s.name}: a 5xx shows ${s.name === "Person" ? "\"Something went wrong, try again\"" : "LoadFailed"}, and Retry loads the screen once the server answers`, async () => {

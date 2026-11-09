@@ -1,3 +1,4 @@
+import { workspaceScope, multiWorkspaceEnabled, personInWorkspace } from "@/lib/workspace-authority";
 // SHO-US-14.4: first-run orientation. Who the Leaders are, asking to be added, and dismissing the start guide.
 import { db } from "@/lib/db";
 import { notFound } from "@/lib/http";
@@ -10,13 +11,13 @@ import { notify } from "@/lib/notify";
  */
 export async function listLeaders(user: Actor) {
   const rows = await db.projectMember.findMany({
-    where: { role: "LEADER", userId: { not: user.id }, project: { archivedAt: null, typeId: "wst_project" } },
+    where: { role: "LEADER", userId: { not: user.id }, project: { ...workspaceScope(user), archivedAt: null, typeId: "wst_project" } },
     select: { user: { select: { id: true, name: true, deactivatedAt: true, emailVerifiedAt: true } } },
   });
   const seen = new Map<string, string>();
-  for (const r of rows) if (isActive(r.user)) seen.set(r.user.id, r.user.name);
+  for (const r of rows) if (isActive(r.user) && (!multiWorkspaceEnabled() || await personInWorkspace(r.user.id,user.workspaceId!))) seen.set(r.user.id, r.user.name);
   if (seen.size) return { kind: "LEADER" as const, people: [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)) };
-  const admins = await db.user.findMany({ where: { orgRole: { not: "MEMBER" }, id: { not: user.id }, deactivatedAt: null, emailVerifiedAt: { not: null } }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+  const admins = await db.user.findMany({ where: { ...(multiWorkspaceEnabled() ? { OR: [{workspaceId:user.workspaceId,orgRole:{not:"MEMBER" as const}}, {additionalWorkspaces:{some:{workspaceId:user.workspaceId,revokedAt:null,role:"ADMIN" as const}}}] } : {orgRole: {not:"MEMBER" as const}}), id: { not: user.id }, deactivatedAt: null, emailVerifiedAt: { not: null } }, select: { id: true, name: true }, orderBy: { name: "asc" } });
   return { kind: "ADMIN" as const, people: admins };
 }
 

@@ -1,3 +1,4 @@
+import { workspaceScope } from "@/lib/workspace-authority";
 import { createHash } from "node:crypto";
 import { currentUser } from "@/lib/auth";
 import { crmMode } from "@/lib/access";
@@ -9,7 +10,7 @@ import { handle } from "@/lib/http";
 export const GET = handle(async () => {
   const user = await currentUser();
   const memberships = await db.projectMember.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, project: workspaceScope(user) },
     orderBy: { projectId: "asc" },
     select: { projectId: true, role: true, project: { select: {
       archivedAt: true, deletedAt: true, typeId: true,
@@ -18,7 +19,7 @@ export const GET = handle(async () => {
   });
   const revision = createHash("sha256").update(JSON.stringify({
     user: user.id, workspace: user.workspaceId, orgRole: user.orgRole,
-    crm: crmMode(), memberships,
+    crm: crmMode(), workspaceGeneration:user.workspaceGeneration, memberships,
   })).digest("hex");
   return Response.json({ revision }, { headers: { "Cache-Control": "private, no-store" } });
 });

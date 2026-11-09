@@ -1,3 +1,4 @@
+import { scopedUser } from "@/lib/workspace-authority";
 import { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { crmVisible, isAdmin, type Actor } from "@/lib/access";
@@ -13,7 +14,7 @@ export async function rankedSearch(user: Actor, query: string, options: {
   const terms = searchTerms(phrase);
   if (phrase.length < 2 || !terms.length) return [];
   // Re-read current authority; never trust an earlier session's role or workspace.
-  const actor = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true } });
+  const actor = await scopedUser(user);
   if (actor.deactivatedAt) return [];
   const current = { id: user.id, orgRole: actor.orgRole };
   const crm = crmVisible(current);
