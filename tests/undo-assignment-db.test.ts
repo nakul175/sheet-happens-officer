@@ -132,7 +132,7 @@ for (const kind of kinds) {
     completed.push(kind + ':rollback-retry');
   });
 }
-it('override Undo does not notify a later author who left the project', async () => {
+for (const departure of ['removed', 'deactivated'] as const) it(`override Undo does not notify a ${departure} later author`, async () => {
   const f = await fixture('task.sent_back');
   await db.task.update({ where: { id: f.taskId }, data: { assigneeId: editor.id } });
   await db.actionLog.create({ data: {
@@ -140,12 +140,18 @@ it('override Undo does not notify a later author who left the project', async ()
     channel: 'SCREEN', action: 'task.assigned', beforeState: { assigneeId: leader.id },
     afterState: { assigneeId: editor.id },
   } });
-  await removeMember(leader, f.projectId, previous.id);
-  await undoAction(editor, f.actionId, true);
-  expect(await db.notification.count({ where: {
-    projectId: f.projectId, taskId: f.taskId, recipientId: previous.id, type: 'CHANGE_OVERRIDDEN',
-  } })).toBe(0);
-  completed.push('override-departed-author-notice');
+  if (departure === 'removed') await removeMember(leader, f.projectId, previous.id);
+  else await db.user.update({ where: { id: previous.id }, data: { deactivatedAt: new Date() } });
+  try {
+    expect(await undoAction(editor, f.actionId, true)).toMatchObject({ overrode: true });
+    expect(await db.notification.count({ where: {
+      projectId: f.projectId, taskId: f.taskId, recipientId: previous.id, type: 'CHANGE_OVERRIDDEN',
+    } })).toBe(0);
+    expect(await db.auditLog.count({ where: { targetId: f.taskId, event: 'UNDO_OVERRIDE' } })).toBe(1);
+    completed.push(`override-${departure}-author-notice`);
+  } finally {
+    if (departure === 'deactivated') await db.user.update({ where: { id: previous.id }, data: { deactivatedAt: null } });
+  }
 });
 for (const scenario of ['removed', 'downgraded', 'archived'] as const) {
   it(`${scenario} actor/project after preflight blocks assignment Undo with unchanged state`, async () => {
