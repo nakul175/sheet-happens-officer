@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { getOrCreateWorkspace } from "@/lib/workspace";
 import { addComment, editComment, removeComment } from "@/lib/comments";
 import { changeMemberRole, removeMember } from "@/lib/projects";
+import { deactivate } from "@/lib/team";
 import type { Tx } from "@/lib/access";
 import { assertLocalFixture } from "./e2e/local-fixture-guard";
 
@@ -15,6 +16,7 @@ const prefix = `comment-race-${randomUUID()}`;
 const leader = { id: `${prefix}-leader`, orgRole: "MEMBER" as const };
 const editor = { id: `${prefix}-editor`, orgRole: "MEMBER" as const };
 const mentioned = { id: `${prefix}-mentioned`, orgRole: "MEMBER" as const };
+const departing = { id: `${prefix}-departing`, orgRole: "MEMBER" as const };
 const projects: string[] = [];
 let workspaceId = "";
 let safe = false;
@@ -62,7 +64,7 @@ beforeAll(async () => {
   assertLocalFixture(process.env.DATABASE_URL);
   safe = true;
   workspaceId = (await getOrCreateWorkspace()).id;
-  for (const person of [leader, editor, mentioned]) {
+  for (const person of [leader, editor, mentioned, departing]) {
     await db.user.create({ data: {
       id: person.id, workspaceId, name: person.id, email: `${person.id}@example.invalid`,
       passwordHash: "unused", emailVerifiedAt: new Date(),
@@ -87,13 +89,13 @@ afterAll(async () => {
       await db.notification.deleteMany({ where: { projectId: { in: projects } } });
       await db.actionLog.deleteMany({ where: { projectId: { in: projects } } });
       await db.project.deleteMany({ where: { id: { in: projects } } });
-      await db.user.deleteMany({ where: { id: { in: [leader.id, editor.id, mentioned.id] } } });
+      await db.user.deleteMany({ where: { id: { in: [leader.id, editor.id, mentioned.id, departing.id] } } });
       expect(await db.project.count({ where: { id: { in: projects } } })).toBe(0);
-      expect(await db.user.count({ where: { id: { in: [leader.id, editor.id, mentioned.id] } } })).toBe(0);
+      expect(await db.user.count({ where: { id: { in: [leader.id, editor.id, mentioned.id, departing.id] } } })).toBe(0);
       cleanup = true;
     } finally {
       mkdirSync("test-results/comment-race", { recursive: true });
-      writeFileSync("test-results/comment-race/cleanup.json", JSON.stringify({ fixture: prefix, cleanup, projects: projects.length, people: 3 }, null, 2));
+      writeFileSync("test-results/comment-race/cleanup.json", JSON.stringify({ fixture: prefix, cleanup, projects: projects.length, people: 4 }, null, 2));
     }
   }
 });
@@ -139,6 +141,24 @@ it.each(["remove", "viewer"] as const)("does not notify a previous assignee afte
   await addComment(leader, taskId, { text: "Private update after handover" });
   expect(await db.notification.count({ where: { taskId, recipientId: editor.id, type: "COMMENT_ADDED" } })).toBe(0);
   expect((await db.task.findUniqueOrThrow({ where: { id: taskId } })).previousAssigneeId).toBeNull();
+});
+
+it("does not notify a deactivated previous assignee about later approval-task comments", async () => {
+  const { projectId, taskId } = await fixture();
+  await db.projectMember.create({ data: { projectId, userId: departing.id, role: "EDITOR" } });
+  await db.task.update({ where: { id: taskId }, data: {
+    approverId: leader.id, assigneeId: leader.id, previousAssigneeId: departing.id,
+  } });
+  await db.user.update({ where: { id: leader.id }, data: { orgRole: "ADMIN" } });
+  try {
+    await deactivate({ ...leader, orgRole: "ADMIN" }, departing.id, "leaders");
+    await addComment(leader, taskId, { text: "Private update after deactivation" });
+    expect(await db.notification.count({ where: { taskId, recipientId: departing.id, type: "COMMENT_ADDED" } })).toBe(0);
+    expect((await db.task.findUniqueOrThrow({ where: { id: taskId } })).previousAssigneeId).toBeNull();
+  } finally {
+    await db.user.update({ where: { id: leader.id }, data: { orgRole: "MEMBER" } });
+    await db.user.update({ where: { id: departing.id }, data: { deactivatedAt: null } });
+  }
 });
 
 it("does not replace an edited comment with a mention removed after preflight", async () => {
