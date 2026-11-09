@@ -150,6 +150,9 @@ it('allows the current author to update one contact with one action', async () =
 it('refuses an older form after another editor changes a field or Known by membership', async () => {
   const row = await fixture();
   const expected = { name: row.name, role: row.role, email: row.email, phone: row.phone, knownBy: [author.id] };
+  const initial = await snapshot(row.id);
+  await updateContact(author, row.id, { name: row.name, expected });
+  expect(await snapshot(row.id)).toEqual(initial);
   await updateContact(admin, row.id, { role: 'current role' });
   const afterRole = await snapshot(row.id);
   await expect(updateContact(author, row.id, { name: prefix + '-stale', role: 'stale role', expected })).rejects.toMatchObject({ status: 409 });

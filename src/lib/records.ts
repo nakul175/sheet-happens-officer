@@ -160,6 +160,7 @@ export async function updateContact(user: Actor, id: string, input: { name?: str
         (["name", "role", "email", "phone"] as const).some((key) => fresh[key] !== c[key])) {
       throw new ApiError(409, "This contact changed while you were editing. Reload and try again.");
     }
+    if (!Object.keys(after).length) return fresh;
     if (known) {
       const currentKnown = (await tx.contactKnownBy.findMany({ where: { contactId: id }, select: { userId: true } })).map((item) => item.userId).sort();
       if (JSON.stringify(currentKnown) !== JSON.stringify(cur.map((item) => item.userId).sort())) {
