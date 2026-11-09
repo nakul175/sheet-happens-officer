@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { moveTask } from '@/lib/tasks';
+import { undoAction } from '@/lib/undo';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 vi.mock('next/server', () => ({ connection: vi.fn() }));
@@ -127,4 +128,19 @@ it('moves an eligible task once and records the destination', async () => {
   expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).sectionId).toBe(f.doingId);
   expect(await db.actionLog.count({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.moved' } })).toBe(1);
   completed.push('eligible-control');
+});
+it('keeps a task document link attached through a section move and Undo', async () => {
+  const f = await fixture();
+  const pageId = randomUUID();
+  const link = await db.holySheetLink.create({ data: { projectId: f.projectId, taskId: f.taskId, originKey: `task:${f.taskId}`, pageId } });
+  const before = await db.holySheetLink.findUniqueOrThrow({ where: { id: link.id } });
+  await moveTask(editor, f.taskId, f.doingId, f.version);
+  const action = await db.actionLog.findFirstOrThrow({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.moved' } });
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).sectionId).toBe(f.doingId);
+  expect(await db.holySheetLink.findUniqueOrThrow({ where: { id: link.id } })).toEqual(before);
+  await undoAction(leader, action.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).sectionId).toBe(f.todoId);
+  expect(await db.holySheetLink.findUniqueOrThrow({ where: { id: link.id } })).toEqual(before);
+  expect(await db.holySheetLink.count({ where: { projectId: f.projectId, taskId: f.taskId } })).toBe(1);
+  completed.push('document-link-move-undo');
 });
