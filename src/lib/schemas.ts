@@ -172,6 +172,7 @@ export const contactCreate = z.object({
   phone: optStr(60), knownBy: z.array(z.string().min(1)).max(50).optional(),
 });
 export const contactUpdate = contactCreate.partial().extend({
+  organisationId: z.never().optional(),
   expected: z.object({
     name: z.string(), role: z.string().nullable(), email: z.string().nullable(), phone: z.string().nullable(),
     knownBy: z.array(z.string()),

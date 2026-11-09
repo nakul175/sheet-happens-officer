@@ -77,7 +77,7 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   expect(edited.json.contact).toMatchObject({ organisationId: orgId, role: "Senior liaison" });
   expect(edited.json.contact.tasks.map((item: { id: string }) => item.id)).toContain(taskId);
   const reassignment = await admin.api.patch(`/api/contacts/${contactId}`, { organisationId: sentinelId, role: "Senior liaison" });
-  expect(reassignment.status).toBe(200);
+  expect(reassignment.status).toBe(400);
   expect((await admin.api.get(`/api/contacts/${contactId}`)).json.contact.organisationId).toBe(orgId);
   expect((await admin.api.get(`/api/orgs/${sentinelId}/contacts`)).json.contacts).toHaveLength(0);
   mkdirSync(evidenceDir, { recursive: true });
