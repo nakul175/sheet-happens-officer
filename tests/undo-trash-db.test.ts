@@ -5,15 +5,16 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { undoAction } from '@/lib/undo';
-import { deleteTask, restoreTask } from '@/lib/tasks';
+import { deleteTask, purgeTrash, restoreTask } from '@/lib/tasks';
 import { addComment } from '@/lib/comments';
+import { UNDO_WINDOW_MS } from '@/lib/undoable';
 import { removeMember } from '@/lib/projects';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 vi.mock('next/server', () => ({ connection: vi.fn() }));
 
 const prefix = 'undo-trash-' + randomUUID();
-const projects: string[] = [], users: string[] = [], completed: string[] = [];
+const projects: string[] = [], users: string[] = [], completed: string[] = [], purgeAuditIds: string[] = [];
 const leader = { id: prefix + '-leader', orgRole: 'MEMBER' as const };
 const editor = { id: prefix + '-editor', orgRole: 'MEMBER' as const };
 const transact = db.$transaction.bind(db);
@@ -37,6 +38,7 @@ afterAll(async () => {
       await db.notification.deleteMany({ where: { projectId: { in: projects } } });
       await db.actionLog.deleteMany({ where: { projectId: { in: projects } } });
       await db.auditLog.deleteMany({ where: { actorId: { in: users } } });
+      await db.auditLog.deleteMany({ where: { id: { in: purgeAuditIds } } });
       await db.project.deleteMany({ where: { id: { in: projects } } });
       await db.user.deleteMany({ where: { id: { in: users } } });
       expect(await db.project.count({ where: { id: { in: projects } } })).toBe(0);
@@ -214,6 +216,29 @@ it('direct delete and restore still work with their own transactions', async () 
   await restoreTask(leader, f.taskId);
   expect((await snapshot(f.projectId)).tasks.every(t => t.deletedAt === null)).toBe(true);
   completed.push('direct-services');
+});
+
+it('a physically purged parent and child cannot be resurrected by their retained delete action', async () => {
+  const f = await fixture('task.deleted');
+  const now = new Date();
+  const expired = new Date(now.getTime() - UNDO_WINDOW_MS - 1000);
+  await db.task.updateMany({ where: { projectId: f.projectId }, data: { deletedAt: expired } });
+  await db.actionLog.update({ where: { id: f.actionId }, data: { createdAt: expired } });
+  const createAudit = db.auditLog.create.bind(db.auditLog);
+  vi.spyOn(db.auditLog, 'create').mockImplementationOnce((async (args: Parameters<typeof db.auditLog.create>[0]) => {
+    const row = await createAudit(args);
+    purgeAuditIds.push(row.id);
+    return row;
+  }) as unknown as typeof db.auditLog.create);
+  expect(await purgeTrash(now, { id: f.taskId })).toBe(1);
+  expect(await db.task.count({ where: { projectId: f.projectId } })).toBe(0);
+  const action = await db.actionLog.findUniqueOrThrow({ where: { id: f.actionId } });
+  expect(action.undoneAt).toBeNull();
+  await expect(undoAction(leader, f.actionId)).rejects.toMatchObject({ status: 409 });
+  expect(await db.task.count({ where: { projectId: f.projectId } })).toBe(0);
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'undo' } })).toBe(0);
+  expect((await db.actionLog.findUniqueOrThrow({ where: { id: f.actionId } })).undoneAt).toBeNull();
+  completed.push('purged-delete-not-resurrected');
 });
 
 it('restoring a deleted child restores its parent cohort atomically but leaves an older deletion in Trash', async () => {
