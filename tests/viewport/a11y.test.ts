@@ -127,6 +127,40 @@ async function ctxFor(who: "root" | "viewer" | null, width: number) {
   return ctx;
 }
 
+it("announces a failed phone sign-in, then clears the error after a valid retry", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/signin", { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
+    await page.getByRole("textbox", { name: "Work email" }).fill(viewerEmail);
+    await page.getByLabel("Password", { exact: true }).fill("incorrect-qa-password");
+    const failed = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signin" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    expect((await failed).status()).toBe(401);
+    const alert = page.getByRole("alert");
+    await alert.waitFor();
+    expect(await alert.innerText()).toBe("Email or password is incorrect.");
+    expect(await alert.innerText()).not.toContain("incorrect-qa-password");
+    expect(await page.getByRole("textbox", { name: "Work email" }).inputValue()).toBe(viewerEmail);
+
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "sign-in page with a visible error").toEqual([]);
+
+    await page.getByLabel("Password", { exact: true }).fill(PW);
+    const accepted = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signin" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    expect((await accepted).status()).toBe(200);
+    await page.getByRole("heading", { name: "Your workspace" }).waitFor();
+    expect(await page.getByRole("alert").count()).toBe(0);
+  } finally { await ctx.close(); }
+});
+
 for (const width of [1280, 390]) {
   describe(`axe at ${width} px`, () => {
     for (const s of SCREENS) {
