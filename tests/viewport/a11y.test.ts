@@ -161,6 +161,39 @@ it("announces a failed phone sign-in, then clears the error after a valid retry"
   } finally { await ctx.close(); }
 });
 
+it("keeps email verification retryable after a phone network failure, while an invalid token still expires", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    let failOnce = true;
+    await page.route("**/api/auth/verify", route => {
+      if (failOnce) { failOnce = false; return route.abort("failed"); }
+      return route.continue();
+    });
+    await page.goto("/verify?token=synthetic-invalid-token-long-enough", { waitUntil: "load" });
+    const button = page.getByRole("button", { name: "Verify my email" });
+    await button.waitFor();
+    await button.click();
+    const alert = page.getByRole("alert");
+    await alert.waitFor();
+    expect(await alert.innerText()).toMatch(/try again/i);
+    expect(new URL(page.url()).pathname).toBe("/verify");
+    expect(await button.isEnabled()).toBe(true);
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "verify page with a visible retryable network error").toEqual([]);
+    const invalid = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/verify" && r.request().method() === "POST");
+    await button.click();
+    expect((await invalid).status()).toBe(400);
+    await page.getByRole("heading", { name: "This link can't be used" }).waitFor();
+    expect(new URL(page.url()).pathname).toBe("/expired");
+  } finally { await ctx.close(); }
+});
+
 it("associates a reset confirmation mismatch and clears it before the invalid-link state", async () => {
   const ctx = await ctxFor(null, 390);
   try {
