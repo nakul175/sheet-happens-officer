@@ -61,3 +61,64 @@ test("SHO-REG-TASKS-04 stale task-sheet edit shows current values and a recovera
   expect(createHash("sha256").update(JSON.stringify(sentinelAfter.json.project)).digest("hex")).toBe(sentinelHash);
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, firstStatus: 409, retryStatus: 200, currentTitleShown: true, draftRecovered: true, sentinelUnchanged: true }, null, 2));
 });
+
+test("SHO-REG-TASKS-04 missing and malformed version errors keep the task-sheet draft", async ({ admin, later }) => {
+  if (!local2691) throw new Error("Version browser audit requires the guarded local test database.");
+  const fixture = randomUUID();
+  const evidenceDir = "test-results/task-version-browser";
+  const ownedProjects: string[] = [];
+  later(async () => {
+    for (const id of ownedProjects) {
+      const result = await admin.api.get(`/api/projects/${id}`);
+      expect(result.status).toBe(200);
+      expect(result.json.project.archived).toBe(true);
+    }
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/invalid-version-cleanup.json`, JSON.stringify({ fixture, archivedProjects: ownedProjects, cleanup: true }, null, 2));
+  });
+  const project = await newProject(admin, later, { label: `version invalid ${fixture}` });
+  ownedProjects.push(project.id);
+  const original = zz(`version original ${fixture}`);
+  const taskId = await newTask(admin, project.id, { title: original });
+  const page = admin.page;
+  await page.goto(`/projects/${project.id}?task=${taskId}`);
+  const sheet = page.getByRole("dialog", { name: "Task", exact: true });
+  const title = sheet.getByRole("textbox", { name: "Title", exact: true });
+  await expect(title).toHaveValue(original);
+
+  const cases = [
+    { name: "absent", value: undefined, code: "version_required", message: "expectedUpdatedAt is required" },
+    { name: "null", value: null, code: "version_required", message: "expectedUpdatedAt is required" },
+    { name: "empty", value: "", code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." },
+    { name: "malformed", value: "abc", code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." },
+  ] as const;
+  for (const item of cases) {
+    const draft = zz(`${item.name} draft ${fixture}`);
+    const intercept = async (route: import("@playwright/test").Route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      delete body.expectedUpdatedAt;
+      if (item.value !== undefined) body.expectedUpdatedAt = item.value;
+      await route.continue({ postData: JSON.stringify(body) });
+    };
+    await page.route(`**/api/tasks/${taskId}`, intercept);
+    try {
+      const response = page.waitForResponse(res => res.url().endsWith(`/api/tasks/${taskId}`) && res.request().method() === "PATCH");
+      await title.fill(draft);
+      await title.blur();
+      const denied = await response;
+      expect(denied.status()).toBe(400);
+      expect(await denied.json()).toEqual({ error: { code: item.code, message: item.message } });
+      await expect(sheet.getByRole("alert")).toContainText(item.message);
+      await expect(title).toHaveValue(draft);
+      const stored = await admin.api.get(`/api/tasks/${taskId}`);
+      expect(stored.status).toBe(200);
+      expect(stored.json.task.title).toBe(original);
+    } finally {
+      await page.unroute(`**/api/tasks/${taskId}`, intercept);
+    }
+  }
+  mkdirSync(evidenceDir, { recursive: true });
+  await sheet.screenshot({ path: `${evidenceDir}/invalid-version-sheet.png` });
+  writeFileSync(`${evidenceDir}/invalid-version-verification.json`, JSON.stringify({ fixture, taskId, cases: cases.map(({ name, code }) => ({ name, code, status: 400 })), draftRetained: true, storedTitleUnchanged: true, fixtureProjectArchiveRegistered: true }, null, 2));
+});
