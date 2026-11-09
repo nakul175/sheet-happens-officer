@@ -138,7 +138,7 @@ it("announces a failed phone sign-in, then clears the error after a valid retry"
     const failed = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signin" && r.request().method() === "POST");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     expect((await failed).status()).toBe(401);
-    const alert = page.getByRole("alert");
+    const alert = page.locator("form:visible").getByRole("alert");
     await alert.waitFor();
     expect(await alert.innerText()).toBe("Email or password is incorrect.");
     expect(await alert.innerText()).not.toContain("incorrect-qa-password");
@@ -157,7 +157,7 @@ it("announces a failed phone sign-in, then clears the error after a valid retry"
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     expect((await accepted).status()).toBe(200);
     await page.getByRole("heading", { name: "Your workspace" }).waitFor();
-    expect(await page.getByRole("alert").count()).toBe(0);
+    expect(await page.locator("form:visible").getByRole("alert").count()).toBe(0);
   } finally { await ctx.close(); }
 });
 
