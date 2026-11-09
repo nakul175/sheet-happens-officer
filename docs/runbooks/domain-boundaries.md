@@ -6,6 +6,8 @@
 
 `tasks.ts` owns task state changes and validation (assignment, approval, completion, move, deletion). `deals.ts` owns deal classification, stage and next-step invariants. `records.ts` owns contact/note/task-link changes. Changes spanning these records must remain in the caller's Prisma transaction; do not replace transaction clients with the global client in helpers.
 
+The owner confirmed three product boundaries on 9 November 2026: task moves change sections **within the current project only**; a contact stays in its original organisation; notes support creation and deletion, with history and Undo, but no edit of an existing note. Keep these constraints when changing routes, schemas, Undo or regression cases. A cross-project task move, contact reassignment or note edit would be a separate feature decision. The audit catalogue records these decisions in `work/handover-audit-20261103/remediation/PRODUCT-CONTRACT-GAPS-20261109.md` outside this checkout.
+
 `undo.ts` owns inverse operations and eligibility, not a second generic persistence layer. For every new mutable action, specify before/after state, write authorization, optimistic version requirement, audit/notification effects and inverse behavior. Test duplicate/retried Undo, expired/deleted dependencies, and concurrent writes before extracting more code. Pure import refactors must not alter public API shapes or denial semantics.
 
 ## A change through these modules
