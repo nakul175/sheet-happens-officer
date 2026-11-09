@@ -41,13 +41,14 @@ test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', a
       expect(result.json.person.status).toBe('DEACTIVATED');
     }
   });
-  const members = await Promise.all(['EDITOR', 'VIEWER'].map(async role => {
+  const members: { person: Awaited<ReturnType<typeof account>>; role: string }[] = [];
+  for (const role of ['EDITOR', 'VIEWER'] as const) {
     const person = await account(zz(`project ${role.toLowerCase()}`), `nakul17+zz-projects-01-${fixture}-${role.toLowerCase()}@aplyd.com`);
     memberIds.push(person.id);
     later(() => admin.api.post(`/api/team/${person.id}/deactivate`, { reassign: 'leaders' }));
     expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: person.id, role })).status).toBe(201);
-    return { person, role };
-  }));
+    members.push({ person, role });
+  }
   const name = zz('Renamed project');
   const changed = await admin.api.patch(`/api/projects/${p.id}`, { name, description: 'A persisted project description' });
   expect(changed.status, JSON.stringify(changed.json)).toBe(200);
