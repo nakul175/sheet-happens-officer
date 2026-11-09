@@ -90,13 +90,14 @@ async function phone(): Promise<{ ctx: BrowserContext; page: Page }> {
 }
 
 describe("phone comments", () => {
-  it("shows one private assignee bell notice for a colleague comment and none for an edit or the author", async () => {
+  it("shows one private assignee bell notice for a colleague comment and none for an edit, the author or a Viewer", async () => {
     const writer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
     const colleague = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const viewer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
     const url = `/api/tasks/${taskId}/comments`;
     const text = `ZZ-TEST feed comment ${RUN}`;
     try {
-      for (const [ctx, who] of [[writer, made[0]], [colleague, made[1]]] as const) {
+      for (const [ctx, who] of [[writer, made[0]], [colleague, made[1]], [viewer, made[2]]] as const) {
         expect((await ctx.request.post("/api/auth/signin", { data: { email: who.email, password: PW } })).status()).toBe(200);
       }
       const notices = async (ctx: BrowserContext) => {
@@ -106,6 +107,7 @@ describe("phone comments", () => {
       };
       const writerBefore = new Set((await notices(writer)).map((n) => n.id));
       const colleagueBefore = new Set((await notices(colleague)).map((n) => n.id));
+      const viewerBefore = new Set((await notices(viewer)).map((n) => n.id));
       const authorPage = await colleague.newPage();
       await authorPage.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
       await authorPage.getByRole("dialog", { name: "Task", exact: true }).waitFor();
@@ -122,6 +124,7 @@ describe("phone comments", () => {
       expect(newWriter[0].text).not.toContain(text);
       expect(newWriter[0].href).toBe(`/tasks/${taskId}`);
       expect((await notices(colleague)).filter((n) => !colleagueBefore.has(n.id))).toHaveLength(0);
+      expect((await notices(viewer)).filter((n) => !viewerBefore.has(n.id))).toHaveLength(0);
 
       const recipientPage = await writer.newPage();
       await recipientPage.goto("/my-tasks", { waitUntil: "load" });
@@ -134,9 +137,11 @@ describe("phone comments", () => {
       expect((await colleague.request.patch(`${url}/${commentId}`, { data: { text: `${text} edited` } })).status()).toBe(200);
       expect((await notices(writer)).filter((n) => !writerBefore.has(n.id)).map((n) => n.id)).toEqual([newWriter[0].id]);
       expect((await notices(colleague)).filter((n) => !colleagueBefore.has(n.id))).toHaveLength(0);
+      expect((await notices(viewer)).filter((n) => !viewerBefore.has(n.id))).toHaveLength(0);
     } finally {
       await writer.close();
       await colleague.close();
+      await viewer.close();
     }
   });
 
