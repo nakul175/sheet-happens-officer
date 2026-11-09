@@ -243,6 +243,64 @@ describe("phone comments", () => {
     }
   });
 
+  it("keeps comment roles, private notice and delete Undo consistent in one phone journey", async () => {
+    const writer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const colleague = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const viewer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const admin = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const url = `/api/tasks/${taskId}/comments`;
+    const text = `ZZ-TEST integrated comment ${RUN}`;
+    try {
+      for (const [ctx, who] of [[writer, made[0]], [colleague, made[1]], [viewer, made[2]], [admin, root]] as const) {
+        expect((await ctx.request.post("/api/auth/signin", { data: { email: who!.email, password: PW } })).status()).toBe(200);
+      }
+      const notices = async (ctx: BrowserContext) => {
+        const response = await ctx.request.get("/api/notifications?limit=200");
+        expect(response.status()).toBe(200);
+        return (await response.json()).items as { id: string; text: string }[];
+      };
+      const before = new Map(await Promise.all([writer, colleague, viewer].map(async (ctx) => [ctx, new Set((await notices(ctx)).map((n) => n.id))] as const)));
+      const page = await colleague.newPage();
+      await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+      await page.getByLabel("Add a comment").fill(text);
+      const [posted] = await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith(url) && response.request().method() === "POST"),
+        page.getByRole("button", { name: "Add comment" }).click(),
+      ]);
+      expect(posted.status()).toBe(201);
+      const id = (await posted.json()).comment.id as string;
+      const fresh = async (ctx: BrowserContext) => (await notices(ctx)).filter((item) => !before.get(ctx)!.has(item.id));
+      const recipient = await fresh(writer);
+      expect(recipient).toHaveLength(1);
+      expect(recipient[0].text).not.toContain(text);
+      expect(await fresh(colleague)).toHaveLength(0);
+      expect(await fresh(viewer)).toHaveLength(0);
+
+      const target = `${url}/${id}`;
+      expect((await viewer.request.patch(target, { data: { text: "viewer edit" } })).status()).toBe(403);
+      expect((await viewer.request.delete(target)).status()).toBe(403);
+      expect((await writer.request.patch(target, { data: { text: "other editor edit" } })).status()).toBe(403);
+      const edited = `${text} edited`;
+      expect((await colleague.request.patch(target, { data: { text: edited } })).status()).toBe(200);
+      expect((await fresh(writer)).map((item) => item.id)).toEqual([recipient[0].id]);
+      const removed = await admin.request.delete(target);
+      expect(removed.status()).toBe(204);
+      const undoId = removed.headers()["x-undo-id"];
+      expect(undoId).toBeTruthy();
+      expect((await (await writer.request.get(url)).json()).comments.some((item: { id: string }) => item.id === id)).toBe(false);
+      expect((await admin.request.post(`/api/actions/${undoId}/undo`, { data: {} })).status()).toBe(200);
+      expect((await admin.request.post(`/api/actions/${undoId}/undo`, { data: {} })).status()).toBe(409);
+      const restored = (await (await writer.request.get(url)).json()).comments.find((item: { id: string }) => item.id === id);
+      expect(restored).toMatchObject({ id, text: edited, author: expect.objectContaining({ id: made[1].id }) });
+      expect((await fresh(writer)).map((item) => item.id)).toEqual([recipient[0].id]);
+    } finally {
+      await writer.close();
+      await colleague.close();
+      await viewer.close();
+      await admin.close();
+    }
+  });
+
   it("edits and deletes an owned comment in the phone UI with escaped text and server readback", async () => {
     const { ctx, page } = await phone();
     const original = `ZZ-TEST edit phone ${RUN}`;
