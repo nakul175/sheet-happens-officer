@@ -41,12 +41,13 @@ afterAll(async () => {
       await db.auditLog.deleteMany({ where: { id: { in: purgeAuditIds } } });
       await db.project.deleteMany({ where: { id: { in: projects } } });
       await db.user.deleteMany({ where: { id: { in: users } } });
+      expect(await db.auditLog.count({ where: { id: { in: purgeAuditIds } } })).toBe(0);
       expect(await db.project.count({ where: { id: { in: projects } } })).toBe(0);
       expect(await db.user.count({ where: { id: { in: users } } })).toBe(0);
       cleanup = true;
     } finally {
       mkdirSync('test-results/undo-trash', { recursive: true });
-      writeFileSync('test-results/undo-trash/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'task-trash-undo-local-postgres', completed, cleanup }, null, 2));
+      writeFileSync('test-results/undo-trash/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'task-trash-undo-local-postgres', completed, purgeAuditRows: purgeAuditIds.length, cleanup }, null, 2));
     }
   }
 });
@@ -231,6 +232,7 @@ it('a physically purged parent and child cannot be resurrected by their retained
     return row;
   }) as unknown as typeof db.auditLog.create);
   expect(await purgeTrash(now, { id: f.taskId })).toBe(1);
+  expect(purgeAuditIds).toHaveLength(1);
   expect(await db.task.count({ where: { projectId: f.projectId } })).toBe(0);
   const action = await db.actionLog.findUniqueOrThrow({ where: { id: f.actionId } });
   expect(action.undoneAt).toBeNull();
