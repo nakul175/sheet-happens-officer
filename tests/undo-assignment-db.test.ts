@@ -162,11 +162,17 @@ it('assignment Undo does not restore a departed previous assignee as a comment r
   await removeMember(leader, f.projectId, previous.id);
   expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).previousAssigneeId).toBeNull();
   await undoAction(editor, f.actionId);
-  await addComment(editor, f.taskId, { text: 'Approval update' });
-  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).previousAssigneeId).toBeNull();
+  const originalFlag = process.env.FF_TASK_COMMENTS;
+  process.env.FF_TASK_COMMENTS = 'true';
+  try { await addComment(editor, f.taskId, { text: 'Approval update' }); }
+  finally {
+    if (originalFlag === undefined) delete process.env.FF_TASK_COMMENTS;
+    else process.env.FF_TASK_COMMENTS = originalFlag;
+  }
   expect(await db.notification.count({ where: {
     projectId: f.projectId, taskId: f.taskId, recipientId: previous.id, type: 'COMMENT_ADDED',
   } })).toBe(0);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).previousAssigneeId).toBeNull();
   completed.push('departed-previous-assignee-notice');
 });
 it('an assignment Undo advances a future task version instead of moving it backwards', async () => {
