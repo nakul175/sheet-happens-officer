@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
 import { ReturnToBridge } from "@/components/ReturnToBridge";
 import { SignInForm } from "./SignInForm";
@@ -21,7 +23,13 @@ async function Form({ params }: { params: PageProps<"/signin">["searchParams"] }
   );
 }
 
-export default function Page({ searchParams }: PageProps<"/signin">) {
+async function SignInScreen({ searchParams }: PageProps<"/signin">) {
+  await connection();
+  if (process.env.APLYD_APEX_LOGIN_ONLY === "true") {
+    const sp = await searchParams;
+    const next = safeReturnPath(typeof sp.next === "string" ? sp.next : undefined, 1);
+    redirect("/api/auth/aplyd/start" + (next ? "?next=" + encodeURIComponent(next) : ""));
+  }
   return (
     <main className={s.wrap}>
       <div className={s.brandtop}>
@@ -37,4 +45,8 @@ export default function Page({ searchParams }: PageProps<"/signin">) {
       </div>
     </main>
   );
+}
+
+export default function Page(props: PageProps<"/signin">) {
+  return <Suspense><SignInScreen {...props} /></Suspense>;
 }
