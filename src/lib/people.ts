@@ -47,6 +47,9 @@ export async function releasePerson(
   }
   // Closed or trashed tasks keep a valid approver too.
   await tx.task.updateMany({ where: { projectId: o.projectId, approverId: o.userId }, data: { approverId: leader } });
+  // The previous assignee receives comment notices while a task awaits approval.
+  // A departing member must not keep that notification pointer after losing access.
+  await tx.task.updateMany({ where: { projectId: o.projectId, previousAssigneeId: o.userId }, data: { previousAssigneeId: null } });
   if (asApprover.length) {
     await logAction(tx, {
       actorId: o.actorId, projectId: o.projectId, targetType: "member", targetId: o.userId, action: "tasks.approver_reassigned",

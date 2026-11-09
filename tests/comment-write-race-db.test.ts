@@ -129,12 +129,13 @@ it("does not write a comment or notify a mention removed after preflight", async
   } finally { pause.release(); await result; }
 });
 
-it("does not notify a departed previous assignee about later comments on an approval task", async () => {
+it.each(["remove", "viewer"] as const)("does not notify a previous assignee after %s handover on an approval task", async (change) => {
   const { projectId, taskId } = await fixture();
   await db.task.update({ where: { id: taskId }, data: {
     approverId: leader.id, assigneeId: leader.id, previousAssigneeId: editor.id,
   } });
-  await removeMember(leader, projectId, editor.id);
+  if (change === "remove") await removeMember(leader, projectId, editor.id);
+  else await changeMemberRole(leader, projectId, editor.id, "VIEWER");
   await addComment(leader, taskId, { text: "Private update after handover" });
   expect(await db.notification.count({ where: { taskId, recipientId: editor.id, type: "COMMENT_ADDED" } })).toBe(0);
   expect((await db.task.findUniqueOrThrow({ where: { id: taskId } })).previousAssigneeId).toBeNull();
