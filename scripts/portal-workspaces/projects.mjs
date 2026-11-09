@@ -16,10 +16,11 @@ export async function changeWorkspaceProject(db,policy,input,unchanged=()=>true)
  await db.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
  try{
   await db.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='8s'");
-  await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify([policy.workspace,input.target])]);
   // Shared with ordinary native writers: prevent a handover/creator/leader race.
   await db.query('LOCK TABLE "ProjectMember" IN SHARE ROW EXCLUSIVE MODE');
   await db.query('LOCK TABLE "ActionLog","Task","TaskCollaborator","User","WorkspaceMembership" IN SHARE MODE');
+  // Take the SERIALIZABLE snapshot only after table locks are acquired.
+  await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify([policy.workspace,input.target])]);
   const users=(await db.query(`SELECT id,"workspaceId","orgRole"::text role,email,"emailVerifiedAt","deactivatedAt",xmin::text revision FROM "User" WHERE id=ANY($1::text[]) ORDER BY id FOR SHARE`,[[input.actor,input.target]])).rows;
   const a=users.find(x=>x.id===input.actor),t=users.find(x=>x.id===input.target);
   if(!a||!t||a.workspaceId!==policy.workspace||a.role!=='SUPER_ADMIN'||t.workspaceId===policy.workspace

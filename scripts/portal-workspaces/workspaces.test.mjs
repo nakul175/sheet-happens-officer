@@ -298,3 +298,20 @@ test('handover audit fault rolls back tasks collaborations role notices and rece
  try{await assert.rejects(projectApply('revoke',undefined,'taker'));assert.deepEqual(await snapshot(),before);}
  finally{await db.query('DROP TRIGGER reject_handover_audit ON "AuditLog"; DROP FUNCTION reject_handover_audit()');}
 });
+
+test('handover sees work committed while waiting for table locks before its snapshot',opt,async()=>{
+ await handoverFixture();const plan=await projectPreview('revoke',{handoverTo:'taker'});
+ const writer=new pg.Client(opts);await writer.connect();let injected=false;
+ const locked={query:async(text,args)=>{
+  if(!injected && text.startsWith('LOCK TABLE "ActionLog"')){
+   injected=true;
+   await writer.query(`INSERT INTO "Task"(id,"workspaceId","projectId","sectionId",title,"assigneeId","createdById","updatedAt") VALUES ('late','extra','p','sec','Concurrent new task','target','target',NOW())`);
+  }
+  return db.query(text,args);
+ }};
+ try{
+  await assert.rejects(projectChange(locked,projectPolicy,{...input(),project:'p',role:'revoke',handoverTo:'taker',operation:'apply',requestId:randomUUID(),expected:plan}));
+  assert(injected);assert.equal((await db.query(`SELECT role::text FROM "ProjectMember" WHERE "userId"='target'`)).rows[0].role,'EDITOR');
+  assert.equal((await db.query(`SELECT "assigneeId" FROM "Task" WHERE id='late'`)).rows[0].assigneeId,'target');
+ }finally{await writer.end();}
+});
