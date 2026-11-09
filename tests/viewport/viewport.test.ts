@@ -154,7 +154,7 @@ it("keeps the Home → Project → Task → Deals → Team → Profile phone jou
 
     await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Projects" }).click();
     await page.waitForURL("**/projects");
-    await page.locator(`a[href="/projects/${ids.project}"]`).click();
+    await page.locator(`a.pcard[href="/projects/${ids.project}"]`).click();
     await page.waitForURL(`**/projects/${ids.project}`);
     await page.getByText(TASK_TITLE, { exact: true }).first().waitFor();
     await usable("project");
