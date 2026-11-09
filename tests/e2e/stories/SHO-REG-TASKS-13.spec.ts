@@ -38,7 +38,7 @@ test("SHO-REG-TASKS-13 phone delete and Undo restores a parent and child without
   await page.goto(`/projects/${project.id}?task=${parentId}`);
   const task = page.getByRole("dialog", { name: "Task", exact: true });
   await expect(task).toBeVisible();
-  await clickAboveTabBar(task.getByRole("button", { name: "Move to Trash" }));
+  await clickAboveTabBar(task.getByRole("button", { name: "Move to Trash", exact: true }));
   const confirm = page.getByRole("dialog", { name: "Move to Trash?" });
   await expect(confirm).toBeVisible();
   await confirm.getByRole("button", { name: "Move to Trash" }).click();
