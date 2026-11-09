@@ -156,10 +156,11 @@ it("keeps the Home → Project → Task → Deals → Team → Profile phone jou
     await page.waitForURL("**/projects");
     await page.locator(`a.pcard[href="/projects/${ids.project}"]`).click();
     await page.waitForURL(`**/projects/${ids.project}`);
-    await page.getByText(TASK_TITLE, { exact: true }).first().waitFor();
+    const taskRow = page.locator(".item.click").filter({ hasText: TASK_TITLE }).first();
+    await taskRow.waitFor();
     await usable("project");
 
-    await page.locator(".item.click").filter({ hasText: TASK_TITLE }).first().click();
+    await taskRow.click();
     const taskDialog = page.getByRole("dialog", { name: "Task", exact: true });
     await taskDialog.waitFor();
     expect(await taskDialog.getByRole("textbox", { name: "Title", exact: true }).inputValue()).toBe(TASK_TITLE);
