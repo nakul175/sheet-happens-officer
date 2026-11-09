@@ -1,5 +1,5 @@
 // Cascading physical deletion must not shorten a child's own Trash period.
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
@@ -9,13 +9,12 @@ import { UNDO_WINDOW_MS } from '@/lib/undoable';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 
 const prefix = 'task-purge-parent-' + randomUUID();
-const userId = prefix + '-user', projects: string[] = [], completed: string[] = [];
+const userId = prefix + '-user', projects: string[] = [], completed: string[] = [], purgeAuditIds: string[] = [];
 const now = new Date('2026-11-05T00:00:00.000Z');
 const cutoff = new Date(now.getTime() - UNDO_WINDOW_MS);
-let workspaceId: string, sentinelId: string, oldAuditIds: Set<string>, safe = false;
+let workspaceId: string, sentinelId: string, safe = false;
 beforeAll(async () => {
   assertLocalFixture(process.env.DATABASE_URL);
-  oldAuditIds = new Set((await db.auditLog.findMany({ where: { event: 'TASK_PURGED' }, select: { id: true } })).map(row => row.id));
   safe = true;
   workspaceId = (await getOrCreateWorkspace()).id;
   await db.user.create({ data: { id: userId, workspaceId, name: prefix, email: prefix + '@example.invalid', passwordHash: 'unused', emailVerifiedAt: new Date() } });
@@ -26,14 +25,14 @@ afterAll(async () => {
   let cleanup = false;
   try {
     expect((await db.project.findUniqueOrThrow({ where: { id: sentinelId } })).name).toBe(prefix + '-sentinel');
-    const later = await db.auditLog.findMany({ where: { event: 'TASK_PURGED' }, select: { id: true } });
-    await db.auditLog.deleteMany({ where: { id: { in: later.filter(row => !oldAuditIds.has(row.id)).map(row => row.id) } } });
+    await db.auditLog.deleteMany({ where: { id: { in: purgeAuditIds } } });
     await db.project.deleteMany({ where: { id: { in: projects } } });
     await db.user.delete({ where: { id: userId } });
+    expect(await db.auditLog.count({ where: { id: { in: purgeAuditIds } } })).toBe(0);
     expect(await db.project.count({ where: { id: { in: projects } } })).toBe(0); cleanup = true;
   } finally {
     mkdirSync('test-results/task-purge-parent-retention', { recursive: true });
-    writeFileSync('test-results/task-purge-parent-retention/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'task-purge-disposable-postgres', completed, cleanup }, null, 2));
+    writeFileSync('test-results/task-purge-parent-retention/cleanup.json', JSON.stringify({ fixture: prefix, scope: 'task-purge-disposable-postgres', completed, purgeAuditRows: purgeAuditIds.length, cleanup }, null, 2));
   }
 });
 async function fixture(childDeletedAt: Date | null) {
@@ -70,8 +69,17 @@ it('does not cascade-delete a live child under an expired parent', async () => {
 
 it('purges an expired parent with only expired children', async () => {
   const f = await fixture(new Date(cutoff.getTime() - 1000));
-  expect(await purgeTrash(now, { id: f.parentId })).toBe(1);
-  expect(await db.task.findUnique({ where: { id: f.parentId } })).toBeNull();
-  expect(await db.task.findUnique({ where: { id: f.childId } })).toBeNull();
-  completed.push('expired-control');
+  const createAudit = db.auditLog.create.bind(db.auditLog);
+  const spy = vi.spyOn(db.auditLog, 'create').mockImplementationOnce((async (args: Parameters<typeof db.auditLog.create>[0]) => {
+    const row = await createAudit(args);
+    purgeAuditIds.push(row.id);
+    return row;
+  }) as unknown as typeof db.auditLog.create);
+  try {
+    expect(await purgeTrash(now, { id: f.parentId })).toBe(1);
+    expect(purgeAuditIds).toHaveLength(1);
+    expect(await db.task.findUnique({ where: { id: f.parentId } })).toBeNull();
+    expect(await db.task.findUnique({ where: { id: f.childId } })).toBeNull();
+    completed.push('expired-control');
+  } finally { spy.mockRestore(); }
 });
