@@ -6,7 +6,7 @@ import { patchCurrent } from '../helpers/jim-http';
 import { activityRow } from '../helpers/screen-row';
 import { expect, zz } from './qa';
 
-test('SHO-REG-TASKS-13 Undo anyway restores only the older title and keeps a later priority edit', async ({ admin, later }) => {
+test('SHO-AUDIT-UNDO-CONFLICT Undo anyway restores only the older title and keeps a later priority edit', async ({ admin, later }) => {
   if (!local2691) throw new Error('Undo override browser audit requires the guarded local test database.');
   const fixture = randomUUID();
   const evidenceDir = 'test-results/undo-override-browser';
