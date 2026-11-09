@@ -9,7 +9,7 @@ jobs:
     name: Lint, build and test
     # Match the documented production native ABI/toolchain; latest is a moving image.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16
@@ -107,6 +107,11 @@ jobs:
           fi
       - name: Unit tests
         run: npm test -- --reporter=default --reporter=json --outputFile=test-results/unit.json
+      # Audit-only residue check: run the complete suite again against the same
+      # disposable database and app process, retaining a separate report.
+      - name: Repeat unit tests on same disposable database (audit candidate)
+        if: ${{ github.event.pull_request.head.ref == 'codex/sho-handover-hardening-7c4a' }}
+        run: npm test -- --reporter=default --reporter=json --outputFile=test-results/unit-repeat.json
       - name: Deal filter browser regression
         run: npx vitest run -c vitest.deal-filters.config.mts --reporter=default --reporter=json --outputFile=test-results/deal-filters.json
       # APL-2911. Story specs that drive this local server in Playwright Chromium (outbox mail, the CI Super Admin), so
