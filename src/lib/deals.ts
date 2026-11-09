@@ -1,3 +1,5 @@
+import { crmRoleProjectWhere } from "@/lib/access";
+import { scopedUser, findScopedUser, workspaceScope, multiWorkspaceEnabled, personInWorkspace } from "@/lib/workspace-authority";
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
 import { createHash } from "node:crypto";
@@ -5,7 +7,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { isActive, isAdmin, projectAccess, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
-import { WORKSTREAM_DEAL, crmMode, crmProjectWhere, crmVisible, requireCrm } from "@/lib/crm";
+import { WORKSTREAM_DEAL, crmMode, crmVisible, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { orgOf } from "@/lib/orgs";
@@ -69,7 +71,7 @@ export async function createDeal(
   },
 ) {
   requireCrm(user);
-  const u = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  const u = await scopedUser(user);
   const name = input.name.trim();
   if (!name) throw new ApiError(400, "Give the deal a name.");
   if (!input.organisationId) throw new ApiError(400, "Choose an organisation.");
@@ -85,7 +87,7 @@ export async function createDeal(
   isoDate(input.nextStep.dueDate);
   const isBid = pipeline.key === "DEAL_BID";
   if (isBid && !input.submissionDeadline) throw new ApiError(400, "A bid needs a submission deadline.");
-  const leader = await db.user.findUnique({ where: { id: input.leaderId } });
+  const leader = multiWorkspaceEnabled() ? await personInWorkspace(input.leaderId,u.workspaceId) : await db.user.findUnique({ where: { id: input.leaderId } });
   if (!leader || !isActive(leader) || leader.workspaceId !== u.workspaceId) throw new ApiError(400, "Choose an active person as Leader.");
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
@@ -384,7 +386,7 @@ export const isWorking = (category: string | null | undefined) => !!category && 
 export const isStalled = (category: string | null | undefined, lastActivity: Date, now = Date.now()) =>
   isWorking(category) && now - lastActivity.getTime() > STALL_DAYS * 86400_000;
 
-const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {} : { members: { some: { userId: user.id } } });
+const visibleTo = (user: Actor): Prisma.ProjectWhereInput => ({...workspaceScope(user), ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } })});
 
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
 export async function listDeals(user: Actor, o: { archived?: boolean; deleted?: boolean; mine?: boolean; pipelineId?: string; lifecycle?: "sales" | "delivery" | "all" } = {}, now = Date.now()) {
@@ -395,6 +397,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; deleted?: 
       typeId: WORKSTREAM_DEAL,
       deletedAt: o.deleted ? { not: null } : null,
       ...(o.deleted ? {} : { archivedAt: o.archived ? { not: null } : null }),
+      ...workspaceScope(user),
       ...(o.deleted && !isAdmin(user) ? { members: { some: { userId: user.id, role: "LEADER" } } } : visibleTo(user)),
       ...(o.pipelineId ? { pipelineId: o.pipelineId } : {}),
       ...(o.lifecycle === "delivery" ? { stage: { category: "DELIVERY" } } : o.lifecycle === "sales" ? { OR: [{ stageId: null }, { stage: { category: { not: "DELIVERY" } } }] } : {}),
@@ -521,7 +524,7 @@ export async function replaceBuyer(user: Actor, projectId: string, input: BuyerR
   if (access.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only a deal has a Buyer.");
   if (input.organisationId === input.expectedOrganisationId) throw new ApiError(400, "Choose a different Buyer.");
 
-  const actor = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  const actor = await scopedUser(user);
   return db.$transaction(async (tx) => {
     const current = await tx.dealParty.findFirst({
       where: { projectId, role: "BUYER" },
@@ -581,7 +584,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   if (t.completedAt) throw new ApiError(409, "A completed task cannot become a deal. Reopen it first.");
   if (t.approverId && t.assigneeId === t.approverId) throw new ApiError(409, "This task is waiting for approval. Close it or send it back before converting.");
 
-  const u = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  const u = await scopedUser(user);
   const name = (input.name ?? t.title).trim();
   const leaderId = input.leaderId ?? t.assigneeId;
   const why = input.whyPursue?.trim();
@@ -603,7 +606,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   if (missing.length) throw new ApiError(400, `Fill in ${missing.join(", ")} first.`, { needsFields: missing });
   const org = await orgOf(user, input.organisationId!).catch(() => { throw new ApiError(400, "Choose an organisation."); });
   if (org.archivedAt) throw new ApiError(400, "That organisation is archived.");
-  const leader = await db.user.findUnique({ where: { id: leaderId } });
+  const leader = multiWorkspaceEnabled() ? await personInWorkspace(leaderId,u.workspaceId) : await db.user.findUnique({ where: { id: leaderId } });
   if (!leader || !isActive(leader) || leader.workspaceId !== u.workspaceId) throw new ApiError(400, "Choose an active person as Leader.");
   const { value, currency } = normaliseValue(input.value, input.currency);
   const probability = checkProbability(input.probability);
@@ -626,7 +629,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
     roles.set(leader.id, "LEADER");
     const add = async (id: string, role: "EDITOR" | "VIEWER") => {
       if (roles.has(id)) return;
-      const person = await tx.user.findUnique({ where: { id } });
+      const person = multiWorkspaceEnabled() ? await personInWorkspace(id,u.workspaceId,tx) : await tx.user.findUnique({ where: { id } });
       if (person && isActive(person) && person.workspaceId === u.workspaceId) roles.set(id, role);
     };
     await add(user.id, "EDITOR");
@@ -693,7 +696,7 @@ export function stalledDealWhere(): Prisma.ProjectWhereInput {
   };
   // AND keeps `archivedAt` if a later crmProjectWhere returns its own archivedAt or OR.
   const visibleTo = (role: "MEMBER" | "ADMIN" | "SUPER_ADMIN"): Prisma.ProjectWhereInput => ({
-    AND: [{ archivedAt: null }, crmProjectWhere({ orgRole: role })],
+    AND: [{ archivedAt: null }, crmRoleProjectWhere({ orgRole: role })],
   });
   const mode = crmMode();
   if (mode !== "admins") {
@@ -752,7 +755,7 @@ function conversionStale() {
 
 async function bidConversionContext(tx: Tx, user: Actor, projectId: string) {
   // Re-read the actor as well as membership inside the commit's serializable transaction.
-  const actor = await tx.user.findUnique({ where: { id: user.id } });
+  const actor = await findScopedUser(user, tx);
   if (!actor || !isActive(actor)) throw new ApiError(401, "Sign in with an active account.");
   requireCrm(actor);
   const a = await projectAccess(actor, projectId, { write: true, tx });

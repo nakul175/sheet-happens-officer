@@ -1,3 +1,4 @@
+import { requireOriginalAccountAdministration } from "@/lib/workspace-authority";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -10,6 +11,7 @@ const body = z.object({ reassign: z.string().min(1) });
 export const POST = handle(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const me = await currentUser();
   const id = (await ctx.params).id;
+  await requireOriginalAccountAdministration(me,id);
   // APL-2714: the not-found and role answers deactivate gives, before the body is read.
   const target = await db.user.findUnique({ where: { id } });
   if (!target) throw notFound("Person");

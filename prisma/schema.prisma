@@ -59,6 +59,7 @@ model Workspace {
   organisations Organisation[]
   contacts      Contact[]
   notes         Note[]
+  additionalMembers WorkspaceMembership[]
 }
 
 model User {
@@ -80,6 +81,8 @@ model User {
   startGuideDismissedAt DateTime?
   createdAt          DateTime  @default(now())
 
+  additionalWorkspaces WorkspaceMembership[]
+  workspaceSelections SessionWorkspace[]
   memberships         ProjectMember[]
   assignedTasks       Task[]             @relation("TaskAssignee")
   approvingTasks      Task[]             @relation("TaskApprover")
@@ -115,7 +118,9 @@ model Session {
   lastSeenAt DateTime  @default(now())
   createdAt  DateTime  @default(now())
   centralLink CentralSessionLink?
+  workspaceSelection SessionWorkspace?
 
+  @@unique([id, userId])
   @@index([userId])
   @@index([expiresAt])
 }
@@ -705,4 +710,44 @@ model PortalOrgRoleReceipt {
   workspaceId String
   result      Json
   createdAt   DateTime @default(now())
+}
+
+// Original User.workspaceId/orgRole remain the original workspace authority.
+// These are additional memberships only; no identity cloning or home reassignment.
+model WorkspaceMembership {
+  userId String
+  workspaceId String
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  role OrgRole @default(MEMBER)
+  generation Int @default(1)
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  selections SessionWorkspace[]
+  @@id([userId, workspaceId])
+  @@index([workspaceId, revokedAt])
+}
+
+// A selection is server-side and tied to the exact native session and member.
+// Old generations deliberately remain invalid after revoke and regrant.
+model SessionWorkspace {
+  sessionId String @id
+  userId String
+  workspaceId String
+  generation Int
+  selectedAt DateTime @default(now())
+  session Session @relation(fields: [sessionId, userId], references: [id, userId], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  membership WorkspaceMembership @relation(fields: [userId, workspaceId], references: [userId, workspaceId], onDelete: Restrict)
+  @@unique([sessionId, userId])
+}
+
+model PortalWorkspaceReceipt {
+  id String @id
+  actorId String
+  targetId String
+  workspaceId String
+  result Json
+  createdAt DateTime @default(now())
 }

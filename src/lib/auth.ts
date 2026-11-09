@@ -1,3 +1,4 @@
+import { selectedSessionWorkspace } from "@/lib/workspace-session";
 import { invitedNativeId, invitedSessionsEnabled } from "@/lib/invited-central-identity";
 import { nativeSessionActive } from "@/lib/native-session-status";
 import { createHash, randomBytes, randomInt, scrypt, timingSafeEqual } from "node:crypto";
@@ -124,7 +125,7 @@ export const PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED";
  * Only the change-password, "me" and app-layout callers pass `allowTempPassword`.
  */
 /** The signed-in user for a session token, or ApiError(401). Does not read the cookie jar. */
-export async function sessionUser(token: string | undefined, opts: { allowTempPassword?: boolean } = {}) {
+export async function sessionUser(token: string | undefined, opts: { allowTempPassword?: boolean; workspaceNeutral?: boolean } = {}) {
   if (!token) throw new ApiError(401, "Not signed in");
   const session = await db.session.findUnique({ where: { tokenHash: sha256(token) }, include: { user: true } });
   const u = session?.user;
@@ -142,10 +143,11 @@ export async function sessionUser(token: string | undefined, opts: { allowTempPa
   if (u.tempPasswordAt && !opts.allowTempPassword) {
     throw new ApiError(403, "Set your own password first.", { code: PASSWORD_CHANGE_REQUIRED });
   }
-  return u;
+  const selected = opts.workspaceNeutral ? null : await selectedSessionWorkspace(session.id);
+  return { ...u, workspaceGeneration: null as number | null, ...selected };
 }
 
-export async function currentUser(opts: { allowTempPassword?: boolean } = {}) {
+export async function currentUser(opts: { allowTempPassword?: boolean; workspaceNeutral?: boolean } = {}) {
   const store = await cookies();
   return sessionUser(store.get(SESSION_COOKIE)?.value, opts);
 }

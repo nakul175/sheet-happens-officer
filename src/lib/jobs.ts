@@ -1,3 +1,4 @@
+import { crmRoleProjectWhere } from "@/lib/access";
 // Scheduled jobs (SHO-US-9.3 AC6). Each run is recorded in JobRun; a failure or a missed
 // day puts a notice in every Super Admin's bell. Jobs are triggered by the server's cron
 // through POST /api/jobs/<name> with the JOB_SECRET; nothing here is reachable from a session.
@@ -11,7 +12,7 @@ import { notify } from "@/lib/notify";
 import { notifyStalledDeals } from "@/lib/deals";
 import { purgeTrash } from "@/lib/tasks";
 import { startOfTodayIST } from "@/lib/dates";
-import { crmMode, crmProjectWhere } from "@/lib/crm";
+import { crmMode } from "@/lib/crm";
 
 type Job = { name: string; about: string; run: (now?: Date) => Promise<unknown> };
 
@@ -47,7 +48,7 @@ export function reminderTaskWhere(today: Date): Prisma.TaskWhereInput {
   const open = { completedAt: null, deletedAt: null, blocked: false, dueDate };
   // AND keeps `archivedAt` if a later crmProjectWhere returns its own archivedAt or OR.
   const projectFor = (role: OrgRole): Prisma.ProjectWhereInput => ({
-    AND: [{ archivedAt: null }, crmProjectWhere({ orgRole: role })],
+    AND: [{ archivedAt: null }, crmRoleProjectWhere({ orgRole: role })],
   });
   const mode = crmMode();
   if (mode !== "admins") {

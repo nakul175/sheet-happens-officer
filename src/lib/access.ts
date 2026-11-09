@@ -1,3 +1,4 @@
+import { workspaceScope, scopedUser, multiWorkspaceEnabled, personInWorkspace } from "@/lib/workspace-authority";
 import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
@@ -5,7 +6,7 @@ import { ApiError, notFound } from "@/lib/http";
 export type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 export type Role = "VIEWER" | "EDITOR" | "LEADER";
 export type OrgRole = "MEMBER" | "ADMIN" | "SUPER_ADMIN";
-export type Actor = { id: string; orgRole: OrgRole; name?: string };
+export type Actor = { id: string; orgRole: OrgRole; name?: string; workspaceId?: string; workspaceGeneration?: number | null };
 
 export const isAdmin = (u: { orgRole: OrgRole }) => u.orgRole !== "MEMBER";
 
@@ -26,14 +27,17 @@ export function crmVisible(user: Pick<Actor, "orgRole">) {
 }
 
 /** Project `where` fragment: deals are left out for a person the CRM is hidden from (SHO-BUG-2). Spread it into any project filter. */
-export const crmProjectWhere = (user: Pick<Actor, "orgRole">): Prisma.ProjectWhereInput =>
+export const crmRoleProjectWhere = (user: Pick<Actor, "orgRole">): Prisma.ProjectWhereInput =>
   crmVisible(user) ? {} : { typeId: { not: WORKSTREAM_DEAL } };
+export const crmProjectWhere = (user: Pick<Actor, "orgRole">): Prisma.ProjectWhereInput =>
+  ({ ...workspaceScope(user as Actor), ...crmRoleProjectWhere(user) });
 
 /**
  * Loads a project the person may see. Non-members get "not found", never "forbidden"
  * (SHO-US-3.2 AC4). Admins and the Super Admin act as Leader everywhere.
  */
 export async function projectAccess(user: Actor, projectId: string, opts: { write?: boolean; deleted?: boolean; tx?: Tx } = {}) {
+  if (multiWorkspaceEnabled()) user = { ...user, ...await scopedUser(user, opts.tx ?? db) };
   const project = await (opts.tx ?? db).project.findUnique({
     where: { id: projectId },
     include: {
@@ -42,7 +46,7 @@ export async function projectAccess(user: Actor, projectId: string, opts: { writ
     },
   });
   const member = project?.members.find((m) => m.userId === user.id) ?? null;
-  if (!project || (!member && !isAdmin(user))) throw notFound("Project");
+  if (!project || (multiWorkspaceEnabled() && project.workspaceId !== workspaceScope(user).workspaceId) || (!member && !isAdmin(user))) throw notFound("Project");
   // A hidden CRM looks like it does not exist: a deal, and so every task, section and log row in it, is "not found" (SHO-BUG-2).
   if (project.typeId === WORKSTREAM_DEAL && !crmVisible(user)) throw notFound("Project");
   // The person who created the work item retains management rights even when they named
@@ -74,6 +78,10 @@ export async function activeMember(tx: Tx, projectId: string, userId: string, ro
     include: { user: true },
   });
   if (!m || !isActive(m.user)) return null;
+  if (multiWorkspaceEnabled()) {
+    const project=await tx.project.findUnique({where:{id:projectId},select:{workspaceId:true}});
+    if (!project || !await personInWorkspace(userId,project.workspaceId,tx)) return null;
+  }
   if (roles && !roles.includes(m.role)) return null;
   return m;
 }

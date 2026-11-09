@@ -117,18 +117,28 @@ describe("a real failure still shows LoadFailed", () => {
       const page = await open(s.path(), s.api(), (route) => route.abort("internetdisconnected"));
       try {
         await loadFailed(page).waitFor({ state: "visible", timeout: 15000 });
-        expect(await page.getByRole("button", { name: "Retry" }).count()).toBe(1);
+        await expect.poll(() => page.getByRole("button", { name: "Retry" }).count(), { timeout: 15000 }).toBe(1);
       } finally { await page.close(); }
     });
     it(`${s.name}: a 5xx shows ${s.name === "Person" ? "\"Something went wrong, try again\"" : "LoadFailed"}, and Retry loads the screen once the server answers`, async () => {
-      let fail = true;
-      const page = await open(s.path(), s.api(), (route) => (fail ? route.fulfill({ status: 503, contentType: "application/json", body: "{}" }) : route.continue()));
+      // Authority refreshes may refetch while Retry is being located. Keep the
+      // server failing until an actual Retry click, rather than restoring it
+      // before click() and racing the button's automatic disappearance.
+      const page = await open(s.path(), s.api(), async (route) => {
+        const clicked = await route.request().frame().evaluate(() =>
+          !!(window as unknown as { __retryClicked?: boolean }).__retryClicked);
+        await (clicked ? route.continue() : route.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
+      });
       // APL-2664: the person page says "Something went wrong, try again" for 503. Other screens keep LoadFailed.
       const fault = s.name === "Person" ? page.getByText("Something went wrong, try again") : loadFailed(page);
       try {
         await fault.waitFor({ state: "visible", timeout: 15000 });
-        fail = false;
-        await page.getByRole("button", { name: "Retry" }).click();
+        await page.evaluate(() => document.addEventListener("click", event => {
+          const target = event.target instanceof Element ? event.target.closest("button") : null;
+          if (target?.textContent?.trim() === "Retry")
+            (window as unknown as { __retryClicked?: boolean }).__retryClicked = true;
+        }, { capture: true }));
+        await page.getByRole("button", { name: "Retry" }).click({ timeout: 15000 });
         await s.ready(page).waitFor({ state: "visible", timeout: 15000 });
         expect(await fault.count()).toBe(0);
       } finally { await page.close(); }

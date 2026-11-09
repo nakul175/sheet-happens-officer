@@ -203,8 +203,9 @@ test.describe("qa:TC missing APL-2624 a Super-Admin-issued password must be chan
     expect((await admin.c.post(`/api/team/${id}/resend`)).status).toBe(200);
     const fresh = emailedPassword(email);
     expect(fresh).not.toBe(password);
-    await page.goto("/projects");
-    await page.waitForURL(/\/signin/); // Resend signs every session out
+    // The authority watcher redirects this already-open session after revocation.
+    // Starting another navigation races that redirect and can abort page.goto.
+    await page.waitForURL(/\/signin/, { timeout: 15000 }); // Resend signs every session out
     await signIn(page, email, fresh);
     await expectWall(page, "/team");
     await page.context().close();

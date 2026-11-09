@@ -1,3 +1,4 @@
+import { scopedUser } from "@/lib/workspace-authority";
 // SHO-US-3.2 AC6 and 3.6 AC6, APL-2684: search over the projects and tasks the person may see.
 // Members find only their own projects. Admins and Super Admins find every project, including
 // archived ones they are not members of, once Include archived is on. Archived projects stay
@@ -26,7 +27,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
     ...crmProjectWhere(user), // neither a deal nor its tasks while the CRM is hidden (SHO-BUG-2)
   };
   const crm = crmVisible(user);
-  const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
+  const me = await scopedUser(user);
   const [organisations, contacts] = crm && !ideasOnly ? await Promise.all([
     db.organisation.findMany({ where: { workspaceId: me.workspaceId, archivedAt: includeArchived ? undefined : null, name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, kind: true } }),
     db.contact.findMany({ where: { workspaceId: me.workspaceId, removedAt: null, name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, organisation: { select: { id: true, name: true } } } }),

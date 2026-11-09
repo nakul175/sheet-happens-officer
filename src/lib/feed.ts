@@ -1,3 +1,4 @@
+import { multiWorkspaceEnabled, workspaceScope } from "@/lib/workspace-authority";
 import { invitedNativeId } from "@/lib/invited-central-identity";
 // Read side for the bell, the project Activity page, the Audit log and Profile
 // (SHO-US-7.1, 6.3, 6.5, 1.6).
@@ -149,15 +150,28 @@ export function noticeForReader(n: N, hidden: boolean): { text: string; href: st
 /** With the comments switch off, comment notices are neither listed, counted nor changed (APL-2590 D1b, #128 D2). */
 const hiddenCommentNotices = () => (commentsEnabled() ? {} : { type: { notIn: COMMENT_NOTICE_TYPES } });
 
+async function workspaceNotices(user: Actor) {
+  if (!multiWorkspaceEnabled()) return {};
+  const original=await db.user.findUniqueOrThrow({where:{id:user.id},select:{workspaceId:true}});
+  // project-lookup-ok: explicit selected-workspace and current-member filters; plain notification IDs have no Prisma relation.
+  const eligible=await db.project.findMany({where:{...workspaceScope(user),
+    ...(user.orgRole==='MEMBER'?{members:{some:{userId:user.id}}}:{})},select:{id:true}});
+  return { AND: [{ OR: [
+    {projectId:{in:eligible.map(p=>p.id)}},
+    ...(original.workspaceId===user.workspaceId ? [{projectId:null}] : []),
+  ] }] };
+}
+
 /** SHO-US-14.13: newest first, 50 at a time; `before` is the `next` value of the previous page. `filter=unread` hides read items. */
 export async function listNotifications(user: Actor, o: { filter?: string; before?: string; limit?: number } = {}) {
   const limit = Math.min(Math.max(o.limit ?? 50, 1), 200);
   const [at, cursorId] = (o.before ?? "").split("|");
   const when = at && !Number.isNaN(Date.parse(at)) ? new Date(at) : null;
+  const noticeScope = await workspaceNotices(user);
   const hideComments = hiddenCommentNotices(); // APL-2590 D1b
   const rows = await db.notification.findMany({
     where: {
-      recipientId: user.id,
+      ...noticeScope, recipientId: user.id,
       ...hideComments,
       ...(o.filter === "unread" ? { readAt: null } : {}),
       ...(when ? { OR: [{ createdAt: { lt: when } }, { createdAt: when, id: { lt: cursorId ?? "" } }] } : {}),
@@ -166,7 +180,7 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
     take: limit + 1,
     include: { actor: { select: { name: true } } },
   });
-  const unread = await db.notification.count({ where: { recipientId: user.id, readAt: null, ...hideComments } });
+  const unread = await db.notification.count({ where: { ...noticeScope, recipientId: user.id, readAt: null, ...hideComments } });
   const page = rows.slice(0, limit);
   const hideCrm = !crmVisible(user);
   const projects = await notificationProjects(user, page.map((n) => n.projectId));
@@ -190,14 +204,14 @@ export async function listNotifications(user: Actor, o: { filter?: string; befor
 }
 
 export async function markRead(user: Actor, id: string) {
-  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: null, ...hiddenCommentNotices() }, data: { readAt: new Date() } });
+  await db.notification.updateMany({ where: { ...await workspaceNotices(user), id, recipientId: user.id, readAt: null, ...hiddenCommentNotices() }, data: { readAt: new Date() } });
 }
 /** SHO-US-14.13 AC4: keep a notice unread until I have acted on it. */
 export async function markUnread(user: Actor, id: string) {
-  await db.notification.updateMany({ where: { id, recipientId: user.id, readAt: { not: null }, ...hiddenCommentNotices() }, data: { readAt: null } });
+  await db.notification.updateMany({ where: { ...await workspaceNotices(user), id, recipientId: user.id, readAt: { not: null }, ...hiddenCommentNotices() }, data: { readAt: null } });
 }
 export async function markAllRead(user: Actor) {
-  await db.notification.updateMany({ where: { recipientId: user.id, readAt: null, ...hiddenCommentNotices() }, data: { readAt: new Date() } }); // #128 D2
+  await db.notification.updateMany({ where: { ...await workspaceNotices(user), recipientId: user.id, readAt: null, ...hiddenCommentNotices() }, data: { readAt: new Date() } }); // #128 D2
 }
 
 // ---- project activity (SHO-US-6.3, 14.14) ----

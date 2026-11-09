@@ -1,3 +1,4 @@
+import { scopedUser, workspaceScope, workspacePeopleWhere } from "@/lib/workspace-authority";
 // SHO-US-11.2 to 11.5: contacts, notes and task links on organisations. Visible to every signed-in Member except where a
 // note belongs to a deal (then deal members and Admins only). Changes are logged with no project; Undo is for 30 days.
 import type { Prisma } from "@/generated/prisma/client";
@@ -16,12 +17,12 @@ export type NoteKindName = "MEETING" | "CALL" | "INTRODUCTION" | "OTHER";
 const dayOf = (d: Date) => d.toISOString().slice(0, 10);
 
 async function me(user: Actor) {
-  return db.user.findUniqueOrThrow({ where: { id: user.id }, select: { id: true, workspaceId: true } });
+  return scopedUser(user);
 }
 
 /** Notes the person may see: no deal, or a deal they belong to; Admins see all (AC2, AC4). */
 export const visibleNotes = (user: Actor): Prisma.NoteWhereInput => ({
-  removedAt: null,
+  ...workspaceScope(user), removedAt: null,
   ...(isAdmin(user) ? {} : { OR: [{ projectId: null }, { project: { members: { some: { userId: user.id } } } }] }),
 });
 
@@ -45,7 +46,7 @@ export async function assertCanUpdateContact(user: Actor, id: string) {
 
 async function knownByList(ids: string[] | undefined, user: Actor, workspaceId: string) {
   const want = [...new Set(ids?.length ? ids : [user.id])];
-  const people = await db.user.findMany({ where: { id: { in: want }, workspaceId }, select: { id: true, deactivatedAt: true } });
+  const people = await db.user.findMany({ where: { id: { in: want }, ...workspacePeopleWhere(workspaceId) }, select: { id: true, deactivatedAt: true } });
   if (people.length !== want.length || people.some((p) => p.deactivatedAt)) throw new ApiError(400, "Choose active members for Known by.");
   return want;
 }
@@ -247,7 +248,7 @@ export async function tasksLinkedHere(user: Actor, o: { organisationId?: string;
   const rows = await db.task.findMany({
     where: {
       deletedAt: null,
-      project: { archivedAt: null, ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }) },
+      project: { ...workspaceScope(user), archivedAt: null, ...(isAdmin(user) ? {} : { members: { some: { userId: user.id } } }) },
       links: { some: o.contactId ? { contactId: o.contactId } : { OR: [{ organisationId: o.organisationId }, { contact: { organisationId: o.organisationId, removedAt: null } }] } },
     },
     orderBy: [{ completedAt: { sort: "asc", nulls: "first" } }, { dueDate: { sort: "asc", nulls: "last" } }], take: 100,

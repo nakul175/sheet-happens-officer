@@ -1,3 +1,4 @@
+import { findScopedUser, workspaceScope, workspacePeopleWhere } from "@/lib/workspace-authority";
 // SHO-2589. Counts and drill-down share one predicate, including subtasks.
 import { db } from "@/lib/db";
 import { crmVisible, isAdmin, WORKSTREAM_DEAL, type Actor } from "@/lib/access";
@@ -19,12 +20,12 @@ export function matchesWorkload(t: CountableTask, filter: WorkloadFilter, today 
 
 export async function workloadAvailable(user: Actor) {
   if (isAdmin(user)) return true;
-  return !!await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { archivedAt: null, deletedAt: null } }, select: { projectId: true } });
+  return !!await db.projectMember.findFirst({ where: { userId: user.id, role: "LEADER", project: { ...workspaceScope(user), archivedAt: null, deletedAt: null } }, select: { projectId: true } });
 }
 
 export async function workload(user: Actor, query = new URLSearchParams()) {
   // Never accept project ids or a workspace from the caller.
-  const actor = await db.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+  const actor = await findScopedUser(user);
   if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Workload");
   // project-lookup-ok: Workload authorizes Admin workspace or led projects only; hidden CRM rows are redacted below.
   const projects = await db.project.findMany({
@@ -33,7 +34,7 @@ export async function workload(user: Actor, query = new URLSearchParams()) {
   });
   if (!isAdmin(user) && !projects.length) throw notFound("Workload");
   const people = await db.user.findMany({
-    where: { workspaceId: actor.workspaceId, deactivatedAt: null, emailVerifiedAt: { not: null }, ...(isAdmin(user) ? {} : { id: { in: [...new Set(projects.flatMap(p => p.members.map(m => m.userId)))] } }) },
+    where: { ...workspacePeopleWhere(actor.workspaceId), deactivatedAt: null, emailVerifiedAt: { not: null }, ...(isAdmin(user) ? {} : { id: { in: [...new Set(projects.flatMap(p => p.members.map(m => m.userId)))] } }) },
     select: { id: true, name: true }, orderBy: [{ name: "asc" }, { id: "asc" }],
   });
   const tasks = await db.task.findMany({
