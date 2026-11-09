@@ -132,6 +132,21 @@ for (const kind of kinds) {
     completed.push(kind + ':rollback-retry');
   });
 }
+it('override Undo does not notify a later author who left the project', async () => {
+  const f = await fixture('task.sent_back');
+  await db.task.update({ where: { id: f.taskId }, data: { assigneeId: editor.id } });
+  await db.actionLog.create({ data: {
+    actorId: previous.id, projectId: f.projectId, targetType: 'task', targetId: f.taskId,
+    channel: 'SCREEN', action: 'task.assigned', beforeState: { assigneeId: leader.id },
+    afterState: { assigneeId: editor.id },
+  } });
+  await removeMember(leader, f.projectId, previous.id);
+  await undoAction(editor, f.actionId, true);
+  expect(await db.notification.count({ where: {
+    projectId: f.projectId, taskId: f.taskId, recipientId: previous.id, type: 'CHANGE_OVERRIDDEN',
+  } })).toBe(0);
+  completed.push('override-departed-author-notice');
+});
 for (const scenario of ['removed', 'downgraded', 'archived'] as const) {
   it(`${scenario} actor/project after preflight blocks assignment Undo with unchanged state`, async () => {
     const f = await fixture(), pause = pauseBeforeTransactions(1), result = Promise.allSettled([undoAction(editor, f.actionId)]);
