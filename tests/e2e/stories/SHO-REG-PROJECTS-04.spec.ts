@@ -83,7 +83,7 @@ test('SHO-REG-PROJECTS-04 partial: task Trash route and signed-in restore contro
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: project.id, firstId, secondId, leaderRestored: true, editorDenied: true, viewerDenied: true, outsiderHidden: true, secondRetained: true, sentinelFingerprint, sentinelPreserved: true }, null, 2));
 });
 
-test('SHO-REG-PROJECTS-04 project Trash: archived project restores with task and members', async ({ admin, later, browser }) => {
+test('SHO-REG-PROJECTS-04 project Trash: archived project restores with task and members', async ({ admin, later }) => {
   if (!local2691) throw new Error('This project Trash case uses only the guarded local test database.');
   const fixture = randomUUID();
   const evidenceDir = 'test-results/project-trash-project-journey';
@@ -150,10 +150,10 @@ test('SHO-REG-PROJECTS-04 project Trash: archived project restores with task and
   const row = trash.locator('.box').filter({ hasText: project.name });
   await expect(row).toBeVisible();
   mkdirSync(evidenceDir, { recursive: true });
-  await page.screenshot({ path: `${evidenceDir}/archived-project-trash.png`, fullPage: true });
+  await trash.screenshot({ path: `${evidenceDir}/archived-project-trash.png` });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(row.getByRole('button', { name: /Restore project/ })).toBeVisible();
-  await page.screenshot({ path: `${evidenceDir}/archived-project-trash-390.png`, fullPage: true });
+  await trash.screenshot({ path: `${evidenceDir}/archived-project-trash-390.png` });
   await row.getByRole('button', { name: /Restore project/ }).click();
   await page.getByRole('dialog', { name: /Restore/ }).getByRole('button', { name: 'Restore project', exact: true }).click();
   await expect.poll(async () => (await admin.api.get(`/api/projects/${project.id}`)).status).toBe(200);
