@@ -33,6 +33,21 @@ test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', a
   const outsider = await account(zz('project outsider'), `nakul17+zz-projects-01-${randomUUID()}@aplyd.com`);
   outsiderId = outsider.id;
   later(() => admin.api.post(`/api/team/${outsider.id}/deactivate`, { reassign: 'leaders' }));
+  const memberIds: string[] = [];
+  later(async () => {
+    for (const id of memberIds) {
+      const result = await admin.api.get(`/api/team/${id}`);
+      expect(result.status).toBe(200);
+      expect(result.json.person.status).toBe('DEACTIVATED');
+    }
+  });
+  const members = await Promise.all(['EDITOR', 'VIEWER'].map(async role => {
+    const person = await account(zz(`project ${role.toLowerCase()}`), `nakul17+zz-projects-01-${fixture}-${role.toLowerCase()}@aplyd.com`);
+    memberIds.push(person.id);
+    later(() => admin.api.post(`/api/team/${person.id}/deactivate`, { reassign: 'leaders' }));
+    expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: person.id, role })).status).toBe(201);
+    return { person, role };
+  }));
   const name = zz('Renamed project');
   const changed = await admin.api.patch(`/api/projects/${p.id}`, { name, description: 'A persisted project description' });
   expect(changed.status, JSON.stringify(changed.json)).toBe(200);
@@ -52,12 +67,20 @@ test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', a
   for (const body of [{ name: '   ' }, { name: 'x'.repeat(201) }, { description: 'x'.repeat(5001) }]) {
     expect((await admin.api.patch(`/api/projects/${p.id}`, body)).status).toBe(400);
   }
+  const beforeDenied = await admin.api.get(`/api/projects/${p.id}`);
+  const beforeDeniedActivity = await admin.api.get(`/api/projects/${p.id}/activity`);
+  for (const { person, role } of members) {
+    expect((await person.c.get(`/api/projects/${p.id}`)).status, `${role} can read the project`).toBe(200);
+    expect((await person.c.patch(`/api/projects/${p.id}`, { name: 'Unauthorized' })).status, `${role} cannot rename it`).toBe(403);
+  }
   expect((await outsider.c.patch(`/api/projects/${p.id}`, { name: 'Unauthorized' })).status).toBe(404);
+  expect((await admin.api.get(`/api/projects/${p.id}`)).json.project).toEqual(beforeDenied.json.project);
+  expect((await admin.api.get(`/api/projects/${p.id}/activity`)).json).toEqual(beforeDeniedActivity.json);
   expect((await admin.api.get(`/api/projects/${p.id}`)).json.project).toMatchObject({ name, description: 'A persisted project description' });
   const sentinelAfter = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
   expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(sentinelFingerprint);
   mkdirSync(evidenceDir, { recursive: true });
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: p.id, sentinelId: sentinel.id, sentinelFingerprint, sentinelPreserved: true, validationRejected: 3, outsiderDenied: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: p.id, sentinelId: sentinel.id, sentinelFingerprint, sentinelPreserved: true, validationRejected: 3, editorViewerReadAllowed: true, editorViewerRenameDenied: true, deniedWritesLeftProjectAndActivityUnchanged: true, outsiderDenied: true }, null, 2));
 });
 
 test('SHO-REG-PROJECTS-01 screen: create, edit, reload and inspect details', async ({ admin, later }) => {
