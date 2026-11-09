@@ -194,6 +194,39 @@ it("keeps email verification retryable after a phone network failure, while an i
   } finally { await ctx.close(); }
 });
 
+it("keeps expired-link resend retryable when its request fails at phone width", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    let failOnce = true;
+    await page.route("**/api/auth/resend-verification", route => {
+      if (failOnce) { failOnce = false; return route.abort("failed"); }
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    });
+    await page.goto("/expired", { waitUntil: "load" });
+    await page.evaluate(() => sessionStorage.setItem("sho_pending_email", "synthetic@example.test"));
+    const button = page.getByRole("button", { name: "Send a new verification link" });
+    await button.waitFor();
+    await button.click();
+    const alert = page.locator('main p[role="alert"]');
+    await alert.waitFor();
+    await expect.poll(async () => alert.innerText()).toMatch(/try again/i);
+    expect(new URL(page.url()).pathname).toBe("/expired");
+    expect(await button.isEnabled()).toBe(true);
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "expired-link page with a retryable network error").toEqual([]);
+    await button.click();
+    await page.getByRole("heading", { name: "Check your email" }).waitFor();
+    expect(new URL(page.url()).pathname).toBe("/check-email");
+    expect(new URL(page.url()).search).toBe("?resent=1");
+  } finally { await ctx.close(); }
+});
+
 it("associates a reset confirmation mismatch and clears it before the invalid-link state", async () => {
   const ctx = await ctxFor(null, 390);
   try {
