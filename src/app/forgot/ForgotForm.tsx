@@ -10,6 +10,7 @@ import { post, rememberEmail } from "@/components/client";
 export function ForgotForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [invalidEmail, setInvalidEmail] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
@@ -17,12 +18,16 @@ export function ForgotForm() {
     const email = String(new FormData(e.currentTarget).get("email")).trim().toLowerCase();
     setBusy(true);
     setError(null);
+    setInvalidEmail(false);
     const r = await post("/api/auth/forgot-password", { email });
     setBusy(false);
     if (r.ok) {
       rememberEmail(email);
       router.push("/check-reset");
-    } else setError(r.error ?? null);
+    } else {
+      setError(r.error ?? null);
+      setInvalidEmail((r.data?.issues as { path?: unknown[] }[] | undefined)?.[0]?.path?.[0] === "email");
+    }
   }
 
   return (
@@ -30,10 +35,10 @@ export function ForgotForm() {
       <h1>Forgot password</h1>
       <p className={styles.lead}>Enter your work email and we will send you a link to set a new password.</p>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
-        {error && <div role="alert" className={styles.alert}>{error}</div>}
+        {error && <div id="forgot-email-error" role="alert" className={styles.alert}>{error}</div>}
         <div className={styles.field}>
           <label htmlFor="email" className={styles.label}>Work email</label>
-          <input id="email" name="email" type="email" autoComplete="username" placeholder="you@aplyd.com" required className={styles.input} />
+          <input id="email" name="email" type="email" autoComplete="username" placeholder="you@aplyd.com" required className={styles.input} aria-invalid={invalidEmail} aria-describedby={invalidEmail ? "forgot-email-error" : undefined} onChange={() => { setError(null); setInvalidEmail(false); }} />
         </div>
         <button type="submit" disabled={busy} className={styles.primary}>{busy ? "Sending…" : "Send reset link"}</button>
       </form>

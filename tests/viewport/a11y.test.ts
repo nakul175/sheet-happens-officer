@@ -199,6 +199,37 @@ it("associates a reset confirmation mismatch and clears it before the invalid-li
   } finally { await ctx.close(); }
 });
 
+it("associates a rejected phone recovery email and clears the error on edit", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/forgot", { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Forgot password" }).waitFor();
+    const email = page.getByLabel("Work email", { exact: true });
+    await email.fill("not-an-email");
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/forgot-password" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Send reset link" }).click();
+    expect((await response).status()).toBe(400);
+    const alert = page.locator("form:visible").getByRole("alert");
+    await alert.waitFor();
+    expect(await alert.innerText()).toBeTruthy();
+    expect(await email.getAttribute("aria-invalid")).toBe("true");
+    expect(await email.getAttribute("aria-describedby")).toBe("forgot-email-error");
+
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "recovery form with a visible email error").toEqual([]);
+    await email.fill("zz-audit-corrected@example.com");
+    await alert.waitFor({ state: "detached" });
+    expect(await email.getAttribute("aria-invalid")).toBe("false");
+    expect(new URL(page.url()).pathname).toBe("/forgot");
+  } finally { await ctx.close(); }
+});
+
 it("associates rejected phone sign-up fields without creating an account", async () => {
   const ctx = await ctxFor(null, 390);
   try {
