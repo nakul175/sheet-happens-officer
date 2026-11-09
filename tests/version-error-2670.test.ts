@@ -3,23 +3,86 @@
 // A stale instant is 409 version_conflict. Each of those bodies is exactly { error: { code, message } }.
 // An outsider PATCH on a hidden task is not a version error: it is the missing-task 404 { error: "Task not found" } (F8).
 // T0 is the task's real updatedAt, read back after a save through the API. No test writes the database.
-import { describe, expect, it } from "vitest";
-import { account, BASE, project, task, type Account } from "./helpers";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { resolve, sep } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { db } from "@/lib/db";
+import { account, BASE, OUTBOX, project, task, type Account } from "./helpers";
+import { assertLocalFixture } from "./e2e/local-fixture-guard";
 
 const REQUIRED = { error: { code: "version_required", message: "expectedUpdatedAt is required" } };
 const INVALID = { error: { code: "invalid_version", message: "expectedUpdatedAt must be a full ISO 8601 date-time with a time and a zone." } };
 const CONFLICT = { error: { code: "version_conflict", message: "Lead changed this task while you were editing it." } };
+const runId = randomUUID();
+const people: Account[] = [];
+const projectIds: string[] = [];
+const taskIds: string[] = [];
+let sequence = 0;
+let safe = false;
+
+afterAll(async () => {
+  if (!safe) return;
+  let cleanup = false;
+  try {
+    const discoveredPeople = await db.user.findMany({ where: { email: { startsWith: `nakul17+v2670-${runId}-` } }, select: { id: true, email: true } });
+    const discoveredProjects = await db.project.findMany({ where: { name: { startsWith: `ZZ-TEST v2670 ${runId}-` } }, select: { id: true } });
+    const userIds = [...new Set([...people.map((person) => person.id), ...discoveredPeople.map((person) => person.id)])];
+    const emails = [...new Set([...people.map((person) => person.email), ...discoveredPeople.map((person) => person.email)])];
+    const ownedProjectIds = [...new Set([...projectIds, ...discoveredProjects.map((project) => project.id)])];
+    await db.notification.deleteMany({ where: { projectId: { in: ownedProjectIds } } });
+    await db.actionLog.deleteMany({ where: { projectId: { in: ownedProjectIds } } });
+    await db.project.deleteMany({ where: { id: { in: ownedProjectIds } } });
+    await db.auditLog.deleteMany({ where: { actorId: { in: userIds } } });
+    await db.loginAttempt.deleteMany({ where: { email: { in: emails } } });
+    await db.user.deleteMany({ where: { id: { in: userIds } } });
+    for (const name of readdirSync(OUTBOX)) {
+      if (!name.endsWith(".json")) continue;
+      const path = resolve(OUTBOX, name);
+      const mail = JSON.parse(readFileSync(path, "utf8")) as { to?: string };
+      if (mail.to && emails.includes(mail.to)) rmSync(path);
+    }
+    expect(await db.task.count({ where: { id: { in: taskIds } } })).toBe(0);
+    expect(await db.task.count({ where: { projectId: { in: ownedProjectIds } } })).toBe(0);
+    expect(await db.project.count({ where: { id: { in: ownedProjectIds } } })).toBe(0);
+    expect(await db.user.count({ where: { id: { in: userIds } } })).toBe(0);
+    cleanup = true;
+  } finally {
+    mkdirSync("test-results/version-error-2670", { recursive: true });
+    writeFileSync("test-results/version-error-2670/cleanup.json", JSON.stringify({ fixture: runId, scope: "disposable-local-sho-test", tasks: taskIds.length, projects: projectIds.length, people: people.length, cleanup }, null, 2));
+  }
+});
 
 describe("one error shape for a task version (APL-2670)", () => {
   async function fixture() {
-    const lead = await account("lead");
-    const worker = await account("worker");
-    const outsider = await account("outsider");
-    const p = await project(lead, lead, [{ who: worker }]);
+    assertLocalFixture(process.env.DATABASE_URL, BASE);
+    if (!resolve(OUTBOX).startsWith(resolve(process.cwd()) + sep)) throw new Error("PRIVATE_CHECKOUT_OUTBOX_REQUIRED");
+    safe = true;
+    const n = sequence++;
+    const person = async (role: string) => {
+      const who = await account(role, `nakul17+v2670-${runId}-${role}-${n}@aplyd.com`);
+      people.push(who);
+      return who;
+    };
+    const lead = await person("lead");
+    const worker = await person("worker");
+    const outsider = await person("outsider");
+    const p = await project(lead, lead, [{ who: worker }], `ZZ-TEST v2670 ${runId}-${n}`);
+    projectIds.push(p.id);
     const id = await task(lead, p.id, { title: "Original" });
+    taskIds.push(id);
     // T0 is whatever the create saved, read back through the API.
     const t0 = (await shown(worker, id)).updatedAt;
     return { lead, worker, outsider, id, sectionId: p.doing, t0 };
+  }
+
+  async function effects(id: string) {
+    return {
+      task: await db.task.findUnique({ where: { id }, select: { title: true, assigneeId: true, approverId: true, sectionId: true, updatedAt: true } }),
+      actionIds: (await db.actionLog.findMany({ where: { targetType: "task", targetId: id }, select: { id: true }, orderBy: { id: "asc" } })).map((row) => row.id),
+      notificationIds: (await db.notification.findMany({ where: { taskId: id }, select: { id: true }, orderBy: { id: "asc" } })).map((row) => row.id),
+      auditIds: (await db.auditLog.findMany({ where: { targetId: id }, select: { id: true }, orderBy: { id: "asc" } })).map((row) => row.id),
+    };
   }
 
   async function shown(worker: Account, id: string) {
@@ -158,6 +221,7 @@ describe("one error shape for a task version (APL-2670)", () => {
 
   it("keeps session, access and version ahead of invalid schemas on every task mutation", async () => {
     const fx = await fixture();
+    const beforeEffects = await effects(fx.id);
     const routes = [
       ["PATCH", "", { title: "" }, { title: "New" }],
       ["POST", "/assign", { assigneeId: "" }, { assigneeId: fx.worker.id }],
@@ -198,5 +262,6 @@ describe("one error shape for a task version (APL-2670)", () => {
       expect(result, `${path} stale valid body`).toEqual({ status: 409, text: JSON.stringify(CONFLICT) });
     }
     expect(await shown(fx.worker, fx.id)).toEqual({ title: "Original", updatedAt: fx.t0 });
+    expect(await effects(fx.id)).toEqual(beforeEffects);
   });
 });
