@@ -153,6 +153,41 @@ describe("phone comments", () => {
     }
   });
 
+  it("allows author-only edits and Admin deletion while another Editor is denied", async () => {
+    const writer = await browser.newContext({ baseURL: app });
+    const colleague = await browser.newContext({ baseURL: app });
+    const admin = await browser.newContext({ baseURL: app });
+    const url = `/api/tasks/${taskId}/comments`;
+    try {
+      for (const [ctx, who] of [[writer, made[0]], [colleague, made[1]], [admin, root]] as const) {
+        expect(who).toBeTruthy();
+        expect((await ctx.request.post("/api/auth/signin", { data: { email: who!.email, password: PW } })).status()).toBe(200);
+      }
+      const original = `ZZ-TEST author matrix ${RUN}`;
+      const created = await writer.request.post(url, { data: { text: original } });
+      expect(created.status()).toBe(201);
+      const id = (await created.json()).comment.id as string;
+      const target = `${url}/${id}`;
+      for (const ctx of [colleague, admin]) {
+        expect((await ctx.request.patch(target, { data: { text: "ZZ-TEST denied edit" } })).status()).toBe(403);
+      }
+      expect((await colleague.request.delete(target)).status()).toBe(403);
+      const ownEdit = `ZZ-TEST author edited ${RUN}`;
+      expect((await writer.request.patch(target, { data: { text: ownEdit } })).status()).toBe(200);
+      const beforeDelete = await writer.request.get(url);
+      expect(beforeDelete.status()).toBe(200);
+      expect((await beforeDelete.json()).comments.find((comment: { id: string }) => comment.id === id)?.text).toBe(ownEdit);
+      expect((await admin.request.delete(target)).status()).toBe(204);
+      const afterDelete = await writer.request.get(url);
+      expect(afterDelete.status()).toBe(200);
+      expect((await afterDelete.json()).comments.some((comment: { id: string }) => comment.id === id)).toBe(false);
+    } finally {
+      await writer.close();
+      await colleague.close();
+      await admin.close();
+    }
+  });
+
   it("edits and deletes an owned comment in the phone UI with escaped text and server readback", async () => {
     const { ctx, page } = await phone();
     const original = `ZZ-TEST edit phone ${RUN}`;
