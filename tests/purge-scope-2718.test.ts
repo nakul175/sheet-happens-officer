@@ -4,12 +4,11 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { PrismaClient } from "../src/generated/prisma/client";
+import { db } from "../src/lib/db";
 import { hashPassword } from "../src/lib/auth";
 import { runJob } from "../src/lib/jobs";
 import { BASE, Client, PW } from "./helpers";
 
-const db = new PrismaClient();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DAY = 86_400_000;
 // Fixed clock for the seed and for the scheduled job. purgeTrash() reads `new Date()`
@@ -181,27 +180,31 @@ describe("purgeTrash scope (APL-2718)", () => {
   it("AC2 the scheduled purge-trash job removes 31-day trash in every workspace (APL-2718-AC2@v1)", async () => {
     const seed = await seedWorkspaces();
     const previous = await db.jobRun.findUnique({ where: { job: "purge-trash" } });
-    const prior = new Set((await db.auditLog.findMany({ where: { event: "TASK_PURGED" }, select: { id: true } })).map((row) => row.id));
     const auditIds: string[] = [];
     let out: Awaited<ReturnType<typeof runJob>> | undefined;
+    const createAudit = db.auditLog.create.bind(db.auditLog);
+    const auditSpy = vi.spyOn(db.auditLog, "create").mockImplementationOnce((async (args: Parameters<typeof db.auditLog.create>[0]) => {
+      const row = await createAudit(args);
+      auditIds.push(row.id);
+      return row;
+    }) as unknown as typeof db.auditLog.create);
     try {
       vi.useFakeTimers({ now: CLOCK, toFake: ["Date"] });
       out = await runJob("purge-trash");
     } finally {
       vi.useRealTimers();
+      auditSpy.mockRestore();
     }
     try {
       expect(out).toEqual({ job: "purge-trash", status: "OK", result: 2 });
       const started = await db.jobRun.findUniqueOrThrow({ where: { job: "purge-trash" } });
       expect(started.lastStartedAt?.toISOString()).toBe(CLOCK.toISOString());
 
-      const created = await db.auditLog.findMany({
-        where: { event: "TASK_PURGED", id: { notIn: [...prior] } },
-        orderBy: { createdAt: "asc" },
-      });
+      expect(auditIds).toHaveLength(1);
+      const created = await db.auditLog.findMany({ where: { id: { in: auditIds } } });
       expect(created).toHaveLength(1);
+      expect(created[0]?.event).toBe("TASK_PURGED");
       expect(created[0]?.data).toEqual({ count: 2 });
-      auditIds.push(...created.map((row) => row.id));
 
       expect(await db.task.findUnique({ where: { id: seed.A.expiredId } })).toBeNull();
       expect(await db.task.findUnique({ where: { id: seed.B.expiredId } })).toBeNull();
