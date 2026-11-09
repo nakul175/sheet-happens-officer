@@ -56,3 +56,29 @@ Both PRs remain drafts, unmerged and undeployed. This introduces an additive
 native migration and requires fresh staging evidence and a separate production
 approval. Disabling the native feature with an existing selected session denies
 that selection rather than silently returning another workspace's authority.
+
+## Additional-workspace project editor
+
+The companion Portal project editor is separately default-OFF. Private config
+`project_ids` explicitly pins the native project IDs available for this workspace.
+The list reads live names, filters to that workspace's active projects, and is
+intersected with reviewed Portal ResourceMappings; company/organisation membership
+alone does not establish project scope. Native `projects.mjs` and the private CLI
+require an active additional MEMBER membership and the workspace's pinned original
+SUPER_ADMIN reviewer. ADMIN workspace access must be reviewed separately because
+it overrides project seats.
+
+Signed Review/Save supports Editor, Viewer, remove and explicit regrant without
+changing the workspace membership or native sessions. Leader transfer requires an
+existing project member, keeps exactly one Leader, and leaves the previous Leader
+as an Editor member. Existing creator and workspace Admin authority remain intact.
+A current Leader cannot be downgraded or removed without first replacing them.
+Creator downgrades that would misrepresent effective authority are refused.
+
+Task assignee/approver/collaborator references are never silently rewritten. Viewer
+downgrade/removal is held while such work requires handover; use SHO's existing
+explicit task handover before retrying. The transaction locks current native scope,
+roster and assignments, compares the entire reviewed proof, and atomically commits
+membership, receipt, native action history and audit. Audit failure rolls back the
+membership. Uncertain Portal dispatches block further SHO changes until reconciled.
+No new migration is required beyond the stacked workspace foundation.
