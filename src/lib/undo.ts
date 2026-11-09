@@ -113,7 +113,9 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
         apply: async (tx) => {
           if (!(await activeMember(tx, projectId, b.assigneeId, WORKERS))) throw bad("The previous assignee can no longer take this task.");
           if ("approverId" in f && b.approverId && !(await activeMember(tx, projectId, b.approverId, WORKERS))) throw bad("The previous approver can no longer take that role.");
-          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId: b.previousAssigneeId ?? null, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)), ...("approverId" in f ? { approverId: b.approverId ?? null } : {}) } });
+          const previousAssigneeId = typeof b.previousAssigneeId === "string" && await activeMember(tx, projectId, b.previousAssigneeId, WORKERS)
+            ? b.previousAssigneeId : null;
+          await tx.task.update({ where: { id }, data: { assigneeId: b.assigneeId, previousAssigneeId, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)), ...("approverId" in f ? { approverId: b.approverId ?? null } : {}) } });
         },
       };
     }
@@ -625,6 +627,14 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
           await tx.$queryRaw`SELECT "id" FROM "Section" WHERE "projectId" = ${sourceId} ORDER BY "id" FOR SHARE NOWAIT`;
         }
         await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        if (["task.assigned", "task.sent_for_approval", "task.sent_back"].includes(row.action)) {
+          const previousAssigneeId = (row.beforeState as { previousAssigneeId?: unknown } | null)?.previousAssigneeId;
+          if (typeof previousAssigneeId === "string") {
+            // A departure or deactivation must not race Undo into restoring a stale notice recipient.
+            await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${previousAssigneeId} FOR SHARE NOWAIT`;
+            await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${previousAssigneeId} FOR SHARE NOWAIT`;
+          }
+        }
         if (row.action === "task.collaborator_added") {
           const collaboratorId = (row.afterState as { userId?: string } | null)?.userId;
           if (collaboratorId) await tx.$queryRaw`SELECT "taskId" FROM "TaskCollaborator" WHERE "taskId" = ${row.targetId} AND "userId" = ${collaboratorId} FOR UPDATE NOWAIT`;

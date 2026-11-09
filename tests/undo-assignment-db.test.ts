@@ -154,12 +154,13 @@ for (const kind of ['task.assigned', 'task.approver_changed']) {
     expect(await snapshot(f.projectId)).toEqual(before); completed.push(kind + ':previous-person-removed');
   });
 }
-it('assignment Undo does not restore a departed previous assignee as a comment recipient', async () => {
+for (const departure of ['removed', 'viewer'] as const) it(`assignment Undo does not restore a ${departure} previous assignee as a comment recipient`, async () => {
   const f = await fixture('task.sent_for_approval');
   await db.actionLog.update({ where: { id: f.actionId }, data: {
     beforeState: { assigneeId: leader.id, previousAssigneeId: previous.id },
   } });
-  await removeMember(leader, f.projectId, previous.id);
+  if (departure === 'removed') await removeMember(leader, f.projectId, previous.id);
+  else await changeMemberRole(leader, f.projectId, previous.id, 'VIEWER');
   expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).previousAssigneeId).toBeNull();
   await undoAction(editor, f.actionId);
   const originalFlag = process.env.FF_TASK_COMMENTS;
@@ -173,7 +174,17 @@ it('assignment Undo does not restore a departed previous assignee as a comment r
     projectId: f.projectId, taskId: f.taskId, recipientId: previous.id, type: 'COMMENT_ADDED',
   } })).toBe(0);
   expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).previousAssigneeId).toBeNull();
-  completed.push('departed-previous-assignee-notice');
+  completed.push(departure + '-previous-assignee-notice');
+});
+it('assignment Undo preserves an eligible previous assignee', async () => {
+  const f = await fixture('task.sent_for_approval');
+  await db.actionLog.update({ where: { id: f.actionId }, data: {
+    beforeState: { assigneeId: leader.id, previousAssigneeId: previous.id },
+  } });
+  await db.task.update({ where: { id: f.taskId }, data: { previousAssigneeId: null } });
+  await undoAction(editor, f.actionId);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).previousAssigneeId).toBe(previous.id);
+  completed.push('eligible-previous-assignee-preserved');
 });
 it('an assignment Undo advances a future task version instead of moving it backwards', async () => {
   const f = await fixture(), stamp = new Date(Date.now() + 60_000);
