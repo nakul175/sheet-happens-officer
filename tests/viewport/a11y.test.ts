@@ -161,6 +161,44 @@ it("announces a failed phone sign-in, then clears the error after a valid retry"
   } finally { await ctx.close(); }
 });
 
+it("associates a reset confirmation mismatch and clears it before the invalid-link state", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/reset?token=synthetic-invalid-token-long-enough", { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Set a new password" }).waitFor();
+    await page.getByLabel("New password").fill("Testing1234");
+    const confirm = page.getByLabel("Confirm new password");
+    await confirm.fill("Testing1235");
+    const mismatch = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/reset-password" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Save and sign in" }).click();
+    expect((await mismatch).status()).toBe(400);
+    const alert = page.locator("form:visible").getByRole("alert");
+    await alert.waitFor();
+    expect(await alert.innerText()).toBe("Passwords do not match.");
+    expect(await confirm.getAttribute("aria-invalid")).toBe("true");
+    expect(await confirm.getAttribute("aria-describedby")).toBe("reset-password-error");
+
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "reset form with a visible mismatch").toEqual([]);
+
+    await confirm.fill("Testing1234");
+    await alert.waitFor({ state: "detached" });
+    expect(await confirm.getAttribute("aria-invalid")).toBe("false");
+    expect(await confirm.getAttribute("aria-describedby")).toBeNull();
+    const expired = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/reset-password" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Save and sign in" }).click();
+    expect((await expired).status()).toBe(400);
+    await page.getByRole("heading", { name: "This link can't be used" }).waitFor();
+    expect(new URL(page.url()).pathname).toBe("/expired");
+  } finally { await ctx.close(); }
+});
+
 for (const width of [1280, 390]) {
   describe(`axe at ${width} px`, () => {
     for (const s of SCREENS) {
