@@ -26,8 +26,31 @@ it("refreshes the embedded editor session provider when the approved origin chan
 
   current = { ...current, origin: "https://staging.holysheet.aplyd.org" };
   await act(async () => { [...host.querySelectorAll("button")].find(b => b.textContent === "Check access again")!.click(); });
+  expect(host.textContent).not.toContain("Close document");
+  await act(async () => { [...host.querySelectorAll("button")].find(b => b.textContent === "Document 1")!.click(); });
   expect(editor.provider).not.toBe(first);
   expect(await editor.provider!.check({ signal: new AbortController().signal })).toMatchObject({ status: "ready", origin: current.origin });
+});
+it("closes an old-origin picker and does not offer its pending link after an approved origin change", async () => {
+  let current = { ...context };
+  const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST"
+    ? new Response(JSON.stringify({ error: "Temporary failure" }), { status: 503 })
+    : new Response(JSON.stringify(current), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  await renderDocuments();
+  await act(async () => { [...host.querySelectorAll("button")].find(b => b.textContent === "Link existing page")!.click(); });
+  const frame = host.querySelector<HTMLIFrameElement>('iframe[title="Choose Holy Sheet page"]')!;
+  const channel = new URLSearchParams(new URL(frame.src).hash.slice(1)).get("hs-channel");
+  await act(async () => { window.dispatchEvent(new MessageEvent("message", {
+    origin: context.origin, source: frame.contentWindow,
+    data: { type: "hs-document-selected", channel, subject: context.subject, pageId: "11111111-1111-4111-8111-111111111111", spaceId: "test-space", created: false },
+  })); });
+  expect(host.textContent).toContain("waiting to be linked");
+  current = { ...current, origin: "https://staging.holysheet.aplyd.org" };
+  await act(async () => { [...host.querySelectorAll("button")].find(b => b.textContent === "Check access again")!.click(); });
+  expect(host.querySelector('iframe[title="Choose Holy Sheet page"]')).toBeNull();
+  expect(host.textContent).not.toContain("waiting to be linked");
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
 });
 it.each(["create", "link"] as const)("opens the %s picker with the checked identity, origin and a fresh channel", async mode => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(context), { status: 200 })));

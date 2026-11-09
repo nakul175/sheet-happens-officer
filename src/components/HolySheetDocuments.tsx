@@ -37,10 +37,10 @@ export function HolySheetDocuments({ kind, id }: {
                 return { status: 'signin' };
             return { status: 'ready', origin: data.origin, subject: data.subject };
         } }), [endpoint, context?.origin, context?.subject]);
-    const key = (subject: string) => `sho.hs.pending:${subject}:${kind}:${id}`;
+    const key = (subject: string, origin: string) => `sho.hs.pending:${subject}:${origin}:${kind}:${id}`;
     useEffect(() => {
         active.current = true;
-        function lock() { epoch.current++; verified.current = null; setContext(null); setFrame(''); setPicker(''); setPending(null); }
+        function lock() { epoch.current++; verified.current = null; channel.current = ''; setContext(null); setFrame(''); setPicker(''); setPending(null); }
         async function check() {
             const attempt = ++checks.current;
             try {
@@ -60,7 +60,7 @@ export function HolySheetDocuments({ kind, id }: {
                     return;
                 if (!isApprovedHolySheetOrigin(data.origin) || !data.subject || !Array.isArray(data.links))
                     throw Error('Holy Sheet access could not be checked.');
-                if (verified.current && verified.current.subject !== data.subject)
+                if (verified.current && (verified.current.subject !== data.subject || verified.current.origin !== data.origin))
                     lock();
                 verified.current = data;
                 setContext(data);
@@ -71,7 +71,7 @@ export function HolySheetDocuments({ kind, id }: {
                 }
                 else
                     try {
-                        const saved = JSON.parse(sessionStorage.getItem(key(data.subject)) ?? 'null');
+                        const saved = JSON.parse(sessionStorage.getItem(key(data.subject, data.origin)) ?? 'null');
                         if (saved && uuid.test(saved.pageId) && typeof saved.spaceId === 'string' && typeof saved.created === 'boolean')
                             setPending(saved);
                     }
@@ -101,7 +101,7 @@ export function HolySheetDocuments({ kind, id }: {
         if (!remove) {
             setPending(selection);
             try {
-                sessionStorage.setItem(key(c.subject), JSON.stringify(selection));
+                sessionStorage.setItem(key(c.subject, c.origin), JSON.stringify(selection));
             }
             catch { }
         }
@@ -120,7 +120,7 @@ export function HolySheetDocuments({ kind, id }: {
             }
             else {
                 try {
-                    sessionStorage.removeItem(key(c.subject));
+                    sessionStorage.removeItem(key(c.subject, c.origin));
                 }
                 catch { }
                 setPending(null);
