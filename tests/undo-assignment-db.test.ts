@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { undoAction } from '@/lib/undo';
+import { addComment } from '@/lib/comments';
 import { archiveProject, changeMemberRole, removeMember } from '@/lib/projects';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
@@ -153,6 +154,21 @@ for (const kind of ['task.assigned', 'task.approver_changed']) {
     expect(await snapshot(f.projectId)).toEqual(before); completed.push(kind + ':previous-person-removed');
   });
 }
+it('assignment Undo does not restore a departed previous assignee as a comment recipient', async () => {
+  const f = await fixture('task.sent_for_approval');
+  await db.actionLog.update({ where: { id: f.actionId }, data: {
+    beforeState: { assigneeId: leader.id, previousAssigneeId: previous.id },
+  } });
+  await removeMember(leader, f.projectId, previous.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).previousAssigneeId).toBeNull();
+  await undoAction(editor, f.actionId);
+  await addComment(editor, f.taskId, { text: 'Approval update' });
+  expect((await db.task.findUniqueOrThrow({ where: { id: f.taskId } })).previousAssigneeId).toBeNull();
+  expect(await db.notification.count({ where: {
+    projectId: f.projectId, taskId: f.taskId, recipientId: previous.id, type: 'COMMENT_ADDED',
+  } })).toBe(0);
+  completed.push('departed-previous-assignee-notice');
+});
 it('an assignment Undo advances a future task version instead of moving it backwards', async () => {
   const f = await fixture(), stamp = new Date(Date.now() + 60_000);
   await db.task.update({ where: { id: f.taskId }, data: { updatedAt: stamp } });
