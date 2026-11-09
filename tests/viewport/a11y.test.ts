@@ -199,6 +199,55 @@ it("associates a reset confirmation mismatch and clears it before the invalid-li
   } finally { await ctx.close(); }
 });
 
+it("associates rejected phone sign-up fields without creating an account", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/signup", { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Create your account" }).waitFor();
+    const name = page.getByLabel("Full name", { exact: true });
+    const email = page.getByLabel("Work email", { exact: true });
+    const password = page.getByLabel("Password", { exact: true });
+    const alert = page.locator("form:visible").getByRole("alert");
+    await name.fill("ZZ-TEST Audit Person");
+    await email.fill("not-an-email");
+    await password.fill("Testing1234");
+    const badEmail = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signup" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Create account" }).click();
+    expect((await badEmail).status()).toBe(400);
+    await alert.waitFor();
+    expect(await alert.innerText()).toBeTruthy();
+    expect(await email.getAttribute("aria-invalid")).toBe("true");
+    expect(await email.getAttribute("aria-describedby")).toBe("signup-error");
+    expect(await name.getAttribute("aria-invalid")).toBe("false");
+
+    await email.fill(`nakul17+zz-a11y-signup-${Date.now()}@aplyd.com`);
+    await alert.waitFor({ state: "detached" });
+    expect(await email.getAttribute("aria-invalid")).toBe("false");
+    await password.fill("short");
+    const badPassword = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signup" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Create account" }).click();
+    expect((await badPassword).status()).toBe(400);
+    await alert.waitFor();
+    expect(await alert.innerText()).toBe("Use at least 8 characters, with at least one letter and one number.");
+    expect(await password.getAttribute("aria-invalid")).toBe("true");
+    expect(await password.getAttribute("aria-describedby")).toBe("signup-error");
+    expect(await email.getAttribute("aria-invalid")).toBe("false");
+
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "sign-up form with a visible field error").toEqual([]);
+    await password.fill("Testing1234");
+    await alert.waitFor({ state: "detached" });
+    expect(await password.getAttribute("aria-invalid")).toBe("false");
+    expect(new URL(page.url()).pathname).toBe("/signup");
+  } finally { await ctx.close(); }
+});
+
 for (const width of [1280, 390]) {
   describe(`axe at ${width} px`, () => {
     for (const s of SCREENS) {
