@@ -174,9 +174,9 @@ it("keeps email verification retryable after a phone network failure, while an i
     const button = page.getByRole("button", { name: "Verify my email" });
     await button.waitFor();
     await button.click();
-    const alert = page.getByRole("alert");
+    const alert = page.locator('main p[role="alert"]');
     await alert.waitFor();
-    expect(await alert.innerText()).toMatch(/try again/i);
+    await expect.poll(async () => alert.innerText()).toMatch(/try again/i);
     expect(new URL(page.url()).pathname).toBe("/verify");
     expect(await button.isEnabled()).toBe(true);
     await page.evaluate(AXE);
