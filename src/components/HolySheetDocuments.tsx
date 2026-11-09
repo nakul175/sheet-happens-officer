@@ -36,7 +36,7 @@ export function HolySheetDocuments({ kind, id }: {
             if (!isApprovedHolySheetOrigin(data.origin) || data.origin !== context?.origin || data.subject !== context?.subject)
                 return { status: 'signin' };
             return { status: 'ready', origin: data.origin, subject: data.subject };
-        } }), [endpoint, context?.subject]);
+        } }), [endpoint, context?.origin, context?.subject]);
     const key = (subject: string) => `sho.hs.pending:${subject}:${kind}:${id}`;
     useEffect(() => {
         active.current = true;

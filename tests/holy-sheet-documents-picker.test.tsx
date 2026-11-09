@@ -3,7 +3,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { HolySheetDocuments } from "../src/components/HolySheetDocuments";
-vi.mock("@aplyd/holy-sheet-editor/hosted", () => ({ HolySheetEditor: () => null }));
+const editor = vi.hoisted(() => ({ provider: null as null | { check: (args: { signal: AbortSignal }) => Promise<{ status: string; origin?: string }> } }));
+vi.mock("@aplyd/holy-sheet-editor/hosted", () => ({ HolySheetEditor: ({ sessionProvider }: { sessionProvider: typeof editor.provider }) => { editor.provider = sessionProvider; return null; } }));
 const context = { origin: "https://holysheet.aplyd.org", subject: "test-subject", canWrite: true, links: [], defaultSpaceId: "test-space" };
 let root: Root | undefined;
 let host: HTMLDivElement;
@@ -12,7 +13,22 @@ async function renderDocuments() {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   await act(async () => { root!.render(<HolySheetDocuments kind="projects" id="test-project" />); });
 }
-afterEach(() => { act(() => root?.unmount()); root = undefined; host?.remove(); sessionStorage.clear(); vi.unstubAllGlobals(); });
+afterEach(() => { act(() => root?.unmount()); root = undefined; host?.remove(); sessionStorage.clear(); editor.provider = null; vi.unstubAllGlobals(); });
+it("refreshes the embedded editor session provider when the approved origin changes", async () => {
+  const pageId = "11111111-1111-4111-8111-111111111111";
+  let current = { ...context, links: [{ pageId }] };
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(current), { status: 200 })));
+  await renderDocuments();
+  await act(async () => { [...host.querySelectorAll("button")].find(b => b.textContent === "Document 1")!.click(); });
+  const first = editor.provider;
+  expect(first).not.toBeNull();
+  expect(await first!.check({ signal: new AbortController().signal })).toMatchObject({ status: "ready", origin: context.origin });
+
+  current = { ...current, origin: "https://staging.holysheet.aplyd.org" };
+  await act(async () => { [...host.querySelectorAll("button")].find(b => b.textContent === "Check access again")!.click(); });
+  expect(editor.provider).not.toBe(first);
+  expect(await editor.provider!.check({ signal: new AbortController().signal })).toMatchObject({ status: "ready", origin: current.origin });
+});
 it.each(["create", "link"] as const)("opens the %s picker with the checked identity, origin and a fresh channel", async mode => {
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(context), { status: 200 })));
   await renderDocuments();
