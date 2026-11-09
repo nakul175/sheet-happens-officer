@@ -85,6 +85,7 @@ export default defineConfig({
       ...configDefaults.exclude,
       "tests/e2e/stories/APL-2470.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2502.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/SHO-REG-TASKS-13.spec.ts", // guarded Playwright deletion and Undo journey
       "tests/e2e/stories/APL-2504.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2505.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2521.spec.ts", // SHO-2913: Playwright story
