@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { local2691, test } from "../helpers/2691-admin";
+import { account, PW } from "../local-api";
 import { newProject, newTask } from "../helpers/migration-2731";
-import { expect, zz } from "./qa";
+import { expect, signInAs, zz } from "./qa";
 
 test("SHO-REG-TASKS-04 stale task-sheet edit shows current values and a recoverable draft", async ({ admin, later }) => {
   if (!local2691) throw new Error("Version browser audit requires the guarded local test database.");
@@ -121,4 +122,79 @@ test("SHO-REG-TASKS-04 missing and malformed version errors keep the task-sheet 
   mkdirSync(evidenceDir, { recursive: true });
   await sheet.screenshot({ path: `${evidenceDir}/invalid-version-sheet.png` });
   writeFileSync(`${evidenceDir}/invalid-version-verification.json`, JSON.stringify({ fixture, taskId, cases: cases.map(({ name, code }) => ({ name, code, status: 400 })), draftRetained: true, storedTitleUnchanged: true, fixtureProjectArchiveRegistered: true }, null, 2));
+});
+
+test("SHO-REG-TASKS-04 editor, viewer and outsider task-sheet boundaries", async ({ admin, later, browser }) => {
+  if (!local2691) throw new Error("Version role audit requires the guarded local test database.");
+  const fixture = randomUUID();
+  const evidenceDir = "test-results/task-version-browser";
+  const ownedPeople: string[] = [];
+  const ownedProjects: string[] = [];
+  later(async () => {
+    for (const id of ownedProjects) {
+      const result = await admin.api.get(`/api/projects/${id}`);
+      expect(result.status).toBe(200);
+      expect(result.json.project.archived).toBe(true);
+    }
+    for (const id of ownedPeople) {
+      const result = await admin.api.get(`/api/team/${id}`);
+      expect(result.status).toBe(200);
+      expect(result.json.person.status).toBe("DEACTIVATED");
+    }
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/role-cleanup.json`, JSON.stringify({ fixture, ownedPeople, ownedProjects, cleanup: true }, null, 2));
+  });
+  const people = {} as Record<"editor" | "viewer" | "outsider", Awaited<ReturnType<typeof account>>>;
+  for (const role of ["editor", "viewer", "outsider"] as const) {
+    const person = await account(zz(`version ${role}`), `nakul17+zz-tasks-04-${fixture}-${role}@aplyd.com`);
+    people[role] = person;
+    ownedPeople.push(person.id);
+    later(async () => {
+      const result = await admin.api.post(`/api/team/${person.id}/deactivate`, { reassign: "leaders" });
+      expect(result.status, JSON.stringify(result.json)).toBe(200);
+    });
+  }
+  const project = await newProject(admin, later, { label: `version roles ${fixture}` });
+  ownedProjects.push(project.id);
+  for (const [person, role] of [[people.editor, "EDITOR"], [people.viewer, "VIEWER"]] as const) {
+    const added = await admin.api.post(`/api/projects/${project.id}/members`, { userId: person.id, role });
+    expect(added.status, JSON.stringify(added.json)).toBe(201);
+  }
+  const original = zz(`version role task ${fixture}`);
+  const taskId = await newTask(admin, project.id, { title: original });
+  const editor = await signInAs(browser, people.editor.email, PW);
+  const viewer = await signInAs(browser, people.viewer.email, PW);
+  const outsider = await signInAs(browser, people.outsider.email, PW);
+  later(async () => { await editor.ctx.close(); await viewer.ctx.close(); await outsider.ctx.close(); });
+
+  await editor.page.goto(`/projects/${project.id}?task=${taskId}`);
+  const editorTitle = editor.page.getByRole("dialog", { name: "Task", exact: true }).getByRole("textbox", { name: "Title", exact: true });
+  await expect(editorTitle).toHaveValue(original);
+  await expect(editorTitle).not.toHaveJSProperty("readOnly", true);
+  const edited = zz(`editor version ${fixture}`);
+  const editorPatch = editor.page.waitForResponse(res => res.url().endsWith(`/api/tasks/${taskId}`) && res.request().method() === "PATCH");
+  await editorTitle.fill(edited);
+  await editorTitle.blur();
+  expect((await editorPatch).status()).toBe(200);
+  expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.title).toBe(edited);
+
+  await viewer.page.goto(`/projects/${project.id}?task=${taskId}`);
+  const viewerSheet = viewer.page.getByRole("dialog", { name: "Task", exact: true });
+  await expect(viewerSheet.getByRole("textbox", { name: "Title", exact: true })).toHaveJSProperty("readOnly", true);
+  await expect(viewerSheet.getByRole("note")).toContainText("Viewer access");
+  const invalid = { title: zz(`denied version ${fixture}`), expectedUpdatedAt: "abc" };
+  const viewerDenied = await viewer.api.patch(`/api/tasks/${taskId}`, invalid);
+  expect(viewerDenied.status).toBe(403);
+
+  const hidden = await outsider.api.patch(`/api/tasks/${taskId}`, invalid);
+  const missing = await outsider.api.patch(`/api/tasks/missing-${fixture}`, invalid);
+  expect(hidden.status).toBe(404);
+  expect(hidden.json).toEqual(missing.json);
+  await outsider.page.goto(`/tasks/${taskId}`);
+  await expect(outsider.page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
+  await expect(outsider.page.getByText(edited)).toHaveCount(0);
+  mkdirSync(evidenceDir, { recursive: true });
+  await viewerSheet.screenshot({ path: `${evidenceDir}/viewer-read-only.png` });
+  await outsider.page.screenshot({ path: `${evidenceDir}/outsider-hidden.png` });
+  writeFileSync(`${evidenceDir}/role-verification.json`, JSON.stringify({ fixture, taskId, editorStatus: 200, viewerStatus: 403, outsiderStatus: 404, hiddenMissingSameBody: true, viewerReadOnly: true, outsiderNoTaskTitle: true }, null, 2));
 });
