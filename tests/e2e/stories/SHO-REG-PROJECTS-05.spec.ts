@@ -74,6 +74,12 @@ test('SHO-REG-PROJECTS-05 partial: deal-note visibility, removal and activity pr
   const privateId = await create(privateText, '2026-11-06', deal.id);
   const notesFor = async (person: typeof editor) => (await person.c.get(`/api/orgs/${orgId}/notes`)).json.notes as { id: string; text: string }[];
   const adminNotes = (await admin.api.get(`/api/orgs/${orgId}/notes`)).json.notes as { id: string; text: string }[];
+  const privateBefore = adminNotes.find(n => n.id === privateId);
+  expect(privateBefore).toBeDefined();
+  expect((await admin.api.patch(`/api/notes/${privateId}`, { text: 'unsupported edit' })).status).toBe(405);
+  expect((await admin.api.put(`/api/notes/${privateId}`, { text: 'unsupported edit' })).status).toBe(405);
+  const privateAfter = (await admin.api.get(`/api/orgs/${orgId}/notes`)).json.notes.find((n: { id: string }) => n.id === privateId);
+  expect(privateAfter).toEqual(privateBefore);
   expect(adminNotes.map(n => n.id).slice(0, 2)).toEqual([privateId, publicId]);
   expect((await notesFor(editor)).map(n => n.id).slice(0, 2)).toEqual([privateId, publicId]);
   expect((await notesFor(viewer)).map(n => n.id).slice(0, 2)).toEqual([privateId, publicId]);
@@ -101,6 +107,7 @@ test('SHO-REG-PROJECTS-05 partial: deal-note visibility, removal and activity pr
   await page.goto(`/accounts/${orgId}?tab=notes`);
   await expect(page.getByText(privateText, { exact: true })).toBeVisible();
   await expect(page.locator('.org-notes-feed img')).toHaveCount(0);
+  await expect(page.locator('.org-notes-feed').getByRole('button', { name: /^Edit/ })).toHaveCount(0);
   mkdirSync(evidenceDir, { recursive: true });
   await page.screenshot({ path: `${evidenceDir}/plain-text-note.png`, fullPage: true });
   const viewerWho = await signInAs(browser, viewer.email, PW);
@@ -123,5 +130,5 @@ test('SHO-REG-PROJECTS-05 partial: deal-note visibility, removal and activity pr
   expect((await notesFor(viewer)).map(n => n.id)).toEqual([publicId]);
   const sentinelAfter = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
   expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(sentinelFingerprint);
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, dealId: deal.id, orgId, taskId, privateId, publicId, roleVisibility: { editor: true, viewer: true, outsider: false, removedViewer: false }, adminChronology: true, editorTaskScope: true, viewerActivityDenied: true, outsiderActivityHidden: true, adminOnlyOrgHistory: true, plainTextEscaped: true, deletedNoteHidden: true, sentinelFingerprint, sentinelPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, dealId: deal.id, orgId, taskId, privateId, publicId, roleVisibility: { editor: true, viewer: true, outsider: false, removedViewer: false }, adminChronology: true, editorTaskScope: true, viewerActivityDenied: true, outsiderActivityHidden: true, adminOnlyOrgHistory: true, plainTextEscaped: true, unsupportedEditRejected: true, deletedNoteHidden: true, sentinelFingerprint, sentinelPreserved: true }, null, 2));
 });
