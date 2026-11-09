@@ -1,12 +1,14 @@
 // SHO-REG-PROJECTS-04: exact 30-day task Trash boundary, restore roles and scoped purge.
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, scryptSync } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { chromium } from 'playwright-core';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { purgeTrash, restoreTask } from '@/lib/tasks';
 import { UNDO_WINDOW_MS } from '@/lib/undoable';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
+import { BASE, PW } from './helpers';
 
 vi.mock('next/server', () => ({ connection: vi.fn() }));
 
@@ -30,8 +32,10 @@ beforeAll(async () => {
   assertLocalFixture(process.env.DATABASE_URL);
   safe = true;
   workspaceId = (await getOrCreateWorkspace()).id;
+  const salt = randomBytes(16);
+  const leaderPasswordHash = `scrypt$${salt.toString('base64')}$${scryptSync(PW, salt, 64, { N: 16384, r: 8, p: 1 }).toString('base64')}`;
   for (const actor of [leader, editor, viewer, admin]) {
-    await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: `${actor.id}@example.invalid`, passwordHash: 'unused', emailVerifiedAt: new Date(), orgRole: actor.orgRole } });
+    await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: `${actor.id}@example.invalid`, passwordHash: actor.id === leader.id ? leaderPasswordHash : 'unused', emailVerifiedAt: new Date(), orgRole: actor.orgRole } });
     userIds.push(actor.id);
   }
   const project = await db.project.create({ data: { workspaceId, name: prefix } });
@@ -80,6 +84,7 @@ it('preserves exact-boundary and unrelated Trash, purges only expired owned task
   } });
   const recent = await create('recent', cutoff + 1);
   const exact = await create('exact', cutoff);
+  const exactForLeaderService = await create('exact-leader-service', cutoff);
   const expired = await create('expired', cutoff - 1);
   const sentinel = await create('unrelated-sentinel', cutoff - 86_400_000, sentinelProjectId, sentinelSectionId);
   const sentinelBefore = await db.task.findUniqueOrThrow({ where: { id: sentinel.id }, select: { id: true, title: true, deletedAt: true, projectId: true } });
@@ -93,8 +98,29 @@ it('preserves exact-boundary and unrelated Trash, purges only expired owned task
   expect(await purgeTrash(now, { projectId })).toBe(1);
   expect(await db.task.findUnique({ where: { id: expired.id } })).toBeNull();
   expect((await db.task.findUniqueOrThrow({ where: { id: exact.id } })).deletedAt?.getTime()).toBe(cutoff);
-  await restoreTask(leader, exact.id);
+  const browser = await chromium.launch({ args: ['--no-sandbox'] });
+  try {
+    const context = await browser.newContext({ baseURL: BASE });
+    const signedIn = await context.request.post('/api/auth/signin', { data: { email: `${leader.id}@example.invalid`, password: PW } });
+    expect(signedIn.status()).toBe(200);
+    const page = await context.newPage();
+    await page.goto(`/projects/${projectId}/trash`);
+    const exactRow = page.getByRole('row', { name: new RegExp(`${prefix}-exact(?:\\s|$)`) });
+    await exactRow.waitFor({ state: 'visible' });
+    expect(await page.getByRole('row', { name: new RegExp(`${prefix}-expired`) }).count()).toBe(0);
+    expect(await exactRow.getByText('0 days left').count()).toBe(1);
+    mkdirSync('test-results/project-trash-boundary', { recursive: true });
+    await page.screenshot({ path: 'test-results/project-trash-boundary/exact-boundary-trash.png', fullPage: true });
+    await exactRow.getByRole('button', { name: 'Restore' }).click();
+    await exactRow.waitFor({ state: 'detached' });
+    expect((await context.request.get(`/api/tasks/${exact.id}`)).status()).toBe(200);
+    await context.close();
+  } finally {
+    await browser.close();
+  }
   expect((await db.task.findUniqueOrThrow({ where: { id: exact.id } })).deletedAt).toBeNull();
+  await restoreTask(leader, exactForLeaderService.id);
+  expect((await db.task.findUniqueOrThrow({ where: { id: exactForLeaderService.id } })).deletedAt).toBeNull();
   expect(await db.task.findUniqueOrThrow({ where: { id: sentinel.id }, select: { id: true, title: true, deletedAt: true, projectId: true } })).toEqual(sentinelBefore);
   expect(await db.project.findUnique({ where: { id: projectId }, select: { id: true } })).toEqual({ id: projectId });
   expect(await db.project.findUnique({ where: { id: sentinelProjectId }, select: { id: true } })).toEqual({ id: sentinelProjectId });
@@ -102,5 +128,5 @@ it('preserves exact-boundary and unrelated Trash, purges only expired owned task
   expect(newAudit).toHaveLength(1);
 
   mkdirSync('test-results/project-trash-boundary', { recursive: true });
-  writeFileSync('test-results/project-trash-boundary/verification.json', JSON.stringify({ fixture: prefix, cutoff: new Date(cutoff).toISOString(), denied: ['EDITOR', 'VIEWER'], restored: ['ADMIN recent', 'LEADER exact'], purged: 1, scopedProjectId: projectId, unrelatedProjectId: sentinelProjectId, sentinelPreserved: true, projectPreserved: true }, null, 2));
-});
+  writeFileSync('test-results/project-trash-boundary/verification.json', JSON.stringify({ fixture: prefix, cutoff: new Date(cutoff).toISOString(), denied: ['EDITOR', 'VIEWER'], restored: ['ADMIN recent', 'LEADER exact through signed-in Chromium', 'LEADER exact through service'], purged: 1, scopedProjectId: projectId, unrelatedProjectId: sentinelProjectId, exactBoundaryBrowserRestored: true, sentinelPreserved: true, projectPreserved: true }, null, 2));
+}, 90_000);
