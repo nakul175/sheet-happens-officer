@@ -167,8 +167,8 @@ it("associates a reset confirmation mismatch and clears it before the invalid-li
     const page = await ctx.newPage();
     await page.goto("/reset?token=synthetic-invalid-token-long-enough", { waitUntil: "load" });
     await page.getByRole("heading", { name: "Set a new password" }).waitFor();
-    await page.getByLabel("New password").fill("Testing1234");
-    const confirm = page.getByLabel("Confirm new password");
+    await page.getByLabel("New password", { exact: true }).fill("Testing1234");
+    const confirm = page.getByLabel("Confirm new password", { exact: true });
     await confirm.fill("Testing1235");
     const mismatch = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/reset-password" && r.request().method() === "POST");
     await page.getByRole("button", { name: "Save and sign in" }).click();
