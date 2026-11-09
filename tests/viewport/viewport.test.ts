@@ -132,6 +132,63 @@ for (const width of WIDTHS) {
   });
 }
 
+it("keeps the Home → Project → Task → Deals → Team → Profile phone journey usable", async () => {
+  const width = 390;
+  const ctx = await signedIn(width, "root");
+  const page = await ctx.newPage();
+  const checked: string[] = [];
+  async function usable(label: string) {
+    await page.waitForTimeout(100);
+    const found: Finding[] = await page.evaluate(collect, { phone: true, width });
+    if (found.length) {
+      const shot = `${SHOTS}/core-journey-${label}.png`;
+      await page.screenshot({ path: shot, fullPage: true });
+      expect.fail(`${label} has ${found.length} phone-layout problem(s): ${JSON.stringify(found.slice(0, 12))}; screenshot: ${shot}`);
+    }
+    checked.push(label);
+  }
+  try {
+    await page.goto("/");
+    await page.getByRole("heading", { name: "Your workspace" }).waitFor();
+    await usable("home");
+
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Projects" }).click();
+    await page.waitForURL("**/projects");
+    await page.locator(`a[href="/projects/${ids.project}"]`).click();
+    await page.waitForURL(`**/projects/${ids.project}`);
+    await page.getByText(TASK_TITLE, { exact: true }).first().waitFor();
+    await usable("project");
+
+    await page.locator(".item.click").filter({ hasText: TASK_TITLE }).first().click();
+    const taskDialog = page.getByRole("dialog", { name: "Task", exact: true });
+    await taskDialog.waitFor();
+    expect(await taskDialog.getByRole("textbox", { name: "Title", exact: true }).inputValue()).toBe(TASK_TITLE);
+    await taskDialog.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await usable("task-overlay-scrolled");
+    await page.keyboard.press("Escape");
+    await taskDialog.waitFor({ state: "detached" });
+
+    const more = page.getByRole("button", { name: "More", exact: true });
+    await more.click();
+    await page.getByRole("menuitem", { name: "Deals", exact: true }).click();
+    await page.waitForURL("**/deals");
+    await usable("deals");
+
+    await more.click();
+    await page.getByRole("menuitem", { name: "Team", exact: true }).click();
+    await page.waitForURL("**/team");
+    await usable("team");
+
+    await more.click();
+    await page.getByRole("menuitem", { name: "Profile", exact: true }).click();
+    await page.waitForURL("**/profile");
+    await usable("profile");
+    expect(checked).toEqual(["home", "project", "task-overlay-scrolled", "deals", "team", "profile"]);
+  } finally {
+    await ctx.close();
+  }
+});
+
 // The screen scan above sees only the resting page. Exercise the task form at
 // each supported width, including its validation state and modal controls.
 for (const width of WIDTHS) {
