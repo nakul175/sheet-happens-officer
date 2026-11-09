@@ -39,3 +39,16 @@ it('original session remains original when there is no selected workspace',async
  mocks.sessionWorkspace.findUnique.mockResolvedValue(null);expect(await selectedSessionWorkspace('home')).toBeNull();
  expect(await scopedUser({...actor,workspaceId:'original'})).toEqual(user);
 });
+
+it('disabling the feature never silently changes an existing selected session to its home authority',async()=>{
+ vi.stubEnv('SHO_MULTI_WORKSPACE_ENABLED','false');
+ mocks.sessionWorkspace.findUnique.mockResolvedValue({workspaceId:'extra',generation:3,membership:{role:'ADMIN',generation:3,revokedAt:null}});
+ await expect(selectedSessionWorkspace('selected')).rejects.toMatchObject({status:403});
+ mocks.sessionWorkspace.findUnique.mockResolvedValue(null);expect(await selectedSessionWorkspace('original')).toBeNull();
+});
+it('only an absent selection table on a disabled installation preserves legacy behavior',async()=>{
+ vi.stubEnv('SHO_MULTI_WORKSPACE_ENABLED','false');
+ mocks.sessionWorkspace.findUnique.mockRejectedValue({code:'P2021',meta:{table:'public.SessionWorkspace'}});
+ expect(await selectedSessionWorkspace('original')).toBeNull();
+ mocks.sessionWorkspace.findUnique.mockRejectedValue({code:'P1001'});await expect(selectedSessionWorkspace('original')).rejects.toMatchObject({code:'P1001'});
+});

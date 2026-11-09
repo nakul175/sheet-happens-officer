@@ -29,3 +29,30 @@ Do not wire a switcher or enable additional workspace sessions before completing
 5. Full regression/build/CI, real browser Portal Save, workspace switch and existing-tab grant/downgrade/revoke; two workspaces and two sessions; cross-workspace Admin negative tests; before/after preservation and additive migration/rollback rehearsal.
 
 No production migration, deployment, runtime activation, merge or schedule changes are authorized by this foundation.
+
+## Runtime and Portal candidate (staging only)
+
+The native `SHO_MULTI_WORKSPACE_ENABLED=true` switch enables the account-menu
+workspace chooser and explicit `/api/workspaces` selection. The session cookie
+stays unchanged. Business handlers read current membership; project/CRM/people
+scope is the selected workspace. Selecting another workspace performs a full
+navigation to discard cached content from the prior authority. A revoked or
+superseded selection shows a recovery chooser rather than protected content.
+Regrant never revives the prior generation; explicit reselection is required.
+Global account administration is held for additional-workspace administrators.
+
+Portal's independent `APLYD_SHO_WORKSPACE_EDITOR_ENABLED=1` gate uses a private
+`APLYD_SHO_WORKSPACE_CONNECTOR` wrapper invoking `scripts/portal-workspaces/cli.mjs`
+and `APLYD_SHO_WORKSPACE_CONFIG` with the existing private org-connector config
+shape. Native identities come from a fresh reviewed binding or the exact Portal
+creation receipt, never email. Review is signed for five minutes and pins the
+reviewer, target, resource, private configuration, reason and native snapshot.
+A durable reserved/uncertain receipt prevents automatic replay. Confirmed writes
+are read back before the Portal reports success. Role choices are bounded to
+Member/Admin; enrollment/regrant starts as Member. Regrant review discloses
+preserved project and task assignments.
+
+Both PRs remain drafts, unmerged and undeployed. This introduces an additive
+native migration and requires fresh staging evidence and a separate production
+approval. Disabling the native feature with an existing selected session denies
+that selection rather than silently returning another workspace's authority.

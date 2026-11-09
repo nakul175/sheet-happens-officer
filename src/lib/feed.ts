@@ -153,8 +153,11 @@ const hiddenCommentNotices = () => (commentsEnabled() ? {} : { type: { notIn: CO
 async function workspaceNotices(user: Actor) {
   if (!multiWorkspaceEnabled()) return {};
   const original=await db.user.findUniqueOrThrow({where:{id:user.id},select:{workspaceId:true}});
+  // project-lookup-ok: explicit selected-workspace and current-member filters; plain notification IDs have no Prisma relation.
+  const eligible=await db.project.findMany({where:{...workspaceScope(user),
+    ...(user.orgRole==='MEMBER'?{members:{some:{userId:user.id}}}:{})},select:{id:true}});
   return { AND: [{ OR: [
-    {project:{...workspaceScope(user), ...(user.orgRole==='MEMBER' ? {members:{some:{userId:user.id}}} : {})}},
+    {projectId:{in:eligible.map(p=>p.id)}},
     ...(original.workspaceId===user.workspaceId ? [{projectId:null}] : []),
   ] }] };
 }
