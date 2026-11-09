@@ -21,6 +21,19 @@ it("pins native subject, creates a source session without browser cookie or role
   expect(m.find).toHaveBeenCalledWith({ where: { id: user.id } });
   expect(m.create).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: user.id, tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/) }) });
 });
+it("reverification checks the exact account without creating a session or clearing failures", async () => {
+  const r = await POST(request({ purpose: "account-link-proof" }));
+  expect(r.status).toBe(200);
+  expect(await r.json()).toEqual({ sub: user.id, email: user.email, email_verified: true, name: user.name, purpose: "account-link-proof" });
+  expect(m.create).not.toHaveBeenCalled(); expect(m.clear).not.toHaveBeenCalled();
+  m.fresh.mockResolvedValue({ ...user, passwordHash: "changed" });
+  expect((await POST(request({ purpose: "account-link-proof" }))).status).toBe(403);
+  expect(m.create).not.toHaveBeenCalled();
+});
+it("rejects unknown proof purposes before checking credentials", async () => {
+  expect((await POST(request({ purpose: "other" }))).status).toBe(400);
+  expect(m.verify).not.toHaveBeenCalled();
+});
 it.each(["wrong-password", "different-email", "disabled", "unverified", "temporary", "locked", "raced-reset"])("rejects %s without session creation", async kind => {
   if (kind === "wrong-password") m.verify.mockResolvedValue(false);
   if (kind === "different-email") m.find.mockResolvedValue({ ...user, email: "other@example.invalid" });
