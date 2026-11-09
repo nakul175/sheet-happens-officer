@@ -24,9 +24,11 @@ function config() {
 let db;
 try {
   let input='';for await(const part of process.stdin){input+=part;if(input.length>32768)throw Error('Request too large');}
-  const c=config(); db=new pg.Client({connectionString:c.database,connectionTimeoutMillis:4000,
+  const c=config(); db=new pg.Client({connectionString:c.database,connectionTimeoutMillis:4000,query_timeout:8000,
     ssl:process.env.APLYD_SHO_TEST_CA?{ca:readFileSync(process.env.APLYD_SHO_TEST_CA,'utf8'),servername:'db'}:undefined});
   await db.connect();
+  const schema=new URL(c.database).searchParams.get('schema')??'public';
+  await db.query('SELECT set_config($1,$2,false)',['search_path','"'+schema.replaceAll('"','""')+'"']);
   const result=await changeWorkspaceMembership(db,c.policy,JSON.parse(input),()=>config().policy.configDigest===c.policy.configDigest);
   process.stdout.write(JSON.stringify(result));
 } catch {process.stderr.write('SHO workspace operation unconfirmed; reconcile before retry.\n');process.exitCode=1;}

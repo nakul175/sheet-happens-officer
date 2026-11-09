@@ -1,6 +1,6 @@
 # SHO multi-workspace implementation boundary
 
-Owner approved true multi-workspace support on9November2026. This is an additive native foundation, not completed Portal/browser integration and not rollout-ready. No public route calls these new services yet. No original User, Session or business row is migrated or reassigned. People remains limited to the selected Employee Company by separate owner decision.
+Owner approved true multi-workspace support on 9 November 2026. The additive foundation now has a staging-only native selector and companion Portal Review/Save integration. Production rollout is not authorized. No original User, Session or business row is migrated or reassigned. People remains limited to the selected Employee Company by separate owner decision.
 
 ## Authority model
 
@@ -18,14 +18,14 @@ The private Portal membership service accepts only an operator-reviewed native o
 - Synthetic database and owned SSH tunnel removed after every run.
 - This is service-level qualification; it is not browser or Portal Save acceptance.
 
-## Remaining activation gates
+## Review boundaries
 
-Do not wire a switcher or enable additional workspace sessions before completing all of these:
+The staging candidate implements the following boundaries. Fresh CI and browser evidence are recorded in the companion acceptance pack; no production activation is implied:
 
 1. Native sessionUser/central-login integration and a CSRF-protected exact workspace selection endpoint. Selection never overrides central app/session revocation.
-2. Explicit workspace-scoped Actor through project/task access, search, CRM, teams/people, records, feed, notifications, background work and all mutation checks. Native legacy code currently reads User.workspaceId or global orgRole directly in these paths; replacing only currentUser would be unsafe.
+2. Explicit workspace-scoped Actor through project/task access, search, CRM, teams/people, records, feed, notifications, background work and all mutation checks. Original account reads are retained only for identity, password/session and original-authority checks.
 3. Team administration must change scoped membership, never globally deactivate/reissue credentials for a person simply because they belong to an additional workspace. Preserve existing global account operations only under explicit original authority.
-4. Portal exact identity/resource review, signed preview/confirmation, durable uncertain-dispatch hold, native readback and receipts. Existing SHO project/org editors must become scope-aware before they are offered in an added workspace.
+4. Portal exact identity/resource review, signed preview/confirmation, durable uncertain-dispatch hold, native readback and receipts. Original-workspace project/org editors retain their original-workspace restriction. The separate additional-workspace editor changes membership; it never pretends to rewrite project roles.
 5. Full regression/build/CI, real browser Portal Save, workspace switch and existing-tab grant/downgrade/revoke; two workspaces and two sessions; cross-workspace Admin negative tests; before/after preservation and additive migration/rollback rehearsal.
 
 No production migration, deployment, runtime activation, merge or schedule changes are authorized by this foundation.
