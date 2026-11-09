@@ -109,9 +109,20 @@ it('preserves exact-boundary and unrelated Trash, purges only expired owned task
     await exactRow.waitFor({ state: 'visible' });
     expect(await page.getByRole('row', { name: new RegExp(`${prefix}-expired`) }).count()).toBe(0);
     expect(await exactRow.getByText('0 days left').count()).toBe(1);
+    const restoreButton = exactRow.getByRole('button', { name: 'Restore' });
+    const textLines = () => restoreButton.evaluate(button => {
+      const range = document.createRange();
+      range.selectNodeContents(button);
+      return range.getClientRects().length;
+    });
+    expect(await textLines()).toBe(1);
     mkdirSync('test-results/project-trash-boundary', { recursive: true });
     await page.screenshot({ path: 'test-results/project-trash-boundary/exact-boundary-trash.png', fullPage: true });
-    await exactRow.getByRole('button', { name: 'Restore' }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await exactRow.waitFor({ state: 'visible' });
+    expect(await textLines()).toBe(1);
+    await page.screenshot({ path: 'test-results/project-trash-boundary/exact-boundary-trash-390.png', fullPage: true });
+    await restoreButton.click();
     await exactRow.waitFor({ state: 'detached' });
     expect((await context.request.get(`/api/tasks/${exact.id}`)).status()).toBe(200);
     await context.close();
@@ -128,5 +139,5 @@ it('preserves exact-boundary and unrelated Trash, purges only expired owned task
   expect(newAudit).toHaveLength(1);
 
   mkdirSync('test-results/project-trash-boundary', { recursive: true });
-  writeFileSync('test-results/project-trash-boundary/verification.json', JSON.stringify({ fixture: prefix, cutoff: new Date(cutoff).toISOString(), denied: ['EDITOR', 'VIEWER'], restored: ['ADMIN recent', 'LEADER exact through signed-in Chromium', 'LEADER exact through service'], purged: 1, scopedProjectId: projectId, unrelatedProjectId: sentinelProjectId, exactBoundaryBrowserRestored: true, sentinelPreserved: true, projectPreserved: true }, null, 2));
+  writeFileSync('test-results/project-trash-boundary/verification.json', JSON.stringify({ fixture: prefix, cutoff: new Date(cutoff).toISOString(), denied: ['EDITOR', 'VIEWER'], restored: ['ADMIN recent', 'LEADER exact through signed-in Chromium', 'LEADER exact through service'], purged: 1, scopedProjectId: projectId, unrelatedProjectId: sentinelProjectId, exactBoundaryBrowserRestored: true, restoreLabelOneLineAt1280And390: true, sentinelPreserved: true, projectPreserved: true }, null, 2));
 }, 90_000);
