@@ -1,4 +1,4 @@
-import { scopedUser, workspaceScope, workspacePeopleWhere } from "@/lib/workspace-authority";
+import { findScopedUser, workspaceScope, workspacePeopleWhere } from "@/lib/workspace-authority";
 // SHO-2589. Counts and drill-down share one predicate, including subtasks.
 import { db } from "@/lib/db";
 import { crmVisible, isAdmin, WORKSTREAM_DEAL, type Actor } from "@/lib/access";
@@ -25,7 +25,7 @@ export async function workloadAvailable(user: Actor) {
 
 export async function workload(user: Actor, query = new URLSearchParams()) {
   // Never accept project ids or a workspace from the caller.
-  const actor = await scopedUser(user);
+  const actor = await findScopedUser(user);
   if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Workload");
   // project-lookup-ok: Workload authorizes Admin workspace or led projects only; hidden CRM rows are redacted below.
   const projects = await db.project.findMany({

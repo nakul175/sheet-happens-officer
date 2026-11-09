@@ -1,7 +1,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 const mocks=vi.hoisted(()=>({user:{findUniqueOrThrow:vi.fn(),findUnique:vi.fn()},workspaceMembership:{findUnique:vi.fn(),count:vi.fn()},sessionWorkspace:{findUnique:vi.fn()},project:{findUnique:vi.fn()}}));
 vi.mock('@/lib/db',()=>({db:mocks}));
-import {scopedUser,workspaceScope,requireOriginalAccountAdministration} from '@/lib/workspace-authority';
+import {scopedUser,findScopedUser,workspaceScope,requireOriginalAccountAdministration} from '@/lib/workspace-authority';
 import {selectedSessionWorkspace} from '@/lib/workspace-session';
 import {projectAccess} from '@/lib/access';
 const user={id:'person',workspaceId:'original',orgRole:'MEMBER',emailVerifiedAt:new Date(),deactivatedAt:null};
@@ -51,4 +51,16 @@ it('only an absent selection table on a disabled installation preserves legacy b
  mocks.sessionWorkspace.findUnique.mockRejectedValue({code:'P2021',meta:{table:'public.SessionWorkspace'}});
  expect(await selectedSessionWorkspace('original')).toBeNull();
  mocks.sessionWorkspace.findUnique.mockRejectedValue({code:'P1001'});await expect(selectedSessionWorkspace('original')).rejects.toMatchObject({code:'P1001'});
+});
+
+it('nullable callers preserve missing-account handling and recheck selected authority',async()=>{
+ mocks.user.findUnique.mockResolvedValue(null);
+ expect(await findScopedUser(actor)).toBeNull();
+ expect(mocks.workspaceMembership.findUnique).not.toHaveBeenCalled();
+ mocks.user.findUnique.mockResolvedValue({...user});
+ expect(await findScopedUser(actor)).toMatchObject({workspaceId:'extra',orgRole:'MEMBER'});
+ mocks.workspaceMembership.findUnique.mockResolvedValue({workspaceId:'extra',role:'MEMBER',generation:4,revokedAt:null});
+ await expect(findScopedUser(actor)).rejects.toMatchObject({status:403});
+ vi.stubEnv('SHO_MULTI_WORKSPACE_ENABLED','false');
+ expect(await findScopedUser(actor)).toEqual(user);
 });

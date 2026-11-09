@@ -71,3 +71,9 @@ describe("SHO-2589 workload", () => {
     expect(await workloadAvailable(leader)).toBe(false);
   });
 });
+
+it('a missing workload account remains a 404 without querying tasks',async()=>{
+ mocks.user.findUnique.mockResolvedValue(null);
+ await expect(workload(leader)).rejects.toMatchObject({status:404});
+ expect(mocks.task.findMany).not.toHaveBeenCalled();
+});

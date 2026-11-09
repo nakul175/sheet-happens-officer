@@ -1,5 +1,5 @@
 import { crmRoleProjectWhere } from "@/lib/access";
-import { scopedUser, workspaceScope, multiWorkspaceEnabled, personInWorkspace } from "@/lib/workspace-authority";
+import { scopedUser, findScopedUser, workspaceScope, multiWorkspaceEnabled, personInWorkspace } from "@/lib/workspace-authority";
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
 import { createHash } from "node:crypto";
@@ -755,7 +755,7 @@ function conversionStale() {
 
 async function bidConversionContext(tx: Tx, user: Actor, projectId: string) {
   // Re-read the actor as well as membership inside the commit's serializable transaction.
-  const actor = await scopedUser(user, tx);
+  const actor = await findScopedUser(user, tx);
   if (!actor || !isActive(actor)) throw new ApiError(401, "Sign in with an active account.");
   requireCrm(actor);
   const a = await projectAccess(actor, projectId, { write: true, tx });

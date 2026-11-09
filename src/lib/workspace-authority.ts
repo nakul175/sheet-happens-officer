@@ -1,4 +1,4 @@
-import type { Prisma } from '@/generated/prisma/client';
+import type { Prisma, User } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
 import { ApiError } from '@/lib/http';
 
@@ -18,6 +18,14 @@ export function workspacePeopleWhere(workspaceId: string): Prisma.UserWhereInput
 /** Re-read authority without replacing a person's original stored workspace/role. */
 export async function scopedUser(actor: WorkspaceActor, store: Store = db) {
   const u = await store.user.findUniqueOrThrow({where:{id:actor.id}});
+  return resolveScopedUser(actor, u, store);
+}
+/** Preserve nullable account lookups used by callers with their own 401/404 response. */
+export async function findScopedUser(actor: WorkspaceActor, store: Store = db) {
+  const u = await store.user.findUnique({where:{id:actor.id}});
+  return u ? resolveScopedUser(actor, u, store) : null;
+}
+async function resolveScopedUser(actor: WorkspaceActor, u: User, store: Store) {
   if (!multiWorkspaceEnabled()) return u;
   if (u.deactivatedAt || !u.emailVerifiedAt || !actor.workspaceId) throw unavailable();
   if (u.workspaceId === actor.workspaceId) return u;

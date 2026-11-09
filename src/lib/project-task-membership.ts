@@ -1,4 +1,4 @@
-import { scopedUser, workspacePeopleWhere } from "@/lib/workspace-authority";
+import { findScopedUser, workspacePeopleWhere } from "@/lib/workspace-authority";
 import { db } from "@/lib/db";
 import { isActive, projectAccess, requireManage, type Actor, type Tx } from "@/lib/access";
 import { ApiError, notFound } from "@/lib/http";
@@ -8,7 +8,7 @@ import { logAction, notify } from "@/lib/notify";
 export async function addWorkspaceTaskMember(tx: Tx, actor: Actor, projectId: string, userId: string, role: "EDITOR" | "VIEWER" = "EDITOR") {
   const [project] = await tx.$queryRaw<{ id: string; workspaceId: string; name: string; archivedAt: Date | null }[]>`SELECT "id", "workspaceId", "name", "archivedAt" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
   if (!project) throw notFound("Project");
-  const personActing = await scopedUser(actor, tx);
+  const personActing = await findScopedUser(actor, tx);
   if (!personActing || !isActive(personActing) || personActing.workspaceId !== project.workspaceId) throw notFound("Project");
   const membership = await tx.projectMember.findUnique({ where: { projectId_userId: { projectId, userId: actor.id } } });
   if (personActing.orgRole === "MEMBER" && membership?.role !== "LEADER") throw new ApiError(403, "Only the project Leader or an Admin can add people to this project.");
@@ -27,7 +27,7 @@ export async function addWorkspaceTaskMember(tx: Tx, actor: Actor, projectId: st
 export async function workspaceTaskPeople(actor: Actor, projectId: string, query: string, purpose: "assignee" | "collaborator") {
   const access = await projectAccess(actor, projectId, { write: true });
   requireManage(access);
-  const me = await scopedUser(actor);
+  const me = await findScopedUser(actor);
   if (!me || !isActive(me) || me.workspaceId !== access.project.workspaceId) throw notFound("Project");
   const q = query.trim();
   if (q.length < 2) return [];
