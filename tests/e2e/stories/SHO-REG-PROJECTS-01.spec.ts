@@ -49,6 +49,20 @@ test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', a
     expect((await admin.api.post(`/api/projects/${p.id}/members`, { userId: person.id, role })).status).toBe(201);
     members.push({ person, role });
   }
+  const ordinaryCreator = members.find(member => member.role === 'EDITOR')!.person;
+  const ordinaryCreated = await ordinaryCreator.c.post('/api/projects', { name: zz('Ordinary created project'), leaderId: ordinaryCreator.id });
+  expect(ordinaryCreated.status, JSON.stringify(ordinaryCreated.json)).toBe(201);
+  const ordinaryProjectId = ordinaryCreated.json.project.id as string;
+  ownedProjects.push(ordinaryProjectId);
+  later(() => archiveProject(admin.api, ordinaryProjectId, admin.user.id));
+  const ordinaryDetail = await admin.api.get(`/api/projects/${ordinaryProjectId}`);
+  expect(ordinaryDetail.status).toBe(200);
+  expect(ordinaryDetail.json.project.members.filter((member: { role: string }) => member.role === 'LEADER').map((member: { userId: string }) => member.userId)).toEqual([ordinaryCreator.id]);
+  const beforeInvalidCreates = await admin.api.get('/api/projects');
+  for (const body of [{ name: '   ' }, { name: 'x'.repeat(201) }, { name: zz('Invalid description'), description: 'x'.repeat(5001) }]) {
+    expect((await admin.api.post('/api/projects', { ...body, leaderId: admin.user.id })).status).toBe(400);
+  }
+  expect((await admin.api.get('/api/projects')).json).toEqual(beforeInvalidCreates.json);
   const name = zz('Renamed project');
   const changed = await admin.api.patch(`/api/projects/${p.id}`, { name, description: 'A persisted project description' });
   expect(changed.status, JSON.stringify(changed.json)).toBe(200);
@@ -81,7 +95,7 @@ test('SHO-REG-PROJECTS-01 API: create, edit, reload, activity and validation', a
   const sentinelAfter = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
   expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(sentinelFingerprint);
   mkdirSync(evidenceDir, { recursive: true });
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: p.id, sentinelId: sentinel.id, sentinelFingerprint, sentinelPreserved: true, validationRejected: 3, editorViewerReadAllowed: true, editorViewerRenameDenied: true, deniedWritesLeftProjectAndActivityUnchanged: true, outsiderDenied: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId: p.id, ordinaryProjectId, sentinelId: sentinel.id, sentinelFingerprint, sentinelPreserved: true, createValidationRejected: 3, editValidationRejected: 3, ordinaryCreateWithOneLeader: true, editorViewerReadAllowed: true, editorViewerRenameDenied: true, deniedWritesLeftProjectAndActivityUnchanged: true, outsiderDenied: true }, null, 2));
 });
 
 test('SHO-REG-PROJECTS-01 screen: create, edit, reload and inspect details', async ({ admin, later }) => {
