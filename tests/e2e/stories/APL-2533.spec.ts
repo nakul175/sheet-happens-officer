@@ -142,6 +142,17 @@ test("qa:TC missing AC1: a name saves a contact, role email and phone are option
   await expect(edit).toHaveCount(0);
   expect((await contactsOf(admin, org.id)).find((c) => c.id === fullId)?.role).toBe("Trustee");
 
+  // An older browser form must not silently replace a newer edit by another permitted editor.
+  await fullRow.getByRole("button", { name: /^Edit / }).click();
+  const stale = member.page.getByRole("dialog", { name: "Edit contact" });
+  await stale.getByLabel("Role").fill("Stale role");
+  expect((await admin.api.patch(`/api/contacts/${fullId}`, { role: "Current role" })).status).toBe(200);
+  await stale.getByRole("button", { name: "Save" }).click();
+  await expect(stale.getByRole("alert")).toContainText("changed while you were editing");
+  expect((await contactsOf(admin, org.id)).find((c) => c.id === fullId)?.role).toBe("Current role");
+  await stale.getByRole("button", { name: "Cancel" }).click();
+  await member.page.reload();
+
   await fullRow.getByRole("button", { name: /^Remove / }).click();
   const confirm = member.page.getByRole("dialog", { name: "Remove contact?" });
   await confirm.getByRole("button", { name: "Remove" }).click();

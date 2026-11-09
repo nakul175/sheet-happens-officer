@@ -111,7 +111,7 @@ export async function createContact(user: Actor, orgId: string, input: { name: s
   });
 }
 
-export async function updateContact(user: Actor, id: string, input: { name?: string; role?: string | null; email?: string | null; phone?: string | null; knownBy?: string[] }) {
+export async function updateContact(user: Actor, id: string, input: { name?: string; role?: string | null; email?: string | null; phone?: string | null; knownBy?: string[]; expected?: { name: string; role: string | null; email: string | null; phone: string | null; knownBy: string[] } }) {
   requireCrm(user);
   const c = await contactOf(user, id);
   requireContactEdit(user, c);
@@ -128,7 +128,7 @@ export async function updateContact(user: Actor, id: string, input: { name?: str
     const was = cur.map((k) => k.userId).sort();
     if (JSON.stringify([...known].sort()) !== JSON.stringify(was)) { before.knownBy = was; after.knownBy = [...known].sort(); } else known = null;
   }
-  if (!Object.keys(after).length) return c;
+  if (!Object.keys(after).length && !input.expected) return c;
   return db.$transaction(async (tx) => {
     let fresh;
     let account;
@@ -148,6 +148,14 @@ export async function updateContact(user: Actor, id: string, input: { name?: str
     const currentActor = { ...user, orgRole: account.orgRole };
     requireCrm(currentActor);
     requireContactEdit(currentActor, fresh);
+    if (input.expected) {
+      const original = input.expected;
+      const currentKnownBy = (await tx.contactKnownBy.findMany({ where: { contactId: id }, select: { userId: true } })).map((item) => item.userId).sort();
+      if (fresh.name !== original.name || fresh.role !== original.role || fresh.email !== original.email || fresh.phone !== original.phone ||
+          JSON.stringify(currentKnownBy) !== JSON.stringify([...original.knownBy].sort())) {
+        throw new ApiError(409, "This contact changed while you were editing. Reload and try again.");
+      }
+    }
     if (fresh.removedAt || fresh.organisationId !== c.organisationId || fresh.createdById !== c.createdById ||
         (["name", "role", "email", "phone"] as const).some((key) => fresh[key] !== c[key])) {
       throw new ApiError(409, "This contact changed while you were editing. Reload and try again.");

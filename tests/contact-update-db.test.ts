@@ -147,6 +147,22 @@ it('allows the current author to update one contact with one action', async () =
   completed.push('current-author-positive');
 });
 
+it('refuses an older form after another editor changes a field or Known by membership', async () => {
+  const row = await fixture();
+  const expected = { name: row.name, role: row.role, email: row.email, phone: row.phone, knownBy: [author.id] };
+  await updateContact(admin, row.id, { role: 'current role' });
+  const afterRole = await snapshot(row.id);
+  await expect(updateContact(author, row.id, { name: prefix + '-stale', role: 'stale role', expected })).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(row.id)).toEqual(afterRole);
+
+  const currentExpected = { ...expected, role: 'current role' };
+  await updateContact(admin, row.id, { knownBy: [recipient.id] });
+  const afterKnownBy = await snapshot(row.id);
+  await expect(updateContact(author, row.id, { name: prefix + '-stale-again', expected: currentExpected })).rejects.toMatchObject({ status: 409 });
+  expect(await snapshot(row.id)).toEqual(afterKnownBy);
+  completed.push('stale-form-fields-and-known-by-denied');
+});
+
 it('allows a current Known by recipient and logs the exact change', async () => {
   const row = await fixture();
   await updateContact(author, row.id, { knownBy: [recipient.id] });
