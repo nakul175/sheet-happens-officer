@@ -19,7 +19,7 @@ export async function workspaceForSession(db, sessionId, enabled) {
     ON m."userId"=c."userId" AND m."workspaceId"=c."workspaceId"
     WHERE c."sessionId"=$1 AND c."userId"=$2`, [s.id,s.userId])).rows[0];
   if (!selected) return {userId:s.userId,workspaceId:s.workspaceId,role:s.role,generation:null,original:true};
-  if (!enabled || selected.revokedAt || selected.generation!==selected.current_generation
+  if (enabled!==true || selected.revokedAt || selected.generation!==selected.current_generation
       || !['MEMBER','ADMIN'].includes(selected.role)) deny();
   return {userId:s.userId,workspaceId:selected.workspaceId,role:selected.role,generation:selected.generation,original:false};
 }
@@ -27,13 +27,13 @@ export async function listSessionWorkspaces(db, sessionId, enabled) {
   const s = await session(db,sessionId);
   const original = (await db.query('SELECT id,name FROM "Workspace" WHERE id=$1',[s.workspaceId])).rows[0];
   if (!original) deny();
-  const rows=enabled ? (await db.query(`SELECT w.id,w.name,m.role::text role,m.generation
+  const rows=enabled===true ? (await db.query(`SELECT w.id,w.name,m.role::text role,m.generation
     FROM "WorkspaceMembership" m JOIN "Workspace" w ON w.id=m."workspaceId"
     WHERE m."userId"=$1 AND m."revokedAt" IS NULL ORDER BY w.name,w.id`,[s.userId])).rows : [];
   return [{...original,role:s.role,generation:null,original:true},...rows.map(r=>({...r,original:false}))];
 }
 export async function selectSessionWorkspace(db, sessionId, workspaceId, enabled) {
-  if (!enabled || !validId(workspaceId)) deny();
+  if (enabled!==true || !validId(workspaceId)) deny();
   await db.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
   try {
     await db.query("SET LOCAL lock_timeout='3s'; SET LOCAL statement_timeout='8s'");

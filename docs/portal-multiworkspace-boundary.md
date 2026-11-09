@@ -13,7 +13,8 @@ The private Portal membership service accepts only an operator-reviewed native o
 ## Verified foundation
 
 - Prisma schema validate/generate and application typecheck pass.
-- Nine real PostgreSQL tests on the captured full native schema pass, including exact same native session grant/downgrade/revoke/regrant, preserved original account/session, independent original-workspace session, expired/global-disabled/foreign-session rejection, foreign-key and role constraints, stale review, dormant authority, rollback and concurrent confirmation.
+- Ten real PostgreSQL tests on the captured full native schema pass, including exact same native session grant/downgrade/revoke/regrant, preserved original account/session, independent original-workspace session, expired/global-disabled/foreign-session rejection, foreign-key and role constraints, stale review, dormant authority, rollback and concurrent confirmation.
+- Additive migration and rollback on populated fixtures preserve every original native table, including existing accounts, sessions and project/task content.
 - Synthetic database and owned SSH tunnel removed after every run.
 - This is service-level qualification; it is not browser or Portal Save acceptance.
 

@@ -82,7 +82,10 @@ test('expired, revoked, globally disabled and foreign sessions cannot switch/rea
  await apply();await select(db,'s','extra',true);
  await assert.rejects(select(db,'s','foreign',true));
  await assert.rejects(select(db,'other','extra',true));
- await assert.rejects(current(db,'s',false));
+ for(const flag of [false,undefined,'false','true',1]){
+  await assert.rejects(current(db,'s',flag));await assert.rejects(select(db,'s','extra',flag));
+  assert.equal((await list(db,'s',flag)).length,1);
+ }
  for(const stmt of ['UPDATE "Session" SET "revokedAt"=NOW() WHERE id=\'s\'','UPDATE "Session" SET "expiresAt"=NOW()-INTERVAL \'1 minute\' WHERE id=\'s\'','UPDATE "User" SET "deactivatedAt"=NOW() WHERE id=\'target\'']){
   await db.query(stmt);await assert.rejects(current(db,'s',true));await assert.rejects(select(db,'s','home',true));
   await db.query('UPDATE "Session" SET "revokedAt"=NULL,"expiresAt"=NOW()+INTERVAL \'1 day\' WHERE id=\'s\'; UPDATE "User" SET "deactivatedAt"=NULL');
@@ -133,4 +136,27 @@ test('existing direct task authority blocks initial enrollment and preserves the
  const task=(await db.query('SELECT * FROM "Task"')).rows;
  await assert.rejects(preview());
  assert.deepEqual((await db.query('SELECT * FROM "Task"')).rows,task);
+});
+
+test('additive migration and rollback preserve every populated original native table',opt,async()=>{
+ await db.query(`INSERT INTO "Project"(id,"workspaceId",name,"updatedAt") VALUES ('p','home','Original work',NOW());
+  INSERT INTO "Section"(id,"projectId",name,position) VALUES ('sec','p','Original section',1);
+  INSERT INTO "ProjectMember"("projectId","userId",role) VALUES ('p','target','LEADER');
+  INSERT INTO "Task"(id,"workspaceId","projectId","sectionId",title,"assigneeId","createdById","updatedAt")
+   VALUES ('task','home','p','sec','Original business content','target','target',NOW());`);
+ const added=new Set(['WorkspaceMembership','SessionWorkspace','PortalWorkspaceReceipt']);
+ const tables=(await db.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows.map(r=>r.tablename).filter(n=>!added.has(n));
+ const snapshot=async()=>{
+  const result={};
+  for(const n of tables) result[n]=(await db.query(`SELECT row_to_json(t)::text value FROM "${n.replaceAll('"','""')}" t ORDER BY row_to_json(t)::text`)).rows.map(r=>r.value);
+  return result;
+ };
+ const before=await snapshot();
+ const rollback=`DROP TABLE "SessionWorkspace"; DROP TABLE "WorkspaceMembership"; DROP TABLE "PortalWorkspaceReceipt";
+  DROP INDEX "Session_id_userId_key"; DROP FUNCTION sho_additional_workspace_only();`;
+ await db.query(rollback);
+ assert.deepEqual(await snapshot(),before);
+ await db.query(readFileSync(new URL('../../prisma/migrations/20261109120000_additional_workspace_memberships/migration.sql',import.meta.url),'utf8'));
+ assert.deepEqual(await snapshot(),before);
+ assert.equal((await current(db,'s',true)).role,'ADMIN');
 });
