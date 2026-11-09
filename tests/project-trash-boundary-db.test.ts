@@ -21,6 +21,8 @@ let auditBeforeIds: Set<string> | null = null;
 let safe = false;
 let projectId = '';
 let sectionId = '';
+let sentinelProjectId = '';
+let sentinelSectionId = '';
 let workspaceId = '';
 let cleanup = false;
 
@@ -41,6 +43,11 @@ beforeAll(async () => {
     { projectId, userId: viewer.id, role: 'VIEWER' },
   ] });
   sectionId = (await db.section.create({ data: { projectId, name: 'To do', position: 0 } })).id;
+  const sentinelProject = await db.project.create({ data: { workspaceId, name: `${prefix}-unrelated` } });
+  sentinelProjectId = sentinelProject.id;
+  projectIds.push(sentinelProjectId);
+  await db.projectMember.create({ data: { projectId: sentinelProjectId, userId: leader.id, role: 'LEADER' } });
+  sentinelSectionId = (await db.section.create({ data: { projectId: sentinelProjectId, name: 'To do', position: 0 } })).id;
 });
 
 afterAll(async () => {
@@ -66,15 +73,15 @@ afterAll(async () => {
 it('preserves exact-boundary and unrelated Trash, purges only expired owned tasks, and enforces restore roles', async () => {
   const now = new Date();
   const cutoff = now.getTime() - UNDO_WINDOW_MS;
-  const create = (name: string, deletedAt: number, inProject = projectId) => db.task.create({ data: {
-    workspaceId, projectId: inProject, sectionId,
+  const create = (name: string, deletedAt: number, inProject = projectId, inSection = sectionId) => db.task.create({ data: {
+    workspaceId, projectId: inProject, sectionId: inSection,
     title: `${prefix}-${name}`, assigneeId: leader.id, createdById: leader.id,
     deletedAt: new Date(deletedAt), deletedById: leader.id,
   } });
   const recent = await create('recent', cutoff + 1);
   const exact = await create('exact', cutoff);
   const expired = await create('expired', cutoff - 1);
-  const sentinel = await create('unrelated-sentinel', cutoff - 86_400_000);
+  const sentinel = await create('unrelated-sentinel', cutoff - 86_400_000, sentinelProjectId, sentinelSectionId);
   const sentinelBefore = await db.task.findUniqueOrThrow({ where: { id: sentinel.id }, select: { id: true, title: true, deletedAt: true, projectId: true } });
   auditBeforeIds = new Set((await db.auditLog.findMany({ where: { event: 'TASK_PURGED' }, select: { id: true } })).map(row => row.id));
 
@@ -83,16 +90,17 @@ it('preserves exact-boundary and unrelated Trash, purges only expired owned task
   await restoreTask(admin, recent.id);
   expect((await db.task.findUniqueOrThrow({ where: { id: recent.id } })).deletedAt).toBeNull();
 
-  expect(await purgeTrash(now, { projectId, title: { startsWith: `${prefix}-expired` } })).toBe(1);
+  expect(await purgeTrash(now, { projectId })).toBe(1);
   expect(await db.task.findUnique({ where: { id: expired.id } })).toBeNull();
   expect((await db.task.findUniqueOrThrow({ where: { id: exact.id } })).deletedAt?.getTime()).toBe(cutoff);
   await restoreTask(leader, exact.id);
   expect((await db.task.findUniqueOrThrow({ where: { id: exact.id } })).deletedAt).toBeNull();
   expect(await db.task.findUniqueOrThrow({ where: { id: sentinel.id }, select: { id: true, title: true, deletedAt: true, projectId: true } })).toEqual(sentinelBefore);
   expect(await db.project.findUnique({ where: { id: projectId }, select: { id: true } })).toEqual({ id: projectId });
+  expect(await db.project.findUnique({ where: { id: sentinelProjectId }, select: { id: true } })).toEqual({ id: sentinelProjectId });
   const newAudit = (await db.auditLog.findMany({ where: { event: 'TASK_PURGED' }, select: { id: true } })).map(row => row.id).filter(id => !auditBeforeIds!.has(id));
   expect(newAudit).toHaveLength(1);
 
   mkdirSync('test-results/project-trash-boundary', { recursive: true });
-  writeFileSync('test-results/project-trash-boundary/verification.json', JSON.stringify({ fixture: prefix, cutoff: new Date(cutoff).toISOString(), denied: ['EDITOR', 'VIEWER'], restored: ['ADMIN recent', 'LEADER exact'], purged: 1, sentinelPreserved: true, projectPreserved: true }, null, 2));
+  writeFileSync('test-results/project-trash-boundary/verification.json', JSON.stringify({ fixture: prefix, cutoff: new Date(cutoff).toISOString(), denied: ['EDITOR', 'VIEWER'], restored: ['ADMIN recent', 'LEADER exact'], purged: 1, scopedProjectId: projectId, unrelatedProjectId: sentinelProjectId, sentinelPreserved: true, projectPreserved: true }, null, 2));
 });
