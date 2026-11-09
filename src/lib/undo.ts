@@ -583,7 +583,21 @@ async function applyPreparedUndo(tx: Tx, user: Actor, prepared: Awaited<ReturnTy
   });
   if (anyway && p.conflicts.length) {
     const later = await tx.actionLog.findMany({ where: { targetType: row.targetType, targetId: row.targetId, createdAt: { gt: row.createdAt }, id: { not: row.id }, actorId: { not: user.id } }, select: { actorId: true } });
-    await notify(tx, later.map((l) => l.actorId), "CHANGE_OVERRIDDEN", {
+    const recipients: string[] = [];
+    for (const actorId of [...new Set(later.map((l) => l.actorId))].sort()) {
+      try {
+        const member = await tx.$queryRaw<{ userId: string }[]>`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${actorId} FOR SHARE NOWAIT`;
+        if (!member.length) continue;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${actorId} FOR SHARE NOWAIT`;
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw bad("This project's membership is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      if (await activeMember(tx, projectId, actorId)) recipients.push(actorId);
+    }
+    await notify(tx, recipients, "CHANGE_OVERRIDDEN", {
       actorId: user.id, projectId, taskId: row.targetType === "task" ? row.targetId : undefined, data: { title: p.subject, fields: p.fields },
     });
     await auditTx(tx, "UNDO_OVERRIDE", { actorId: user.id, targetId: row.targetId, targetType: row.targetType, data: { projectId, action: row.action } });
