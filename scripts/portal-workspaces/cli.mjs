@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import pg from 'pg';
 import dotenv from 'dotenv';
 import {changeWorkspaceMembership} from './bridge.mjs';
+import {changeWorkspaceProject} from './projects.mjs';
 
 function privateFile(path) {
   if(!isAbsolute(path))throw Error('Config unavailable');
@@ -17,7 +18,8 @@ function config() {
   const runtime=privateFile(c.runtime_environment_file), env=dotenv.parse(runtime);
   if(!env.DATABASE_URL||typeof env.SUPER_ADMIN_EMAILS!=='string')throw Error('Native protection source missing');
   return {database:env.DATABASE_URL,policy:{enabled:process.env.APLYD_SHO_WORKSPACE_WRITER_ENABLED==='1',
-    workspace:c.workspace_id,reviewers:c.reviewer_ids,reference:c.review_reference,
+    projectsEnabled:process.env.APLYD_SHO_WORKSPACE_PROJECT_WRITER_ENABLED==='1',
+    projects:c.project_ids??[],workspace:c.workspace_id,reviewers:c.reviewer_ids,reference:c.review_reference,
     protectedEmails:env.SUPER_ADMIN_EMAILS.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean),
     configDigest:createHash('sha256').update(raw).update(runtime).digest('hex')}};
 }
@@ -29,7 +31,9 @@ try {
   await db.connect();
   const schema=new URL(c.database).searchParams.get('schema')??'public';
   await db.query('SELECT set_config($1,$2,false)',['search_path','"'+schema.replaceAll('"','""')+'"']);
-  const result=await changeWorkspaceMembership(db,c.policy,JSON.parse(input),()=>config().policy.configDigest===c.policy.configDigest);
+  const payload=JSON.parse(input);
+  const change=payload.scope==='project'?changeWorkspaceProject:changeWorkspaceMembership;
+  const result=await change(db,c.policy,payload,()=>config().policy.configDigest===c.policy.configDigest);
   process.stdout.write(JSON.stringify(result));
 } catch {process.stderr.write('SHO workspace operation unconfirmed; reconcile before retry.\n');process.exitCode=1;}
 finally {await db?.end();}

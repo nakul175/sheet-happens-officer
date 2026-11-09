@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import pg from 'pg';
+import {changeWorkspaceProject as projectChange} from './projects.mjs';
 import {changeWorkspaceMembership as change} from './bridge.mjs';
 import {workspaceForSession as current,selectSessionWorkspace as select,listSessionWorkspaces as list} from './session.mjs';
 const enabled=!!process.env.SHO_WORKSPACE_TEST_DATABASE_URL;
@@ -28,9 +29,10 @@ before(async()=>{
    CREATE TABLE "Workspace"(id TEXT PRIMARY KEY,name TEXT NOT NULL);
    CREATE TABLE "User"(id TEXT PRIMARY KEY,"workspaceId" TEXT REFERENCES "Workspace"(id),email TEXT,name TEXT,"passwordHash" TEXT,"orgRole" "OrgRole","emailVerifiedAt" TIMESTAMP,"deactivatedAt" TIMESTAMP);
    CREATE TABLE "Session"(id TEXT PRIMARY KEY,"userId" TEXT REFERENCES "User"(id),"tokenHash" TEXT,"expiresAt" TIMESTAMP,"revokedAt" TIMESTAMP);
-   CREATE TABLE "Project"(id TEXT PRIMARY KEY,"workspaceId" TEXT,name TEXT,"updatedAt" TIMESTAMP);
-   CREATE TABLE "ProjectMember"("projectId" TEXT,"userId" TEXT,role TEXT);
-   CREATE TABLE "ActionLog"(id TEXT,"actorId" TEXT,channel TEXT,"projectId" TEXT,"targetType" TEXT,"targetId" TEXT,action TEXT);
+   CREATE TYPE "ProjectRole" AS ENUM ('LEADER','EDITOR','VIEWER');
+   CREATE TABLE "Project"(id TEXT PRIMARY KEY,"workspaceId" TEXT,name TEXT,"updatedAt" TIMESTAMP,"archivedAt" TIMESTAMP,"deletedAt" TIMESTAMP);
+   CREATE TABLE "ProjectMember"("projectId" TEXT,"userId" TEXT,role "ProjectRole", PRIMARY KEY("projectId","userId"));
+   CREATE TABLE "ActionLog"(id TEXT,"actorId" TEXT,channel TEXT,"projectId" TEXT,"targetType" TEXT,"targetId" TEXT,action TEXT,"beforeState" JSONB,"afterState" JSONB);
    CREATE TABLE "Section"(id TEXT PRIMARY KEY,"projectId" TEXT,name TEXT,position INTEGER);
    CREATE TABLE "Task"(id TEXT PRIMARY KEY,"workspaceId" TEXT,"projectId" TEXT,"sectionId" TEXT,title TEXT,"assigneeId" TEXT,"approverId" TEXT,"createdById" TEXT,"updatedAt" TIMESTAMP);
    CREATE TABLE "TaskCollaborator"("taskId" TEXT,"userId" TEXT);
@@ -159,4 +161,83 @@ test('additive migration and rollback preserve every populated original native t
  await db.query(readFileSync(new URL('../../prisma/migrations/20261109120000_additional_workspace_memberships/migration.sql',import.meta.url),'utf8'));
  assert.deepEqual(await snapshot(),before);
  assert.equal((await current(db,'s',true)).role,'ADMIN');
+});
+
+// Additional-workspace project editor: exercised on the same transactional store.
+const projectPolicy={...policy,projectsEnabled:true,projects:['p']};
+async function projectFixture(){
+ await apply();
+ await db.query(`INSERT INTO "Project"(id,"workspaceId",name,"updatedAt") VALUES ('p','extra','Reviewed project',NOW());
+ INSERT INTO "ProjectMember"("projectId","userId",role) VALUES ('p','reviewer','LEADER');`);
+}
+async function projectPreview(role='EDITOR',extra={}){return projectChange(db,projectPolicy,{...input(),project:'p',role,operation:'preview',...extra});}
+async function projectApply(role='EDITOR',expected){return projectChange(db,projectPolicy,{...input(),project:'p',role,operation:'apply',requestId:randomUUID(),expected:expected??await projectPreview(role)});}
+test('project flag, unknown scope/role and inspect writes deny before I/O',async()=>{
+ const fake={query(){throw Error('Unexpected I/O')}};
+ for(const [p,i] of [[{...projectPolicy,projectsEnabled:false},{}],[projectPolicy,{role:'SUPER_ADMIN'}],[projectPolicy,{project:'../bad'}],[projectPolicy,{role:'inspect',operation:'apply'}]])
+  await assert.rejects(projectChange(fake,p,{...input(),project:'p',operation:'preview',role:'EDITOR',...i}),/Project authority review refused/);
+});
+test('project grant downgrade revoke and regrant preserve home authority and selected sessions',opt,async()=>{
+ await projectFixture();await select(db,'s','extra',true);
+ const before={users:(await db.query('SELECT * FROM "User" ORDER BY id')).rows,sessions:(await db.query('SELECT * FROM "Session" ORDER BY id')).rows,membership:(await db.query('SELECT * FROM "WorkspaceMembership"')).rows,selection:(await db.query('SELECT * FROM "SessionWorkspace"')).rows};
+ for(const role of ['VIEWER','EDITOR','VIEWER','revoke','VIEWER']){
+  const result=await projectApply(role);assert.equal(result.after.find(x=>x.userId==='target')?.role,role==='revoke'?undefined:role);
+  assert.equal((await current(db,'s',true)).workspaceId,'extra');assert.equal((await current(db,'s2',true)).workspaceId,'home');
+ }
+ assert.deepEqual({users:(await db.query('SELECT * FROM "User" ORDER BY id')).rows,sessions:(await db.query('SELECT * FROM "Session" ORDER BY id')).rows,membership:(await db.query('SELECT * FROM "WorkspaceMembership"')).rows,selection:(await db.query('SELECT * FROM "SessionWorkspace"')).rows},before);
+});
+test('project preview is read-only, stale membership generation/role deny commit',opt,async()=>{
+ await projectFixture();const p=await projectPreview();const n=(await db.query('SELECT count(*) FROM "PortalWorkspaceReceipt"')).rows[0].count;
+ assert.equal(p.members.length,1);assert.equal((await db.query('SELECT count(*) FROM "PortalWorkspaceReceipt"')).rows[0].count,n);
+ await apply('role','ADMIN');await assert.rejects(projectApply('EDITOR',p));
+ await apply('role','MEMBER');await assert.rejects(projectApply('EDITOR',p));
+ await apply('revoke',null);await assert.rejects(projectPreview());
+ await apply('regrant');await assert.rejects(projectApply('EDITOR',p));
+});
+test('project foreign workspace, archived/deleted resource and inactive actor/target refuse',opt,async()=>{
+ await projectFixture();
+ for(const [sql,reset] of [
+  [`UPDATE "Project" SET "workspaceId"='home'`,`UPDATE "Project" SET "workspaceId"='extra'`],
+  [`UPDATE "Project" SET "archivedAt"=NOW()`,`UPDATE "Project" SET "archivedAt"=NULL`],
+  [`UPDATE "Project" SET "deletedAt"=NOW()`,`UPDATE "Project" SET "deletedAt"=NULL`],
+  [`UPDATE "User" SET "deactivatedAt"=NOW() WHERE id='target'`,`UPDATE "User" SET "deactivatedAt"=NULL WHERE id='target'`],
+  [`UPDATE "User" SET "orgRole"='MEMBER' WHERE id='reviewer'`,`UPDATE "User" SET "orgRole"='SUPER_ADMIN' WHERE id='reviewer'`]]){await db.query(sql);await assert.rejects(projectPreview());await db.query(reset);}
+});
+test('project creator downgrade and last Leader removal are held',opt,async()=>{
+ await projectFixture();await projectApply('EDITOR');
+ await db.query(`INSERT INTO "ActionLog"(id,"actorId",channel,"projectId","targetType","targetId",action) VALUES ('creator','target','SCREEN','p','project','p','project.created')`);
+ await assert.rejects(projectPreview('VIEWER'));await assert.rejects(projectPreview('EDITOR'));
+ await projectApply('revoke');assert.equal((await projectPreview('inspect')).members.length,1);
+ await db.query(`DELETE FROM "ActionLog" WHERE id='creator'`);await projectApply('EDITOR');
+ await projectApply('LEADER');await assert.rejects(projectPreview('revoke'));await assert.rejects(projectPreview('VIEWER'));
+ const roles=(await db.query(`SELECT "userId",role::text FROM "ProjectMember" ORDER BY "userId"`)).rows;
+ assert.deepEqual(roles,[{userId:'reviewer',role:'EDITOR'},{userId:'target',role:'LEADER'}]);
+});
+test('project task handover is explicit; assigned and approval work is never silently changed',opt,async()=>{
+ await projectFixture();await projectApply('EDITOR');
+ await db.query(`INSERT INTO "Section"(id,"projectId",name,position) VALUES ('sec','p','Open',0);
+ INSERT INTO "Task"(id,"workspaceId","projectId","sectionId",title,"assigneeId","createdById","updatedAt") VALUES ('task','extra','p','sec','Preserved','target','reviewer',NOW())`);
+ const tasks=(await db.query('SELECT * FROM "Task"')).rows;
+ await assert.rejects(projectPreview('VIEWER'));await assert.rejects(projectPreview('revoke'));
+ assert.deepEqual((await db.query('SELECT * FROM "Task"')).rows,tasks);
+});
+test('project stale roster, config drift and replay cannot commit',opt,async()=>{
+ await projectFixture();const old=await projectPreview();await projectApply('VIEWER');await assert.rejects(projectApply('EDITOR',old));
+ const plan=await projectPreview('EDITOR'),requestId=randomUUID(),payload={...input(),project:'p',role:'EDITOR',operation:'apply',requestId,expected:plan};
+ await assert.rejects(projectChange(db,projectPolicy,payload,()=>false));
+ await projectChange(db,projectPolicy,payload);await assert.rejects(projectChange(db,projectPolicy,payload));
+ assert.equal((await db.query('SELECT count(*) FROM "PortalWorkspaceReceipt" WHERE id=$1',[requestId])).rows[0].count,'1');
+});
+test('project audit failure rolls back membership and receipt together',opt,async()=>{
+ await projectFixture();const plan=await projectPreview(),before=(await db.query('SELECT count(*) FROM "PortalWorkspaceReceipt"')).rows[0].count;
+ await db.query(`CREATE FUNCTION reject_project_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event='PORTAL_WORKSPACE_PROJECT_ROLE' THEN RAISE EXCEPTION 'synthetic audit fault'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_project_audit BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION reject_project_audit()`);
+ try{await assert.rejects(projectApply('EDITOR',plan));assert.equal((await db.query('SELECT count(*) FROM "ProjectMember" WHERE "userId"=\'target\'')).rows[0].count,'0');assert.equal((await db.query('SELECT count(*) FROM "PortalWorkspaceReceipt"')).rows[0].count,before);}
+ finally{await db.query('DROP TRIGGER reject_project_audit ON "AuditLog"; DROP FUNCTION reject_project_audit()');}
+});
+test('project catalogue returns only pinned live projects in this workspace',opt,async()=>{
+ await projectFixture();
+ await db.query(`INSERT INTO "Project"(id,"workspaceId",name,"updatedAt") VALUES ('foreign-p','foreign','Foreign',NOW()),('hidden-p','extra','Not reviewed',NOW())`);
+ const result=await projectPreview('list',{project:'catalogue'});assert.deepEqual(result.projects,[{id:'p',name:'Reviewed project'}]);
+ await assert.rejects(projectPreview('EDITOR',{project:'hidden-p'}));
+ await db.query(`UPDATE "Project" SET "archivedAt"=NOW() WHERE id='p'`);assert.deepEqual((await projectPreview('list',{project:'catalogue'})).projects,[]);
 });
