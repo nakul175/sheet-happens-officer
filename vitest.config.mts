@@ -29,6 +29,7 @@ export default defineConfig({
       "tests/e2e/stories/SHO-REG-PROJECTS-04.spec.ts", // Playwright task Trash route and controls acceptance
       "tests/e2e/stories/SHO-REG-PROJECTS-05.spec.ts", // Playwright project notes and activity acceptance
       "tests/e2e/stories/SHO-REG-CRM-01.spec.ts", // Playwright organisation CRUD/Undo acceptance
+      "tests/e2e/stories/SHO-REG-CRM-02.spec.ts", // guarded Playwright contact association and Undo journey
       "tests/e2e/stories/SHO-REG-TASKS-06.spec.ts", // Playwright approver recovery audit
       "tests/e2e/stories/SHO-REG-TASKS-04.spec.ts", // Playwright stale task-sheet recovery audit
       "tests/e2e/stories/SHO-REG-TASKS-08.spec.ts", // Playwright mixed bulk and Undo audit

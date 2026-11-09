@@ -1,0 +1,109 @@
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { test, local2691 } from "../helpers/2691-admin";
+import { newProject, newTask, postTaskCurrent } from "../helpers/migration-2731";
+import { expect, zz } from "./qa";
+
+test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal and Undo", async ({ admin, later }) => {
+  if (!local2691) throw new Error("Contact audit requires the guarded local test database.");
+  test.setTimeout(180_000);
+  const fixture = randomUUID();
+  const evidenceDir = "test-results/contact-organisation-browser";
+  const owned: string[] = [];
+  later(async () => {
+    for (const id of owned) {
+      const response = await admin.api.get(`/api/orgs/${id}`);
+      expect(response.status).toBe(200);
+      expect(response.json.organisation.archived).toBe(true);
+    }
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, owned, archived: true, cleanup: true }, null, 2));
+  });
+  async function makeOrg(label: string) {
+    const created = await admin.api.post("/api/orgs", { name: zz(label) });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const id = created.json.organisation.id as string;
+    owned.push(id);
+    later(async () => {
+      const loaded = await admin.api.get(`/api/orgs/${id}`);
+      expect(loaded.status).toBe(200);
+      if (!loaded.json.organisation.archived)
+        expect((await admin.api.post(`/api/orgs/${id}/archive`, { archive: true })).status).toBe(200);
+    });
+    return id;
+  }
+
+  const orgId = await makeOrg("contact original organisation");
+  const sentinelId = await makeOrg("contact foreign sentinel");
+  const sentinelBefore = (await admin.api.get(`/api/orgs/${sentinelId}`)).json.organisation;
+  const sentinelHash = createHash("sha256").update(JSON.stringify(sentinelBefore)).digest("hex");
+  const project = await newProject(admin, later, { label: "contact linked project" });
+  const taskId = await newTask(admin, project.id, { title: zz("contact linked task") });
+  const name = zz("contact fixed organisation");
+  const page = admin.page;
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto(`/accounts/${orgId}?tab=contacts`);
+  await page.getByRole("button", { name: "+ Contact" }).click();
+  const create = page.getByRole("dialog", { name: "New contact" });
+  await create.getByRole("textbox", { name: "Name", exact: true }).fill(name);
+  await create.getByRole("textbox", { name: "Role" }).fill("Liaison");
+  await create.getByRole("button", { name: "Save" }).click();
+  await expect(create).toHaveCount(0);
+  const list = await admin.api.get(`/api/orgs/${orgId}/contacts`);
+  expect(list.status).toBe(200);
+  const contact = (list.json.contacts as { id: string; name: string }[]).find((row) => row.name === name);
+  expect(contact).toBeDefined();
+  const contactId = contact!.id;
+  later(async () => {
+    const loaded = await admin.api.get(`/api/contacts/${contactId}`);
+    if (loaded.status === 200) expect((await admin.api.del(`/api/contacts/${contactId}`)).status).toBe(204);
+    else expect(loaded.status).toBe(404);
+  });
+  const linked = await postTaskCurrent(admin, taskId, "links", { contactId });
+  expect(linked.status).toBe(201);
+  const linkedTask = await admin.api.get(`/api/tasks/${taskId}`);
+  expect(linkedTask.status).toBe(200);
+  expect(linkedTask.json.task.links).toEqual([expect.objectContaining({ contact: expect.objectContaining({ id: contactId, organisationId: orgId }) })]);
+
+  const row = page.getByRole("region", { name: "Organisation contacts", exact: true })
+    .getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
+  await row.getByRole("button", { name: /^Edit / }).click();
+  const edit = page.getByRole("dialog", { name: "Edit contact" });
+  await edit.getByRole("textbox", { name: "Role" }).fill("Senior liaison");
+  await edit.getByRole("button", { name: "Save" }).click();
+  await expect(edit).toHaveCount(0);
+  const edited = await admin.api.get(`/api/contacts/${contactId}`);
+  expect(edited.status).toBe(200);
+  expect(edited.json.contact).toMatchObject({ organisationId: orgId, role: "Senior liaison" });
+  expect(edited.json.contact.tasks.map((item: { id: string }) => item.id)).toContain(taskId);
+  const reassignment = await admin.api.patch(`/api/contacts/${contactId}`, { organisationId: sentinelId, role: "Senior liaison" });
+  expect(reassignment.status).toBe(200);
+  expect((await admin.api.get(`/api/contacts/${contactId}`)).json.contact.organisationId).toBe(orgId);
+  expect((await admin.api.get(`/api/orgs/${sentinelId}/contacts`)).json.contacts).toHaveLength(0);
+  mkdirSync(evidenceDir, { recursive: true });
+  await page.screenshot({ path: `${evidenceDir}/edited.png`, fullPage: true });
+
+  await row.getByRole("button", { name: /^Remove / }).click();
+  const [deleted] = await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith(`/api/contacts/${contactId}`) && response.request().method() === "DELETE"),
+    page.getByRole("dialog", { name: "Remove contact?" }).getByRole("button", { name: "Remove" }).click(),
+  ]);
+  expect(deleted.status()).toBe(204);
+  const undoId = deleted.headers()["x-undo-id"];
+  expect(undoId).toBeTruthy();
+  await expect(row).toHaveCount(0);
+  expect((await admin.api.get(`/api/contacts/${contactId}`)).status).toBe(404);
+  expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.links).toHaveLength(0);
+  expect((await admin.api.get(`/api/orgs/${orgId}`)).json.organisation.tasks.map((item: { id: string }) => item.id)).not.toContain(taskId);
+
+  expect((await admin.api.post(`/api/actions/${undoId}/undo`, {})).status).toBe(200);
+  expect((await admin.api.post(`/api/actions/${undoId}/undo`, {})).status).toBe(409);
+  const restored = await admin.api.get(`/api/contacts/${contactId}`);
+  expect(restored.status).toBe(200);
+  expect(restored.json.contact).toMatchObject({ organisationId: orgId, role: "Senior liaison" });
+  expect(restored.json.contact.tasks.map((item: { id: string }) => item.id)).toContain(taskId);
+  expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.links).toEqual([expect.objectContaining({ contact: expect.objectContaining({ id: contactId, organisationId: orgId }) })]);
+  expect(createHash("sha256").update(JSON.stringify((await admin.api.get(`/api/orgs/${sentinelId}`)).json.organisation)).digest("hex")).toBe(sentinelHash);
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, orgId, sentinelId, projectId: project.id, taskId, contactId, mobileWidth: 390,
+    originalOrganisationFixed: true, linkedTaskHiddenOnRemoval: true, linkedTaskRestoredOnUndo: true, replayRejected: true, sentinelPreserved: true }, null, 2));
+});
