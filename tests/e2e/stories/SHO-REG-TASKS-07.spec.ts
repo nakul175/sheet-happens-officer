@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { test, local2691 } from "../helpers/2691-admin";
-import { newProject, newTask } from "../helpers/migration-2731";
+import { newProject, newTask, postTaskCurrent } from "../helpers/migration-2731";
 import { expect, zz } from "./qa";
 
 test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores the section", async ({ admin, later }) => {
@@ -10,6 +10,7 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
   const evidenceDir = "test-results/task-section-move-browser";
   let sourceId = "";
   let foreignId = "";
+  let organisationId = "";
   later(async () => {
     if (!sourceId || !foreignId) return;
     const source = await admin.api.get(`/api/projects/${sourceId}`);
@@ -21,6 +22,13 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
     mkdirSync(evidenceDir, { recursive: true });
     writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, sourceId, foreignId, projectsArchived: true, cleanup: true }, null, 2));
   });
+  const organisation = await admin.api.post("/api/orgs", { name: zz("section move linked organisation") });
+  expect(organisation.status, JSON.stringify(organisation.json)).toBe(201);
+  organisationId = organisation.json.organisation.id as string;
+  later(async () => {
+    const archived = await admin.api.post(`/api/orgs/${organisationId}/archive`, { archive: true });
+    expect(archived.status, JSON.stringify(archived.json)).toBe(200);
+  });
   const source = await newProject(admin, later, { label: "section move source" });
   sourceId = source.id;
   const foreign = await newProject(admin, later, { label: "section move foreign sentinel" });
@@ -28,9 +36,13 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
   const title = zz("section move parent");
   const taskId = await newTask(admin, source.id, { title });
   const childId = await newTask(admin, source.id, { title: zz("section move child"), parentId: taskId });
+  const linked = await postTaskCurrent(admin, taskId, "links", { organisationId });
+  expect(linked.status, JSON.stringify(linked.json)).toBe(201);
   const read = async () => admin.api.get(`/api/tasks/${taskId}`);
   const before = await read();
   expect(before.status).toBe(200);
+  expect(before.json.task.links).toHaveLength(1);
+  expect(before.json.task.links[0].organisation.id).toBe(organisationId);
   const childBefore = await admin.api.get(`/api/tasks/${childId}`);
   expect(childBefore.status).toBe(200);
   const foreignBefore = (await admin.api.get(`/api/projects/${foreign.id}`)).json.project;
@@ -83,5 +95,5 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
   expect((await admin.api.post(`/api/actions/${action!.id}/undo`, {})).status).toBe(409);
   const foreignAfter = (await admin.api.get(`/api/projects/${foreign.id}`)).json.project;
   expect(createHash("sha256").update(JSON.stringify(foreignAfter)).digest("hex")).toBe(foreignHash);
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, childId, sourceId, foreignId, foreignSectionRejected: true, mobileWidth: 390, movedWithinProject: true, relatedStatePreserved: true, undoRestoredSection: true, replayRejected: true, foreignProjectPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, childId, sourceId, foreignId, organisationId, linkedRecordPreserved: true, foreignSectionRejected: true, mobileWidth: 390, movedWithinProject: true, relatedStatePreserved: true, undoRestoredSection: true, replayRejected: true, foreignProjectPreserved: true }, null, 2));
 });
