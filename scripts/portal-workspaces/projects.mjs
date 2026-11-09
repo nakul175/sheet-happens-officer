@@ -1,5 +1,6 @@
-// Exact additional-workspace project roles. No identity, workspace or task rewrites.
+// Exact additional-workspace project roles with explicitly reviewed native task handover.
 import {createHash,randomUUID} from 'node:crypto';
+import {readHandover,applyHandover} from './handover.mjs';
 const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const id=x=>typeof x==='string' && /^[A-Za-z0-9_-]{1,200}$/.test(x);
 const refuse=()=>{throw Error('Project authority review refused');};
@@ -9,6 +10,7 @@ export async function changeWorkspaceProject(db,policy,input,unchanged=()=>true)
    || !Array.isArray(policy.reviewers) || !Array.isArray(policy.protectedEmails)
    || !id(input.actor) || !id(input.target) || input.actor===input.target || !policy.reviewers.includes(input.actor)
    || !['preview','apply'].includes(input.operation) || !['LEADER','EDITOR','VIEWER','revoke','inspect','list'].includes(input.role) || (['inspect','list'].includes(input.role)&&input.operation!=='preview')
+   || (input.handoverTo!=null && (!id(input.handoverTo) || !['VIEWER','revoke'].includes(input.role)))
    || !Array.isArray(policy.projects) || !policy.projects.every(id) || (input.role!=='list'&&!policy.projects.includes(input.project))
    || (input.operation==='apply' && (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(input.requestId??'') || !input.expected)))refuse();
  await db.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
@@ -17,7 +19,7 @@ export async function changeWorkspaceProject(db,policy,input,unchanged=()=>true)
   await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[JSON.stringify([policy.workspace,input.target])]);
   // Shared with ordinary native writers: prevent a handover/creator/leader race.
   await db.query('LOCK TABLE "ProjectMember" IN SHARE ROW EXCLUSIVE MODE');
-  await db.query('LOCK TABLE "ActionLog","Task","TaskCollaborator" IN SHARE MODE');
+  await db.query('LOCK TABLE "ActionLog","Task","TaskCollaborator","User","WorkspaceMembership" IN SHARE MODE');
   const users=(await db.query(`SELECT id,"workspaceId","orgRole"::text role,email,"emailVerifiedAt","deactivatedAt",xmin::text revision FROM "User" WHERE id=ANY($1::text[]) ORDER BY id FOR SHARE`,[[input.actor,input.target]])).rows;
   const a=users.find(x=>x.id===input.actor),t=users.find(x=>x.id===input.target);
   if(!a||!t||a.workspaceId!==policy.workspace||a.role!=='SUPER_ADMIN'||t.workspaceId===policy.workspace
@@ -37,15 +39,15 @@ export async function changeWorkspaceProject(db,policy,input,unchanged=()=>true)
   if(leaders.length!==1 || (mine?.role==='LEADER'&&['EDITOR','VIEWER','revoke'].includes(input.role)) || (['revoke','LEADER'].includes(input.role)&&!mine))refuse();
   const creator=(await db.query(`SELECT id,xmin::text revision FROM "ActionLog" WHERE "projectId"=$1 AND "actorId"=$2 AND action IN ('project.created','deal.created') ORDER BY id`,[project.id,t.id])).rows;
   if(creator.length && ['EDITOR','VIEWER'].includes(input.role))refuse();
-  const assignments=(await db.query(`SELECT t.id,t."assigneeId",t."approverId",EXISTS(SELECT 1 FROM "TaskCollaborator" c WHERE c."taskId"=t.id AND c."userId"=$2) collaborator FROM "Task" t WHERE t."projectId"=$1 AND (t."assigneeId"=$2 OR t."approverId"=$2 OR EXISTS(SELECT 1 FROM "TaskCollaborator" c WHERE c."taskId"=t.id AND c."userId"=$2)) ORDER BY t.id`,[project.id,t.id])).rows;
-  if(assignments.length && ['VIEWER','revoke'].includes(input.role))refuse();
+  const {assignments,handover}=await readHandover(db,{project,target:t.id,leader:leaders[0].userId,role:input.role,recipient:input.handoverTo??null});
   const before={workspace:policy.workspace,actor:a.id,actorRevision:a.revision,target:t.id,targetRevision:t.revision,
-   originalWorkspace:t.workspaceId,originalRole:t.role,membership,project,members,creator,assignments,
+   originalWorkspace:t.workspaceId,originalRole:t.role,membership,project,members,creator,assignments,handover,
    role:input.role,reference:policy.reference,configDigest:policy.configDigest};
   if(!unchanged())refuse();
   if(input.operation==='preview'){await db.query('COMMIT');return before;}
   if(digest(before)!==digest(input.expected))refuse();
   await db.query('INSERT INTO "PortalWorkspaceReceipt" (id,"actorId","targetId","workspaceId",result) VALUES ($1,$2,$3,$4,$5)',[input.requestId,a.id,t.id,policy.workspace,{}]);
+  const handedOver=await applyHandover(db,{project,target:t.id,actor:a.id,assignments,handover,requestId:input.requestId});
   if(input.role==='LEADER' && leaders[0].userId!==t.id){
    // Native Change Leader semantics: previous Leader remains an Editor. Review pins both seats.
    await db.query(`UPDATE "ProjectMember" SET role='EDITOR' WHERE "projectId"=$1 AND "userId"=$2`,[project.id,leaders[0].userId]);
@@ -58,8 +60,8 @@ export async function changeWorkspaceProject(db,policy,input,unchanged=()=>true)
   if(input.role!=='revoke')expected.push({userId:t.id,role:input.role});expected.sort((a,b)=>a.userId.localeCompare(b.userId));
   if(after.length!==expected.length || !after.every(x=>expected.some(y=>x.userId===y.userId&&x.role===y.role)) || after.filter(x=>x.role==='LEADER').length!==1 || !unchanged())refuse();
   await db.query('INSERT INTO "AuditLog" (id,"actorId",event,"targetId",data,"createdAt") VALUES ($1,$2,$3,$4,$5,NOW())',[randomUUID(),a.id,'PORTAL_WORKSPACE_PROJECT_ROLE',t.id,{projectId:project.id,workspaceId:policy.workspace,role:input.role,requestId:input.requestId}]);
-  await db.query('INSERT INTO "ActionLog" (id,"actorId","projectId","targetType","targetId",action,"beforeState","afterState",channel) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',[randomUUID(),a.id,project.id,'member',t.id,'member.portal_role_changed',{role:mine?.role??null},{role:input.role,requestId:input.requestId},'SCREEN']);
-  const result={requestId:input.requestId,before,after};await db.query('UPDATE "PortalWorkspaceReceipt" SET result=$1 WHERE id=$2',[result,input.requestId]);
+  await db.query('INSERT INTO "ActionLog" (id,"actorId","projectId","targetType","targetId",action,"beforeState","afterState",channel) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',[randomUUID(),a.id,project.id,'member',t.id,'member.portal_role_changed',{role:mine?.role??null},{role:input.role,requestId:input.requestId,handover:handedOver},'SCREEN']);
+  const result={requestId:input.requestId,before,after,handover:handedOver};await db.query('UPDATE "PortalWorkspaceReceipt" SET result=$1 WHERE id=$2',[result,input.requestId]);
   await db.query('COMMIT');return result;
  }catch(e){await db.query('ROLLBACK').catch(()=>{});throw e;}
 }

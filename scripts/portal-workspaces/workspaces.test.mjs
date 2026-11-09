@@ -34,15 +34,16 @@ before(async()=>{
    CREATE TABLE "ProjectMember"("projectId" TEXT,"userId" TEXT,role "ProjectRole", PRIMARY KEY("projectId","userId"));
    CREATE TABLE "ActionLog"(id TEXT,"actorId" TEXT,channel TEXT,"projectId" TEXT,"targetType" TEXT,"targetId" TEXT,action TEXT,"beforeState" JSONB,"afterState" JSONB);
    CREATE TABLE "Section"(id TEXT PRIMARY KEY,"projectId" TEXT,name TEXT,position INTEGER);
-   CREATE TABLE "Task"(id TEXT PRIMARY KEY,"workspaceId" TEXT,"projectId" TEXT,"sectionId" TEXT,title TEXT,"assigneeId" TEXT,"approverId" TEXT,"createdById" TEXT,"updatedAt" TIMESTAMP);
+   CREATE TABLE "Task"(id TEXT PRIMARY KEY,"workspaceId" TEXT,"projectId" TEXT,"sectionId" TEXT,title TEXT,"assigneeId" TEXT,"approverId" TEXT,"createdById" TEXT,"updatedAt" TIMESTAMP,"completedAt" TIMESTAMP,"deletedAt" TIMESTAMP);
    CREATE TABLE "TaskCollaborator"("taskId" TEXT,"userId" TEXT);
+   CREATE TABLE "Notification"(id TEXT PRIMARY KEY,"recipientId" TEXT,"actorId" TEXT,type TEXT,"projectId" TEXT,data JSONB);
    CREATE TABLE "AuditLog"(id TEXT PRIMARY KEY,"actorId" TEXT,event TEXT,"targetId" TEXT,data JSONB,"createdAt" TIMESTAMP);`);
  }
  await db.query(readFileSync(new URL('../../prisma/migrations/20261109120000_additional_workspace_memberships/migration.sql',import.meta.url),'utf8'));
 });
 beforeEach(async()=>{if(!enabled)return;
  if(process.env.SHO_WORKSPACE_SCHEMA_FILE) await db.query("INSERT INTO \"WorkstreamType\" VALUES ('wst_project','project','Project') ON CONFLICT DO NOTHING");
- await db.query(`TRUNCATE "TaskCollaborator","Task","Section","Workspace","User","Session","Project","ProjectMember","ActionLog","AuditLog","WorkspaceMembership","SessionWorkspace","PortalWorkspaceReceipt" CASCADE;
+ await db.query(`TRUNCATE "Notification","TaskCollaborator","Task","Section","Workspace","User","Session","Project","ProjectMember","ActionLog","AuditLog","WorkspaceMembership","SessionWorkspace","PortalWorkspaceReceipt" CASCADE;
   INSERT INTO "Workspace"(id,name) VALUES ('home','Original'),('extra','Additional'),('foreign','Unassigned');
   INSERT INTO "User"(id,"workspaceId",email,name,"passwordHash","orgRole","emailVerifiedAt") VALUES
    ('reviewer','extra','reviewer@example.invalid','Reviewer','!synthetic!','SUPER_ADMIN',NOW()),
@@ -171,7 +172,7 @@ async function projectFixture(){
  INSERT INTO "ProjectMember"("projectId","userId",role) VALUES ('p','reviewer','LEADER');`);
 }
 async function projectPreview(role='EDITOR',extra={}){return projectChange(db,projectPolicy,{...input(),project:'p',role,operation:'preview',...extra});}
-async function projectApply(role='EDITOR',expected){return projectChange(db,projectPolicy,{...input(),project:'p',role,operation:'apply',requestId:randomUUID(),expected:expected??await projectPreview(role)});}
+async function projectApply(role='EDITOR',expected,handoverTo=null){return projectChange(db,projectPolicy,{...input(),project:'p',role,operation:'apply',requestId:randomUUID(),handoverTo,expected:expected??await projectPreview(role,{handoverTo})});}
 test('project flag, unknown scope/role and inspect writes deny before I/O',async()=>{
  const fake={query(){throw Error('Unexpected I/O')}};
  for(const [p,i] of [[{...projectPolicy,projectsEnabled:false},{}],[projectPolicy,{role:'SUPER_ADMIN'}],[projectPolicy,{project:'../bad'}],[projectPolicy,{role:'inspect',operation:'apply'}]])
@@ -240,4 +241,60 @@ test('project catalogue returns only pinned live projects in this workspace',opt
  const result=await projectPreview('list',{project:'catalogue'});assert.deepEqual(result.projects,[{id:'p',name:'Reviewed project'}]);
  await assert.rejects(projectPreview('EDITOR',{project:'hidden-p'}));
  await db.query(`UPDATE "Project" SET "archivedAt"=NOW() WHERE id='p'`);assert.deepEqual((await projectPreview('list',{project:'catalogue'})).projects,[]);
+});
+
+async function handoverFixture(){
+ await projectFixture();await projectApply('EDITOR');
+ await db.query(`INSERT INTO "User"(id,"workspaceId",email,name,"passwordHash","orgRole","emailVerifiedAt") VALUES ('taker','extra','taker@example.invalid','Taker','!synthetic!','MEMBER',NOW());
+ INSERT INTO "ProjectMember"("projectId","userId",role) VALUES ('p','taker','EDITOR');
+ INSERT INTO "Section"(id,"projectId",name,position) VALUES ('sec','p','Work',0);
+ INSERT INTO "Task"(id,"workspaceId","projectId","sectionId",title,"assigneeId","approverId","createdById","updatedAt","completedAt","deletedAt") VALUES
+ ('open','extra','p','sec','Open assigned work','target',NULL,'target',NOW(),NULL,NULL),
+ ('waiting','extra','p','sec','Awaiting approval','target','target','target',NOW(),NULL,NULL),
+ ('clear','extra','p','sec','Leader already holds','reviewer','target','target',NOW(),NULL,NULL),
+ ('approval','extra','p','sec','Other holder','taker','target','target',NOW(),NULL,NULL),
+ ('closed','extra','p','sec','Completed history','target','target','target',NOW(),NOW(),NULL),
+ ('trash','extra','p','sec','Trashed history','target',NULL,'target',NOW(),NULL,NOW());
+ INSERT INTO "TaskCollaborator"("taskId","userId") VALUES ('open','target'),('open','taker'),('closed','target');`);
+}
+const taskSnapshot=async()=> (await db.query('SELECT * FROM "Task" ORDER BY id')).rows;
+test('handover applies native holder approval history and collaboration semantics atomically',opt,async()=>{
+ await handoverFixture();const before=await taskSnapshot();const users=(await db.query('SELECT * FROM "User" ORDER BY id')).rows;
+ const p=await projectPreview('VIEWER',{handoverTo:'taker'});assert.equal(p.handover.changes.length,5);
+ const result=await projectApply('VIEWER',p,'taker');assert.deepEqual(result.handover,p.handover.changes);
+ let after=await taskSnapshot();
+ for(const row of after){const old=before.find(x=>x.id===row.id);const expected=p.handover.changes.find(x=>x.id===row.id);assert.deepEqual(row,{...old,...(expected?{assigneeId:expected.assigneeId,approverId:expected.approverId,updatedAt:row.updatedAt}:{})});}
+ const byId=Object.fromEntries(after.map(x=>[x.id,x]));
+ assert.equal(byId.open.assigneeId,'taker');assert.equal(byId.waiting.assigneeId,'reviewer');assert.equal(byId.waiting.approverId,'reviewer');
+ assert.equal(byId.clear.approverId,null);assert.equal(byId.approval.approverId,'reviewer');assert.equal(byId.closed.assigneeId,'target');assert.equal(byId.closed.approverId,'reviewer');assert.equal(byId.trash.assigneeId,'target');
+ assert.equal((await db.query(`SELECT count(*) FROM "TaskCollaborator" WHERE "userId"='target'`)).rows[0].count,'2');
+ await projectApply('revoke');assert.equal((await db.query(`SELECT count(*) FROM "TaskCollaborator" WHERE "userId"='target'`)).rows[0].count,'0');
+ assert.equal((await db.query(`SELECT count(*) FROM "TaskCollaborator" WHERE "userId"='taker'`)).rows[0].count,'1');
+ assert.deepEqual(await taskSnapshot(),after);assert.deepEqual((await db.query('SELECT * FROM "User" ORDER BY id')).rows,users);
+ assert.equal((await db.query(`SELECT count(*) FROM "Notification" WHERE "recipientId"='taker' AND type='TASKS_HANDED_OVER'`)).rows[0].count,'1');
+});
+test('handover missing self foreign viewer inactive and revoked-workspace recipients deny',opt,async()=>{
+ await handoverFixture();const before=await taskSnapshot();
+ for(const handoverTo of [null,'target','unrelated','missing'])await assert.rejects(projectPreview('revoke',{handoverTo}));
+ for(const [sql,reset] of [
+ [`UPDATE "ProjectMember" SET role='VIEWER' WHERE "userId"='taker'`,`UPDATE "ProjectMember" SET role='EDITOR' WHERE "userId"='taker'`],
+ [`UPDATE "User" SET "deactivatedAt"=NOW() WHERE id='taker'`,`UPDATE "User" SET "deactivatedAt"=NULL WHERE id='taker'`],
+ [`UPDATE "User" SET "emailVerifiedAt"=NULL WHERE id='taker'`,`UPDATE "User" SET "emailVerifiedAt"=NOW() WHERE id='taker'`],
+ [`UPDATE "User" SET "workspaceId"='foreign' WHERE id='taker'`,`UPDATE "User" SET "workspaceId"='extra' WHERE id='taker'`]]){await db.query(sql);await assert.rejects(projectPreview('revoke',{handoverTo:'taker'}));await db.query(reset);}
+ assert.deepEqual(await taskSnapshot(),before);
+});
+test('handover stale task recipient and collaboration proofs require fresh review',opt,async()=>{
+ await handoverFixture();
+ for(const sql of [`UPDATE "Task" SET title='Changed after review' WHERE id='open'`,`UPDATE "User" SET name='Changed taker' WHERE id='taker'`,`UPDATE "TaskCollaborator" SET "userId"="userId" WHERE "userId"='target'`]){
+  const plan=await projectPreview('revoke',{handoverTo:'taker'});await db.query(sql);await assert.rejects(projectApply('revoke',plan,'taker'));
+ }
+ assert.equal((await db.query(`SELECT role::text FROM "ProjectMember" WHERE "userId"='target'`)).rows[0].role,'EDITOR');
+});
+test('handover audit fault rolls back tasks collaborations role notices and receipt',opt,async()=>{
+ await handoverFixture();const tables=['Task','TaskCollaborator','ProjectMember','Notification','PortalWorkspaceReceipt'];
+ const snapshot=async()=>{const r={};for(const t of tables)r[t]=(await db.query(`SELECT row_to_json(x)::text value FROM "${t}" x ORDER BY row_to_json(x)::text`)).rows;return r;};
+ const before=await snapshot();
+ await db.query(`CREATE FUNCTION reject_handover_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event='PORTAL_WORKSPACE_PROJECT_ROLE' THEN RAISE EXCEPTION 'synthetic handover fault'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_handover_audit BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION reject_handover_audit()`);
+ try{await assert.rejects(projectApply('revoke',undefined,'taker'));assert.deepEqual(await snapshot(),before);}
+ finally{await db.query('DROP TRIGGER reject_handover_audit ON "AuditLog"; DROP FUNCTION reject_handover_audit()');}
 });
