@@ -90,6 +90,56 @@ async function phone(): Promise<{ ctx: BrowserContext; page: Page }> {
 }
 
 describe("phone comments", () => {
+  it("shows one private assignee bell notice for a colleague comment and none for an edit or the author", async () => {
+    const writer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const colleague = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const url = `/api/tasks/${taskId}/comments`;
+    const text = `ZZ-TEST feed comment ${RUN}`;
+    try {
+      for (const [ctx, who] of [[writer, made[0]], [colleague, made[1]]] as const) {
+        expect((await ctx.request.post("/api/auth/signin", { data: { email: who.email, password: PW } })).status()).toBe(200);
+      }
+      const notices = async (ctx: BrowserContext) => {
+        const r = await ctx.request.get("/api/notifications?limit=200");
+        expect(r.status()).toBe(200);
+        return (await r.json()).items as { id: string; text: string; href: string | null }[];
+      };
+      const writerBefore = new Set((await notices(writer)).map((n) => n.id));
+      const colleagueBefore = new Set((await notices(colleague)).map((n) => n.id));
+      const authorPage = await colleague.newPage();
+      await authorPage.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+      await authorPage.getByRole("dialog", { name: "Task", exact: true }).waitFor();
+      await authorPage.getByLabel("Add a comment").fill(text);
+      const [posted] = await Promise.all([
+        authorPage.waitForResponse((r) => r.url().endsWith(url) && r.request().method() === "POST"),
+        authorPage.getByRole("button", { name: "Add comment" }).click(),
+      ]);
+      expect(posted.status()).toBe(201);
+      const commentId = (await posted.json()).comment.id as string;
+      const newWriter = (await notices(writer)).filter((n) => !writerBefore.has(n.id));
+      expect(newWriter).toHaveLength(1);
+      expect(newWriter[0].text).toContain("commented on");
+      expect(newWriter[0].text).not.toContain(text);
+      expect(newWriter[0].href).toBe(`/tasks/${taskId}`);
+      expect((await notices(colleague)).filter((n) => !colleagueBefore.has(n.id))).toHaveLength(0);
+
+      const recipientPage = await writer.newPage();
+      await recipientPage.goto("/my-tasks", { waitUntil: "load" });
+      await recipientPage.getByRole("button", { name: /^Notifications/ }).click();
+      const bell = recipientPage.getByRole("dialog", { name: "Notifications" });
+      await bell.waitFor();
+      await bell.locator(".bell-row").filter({ hasText: newWriter[0].text }).first().waitFor();
+      expect((await bell.textContent()) ?? "").not.toContain(text);
+
+      expect((await colleague.request.patch(`${url}/${commentId}`, { data: { text: `${text} edited` } })).status()).toBe(200);
+      expect((await notices(writer)).filter((n) => !writerBefore.has(n.id)).map((n) => n.id)).toEqual([newWriter[0].id]);
+      expect((await notices(colleague)).filter((n) => !colleagueBefore.has(n.id))).toHaveLength(0);
+    } finally {
+      await writer.close();
+      await colleague.close();
+    }
+  });
+
   it("feature OFF hides an existing comment from routes, task UI and search without deleting it", async () => {
     expect(app, "the default fixture server must have comments OFF; the second server has them ON").not.toBe(BASE);
     const on = await browser.newContext({ baseURL: app });
