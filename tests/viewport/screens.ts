@@ -3,14 +3,15 @@ export const WIDTHS = [320, 360, 390, 414, 599, 768] as const;
 export const PHONE_MAX = 600; // under this width the 44 px and 16 px rules apply
 export const TASK_TITLE = "Prepare the quarterly review pack with the finance team";
 
-export type Ids = { project: string; task: string; deal: string; org: string };
-export type Screen = { name: string; path: (ids: Ids) => string; as?: "root" | "viewer"; public?: boolean; wait?: string; heading?: string; taskPanel?: boolean; taskPage?: boolean; canonical?: (ids: Ids) => string };
+export type Ids = { project: string; task: string; deal: string; org: string; person: string; personName: string };
+export type Screen = { name: string; path: (ids: Ids) => string; as?: "root" | "viewer"; public?: boolean; wait?: string; heading?: string | ((ids: Ids) => string); taskPanel?: boolean; taskPage?: boolean; canonical?: (ids: Ids) => string };
 
 export const SCREENS: Screen[] = [
   { name: "Sign in", path: () => "/signin", public: true },
   { name: "Sign up", path: () => "/signup", public: true },
   { name: "Forgot password", path: () => "/forgot", public: true },
   { name: "Home", path: () => "/", heading: "Your workspace" },
+  { name: "Approvals", path: () => "/approvals", heading: "Your approvals" },
   { name: "My tasks", path: () => "/my-tasks", heading: "My tasks" },
   { name: "My tasks with task panel", path: (i) => `/my-tasks?task=${i.task}`, taskPanel: true },
   { name: "Projects", path: () => "/projects" },
@@ -25,6 +26,7 @@ export const SCREENS: Screen[] = [
   { name: "Task page", path: (i) => `/tasks/${i.task}`, taskPage: true, canonical: (i) => `/projects/${i.project}?task=${i.task}` },
   { name: "Workload", path: () => "/workload", wait: ".workload tbody tr" },
   { name: "Team", path: () => "/team" },
+  { name: "Person", path: (i) => `/team/${i.person}`, heading: (i) => i.personName },
   { name: "Search", path: () => "/search" },
   { name: "Profile", path: () => "/profile" },
   { name: "Deals", path: () => "/deals" },
@@ -34,5 +36,6 @@ export const SCREENS: Screen[] = [
   { name: "Accounts", path: () => "/accounts" },
   { name: "Account", path: (i) => `/accounts/${i.org}` },
   { name: "Pipeline review", path: () => "/review" },
+  { name: "Pipeline reporting", path: () => "/review/reporting", heading: "Reporting" },
   { name: "Audit log", path: () => "/audit" },
 ];

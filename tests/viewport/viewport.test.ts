@@ -45,7 +45,7 @@ beforeAll(async () => {
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
   ownedProjects.push((d.json.deal?.id ?? d.json.project?.id) as string);
-  ids = { project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId };
+  ids = { project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId, person: editor.id, personName: editor.name };
 }, 60000);
 afterAll(async () => {
   await finishViewportFixture(
