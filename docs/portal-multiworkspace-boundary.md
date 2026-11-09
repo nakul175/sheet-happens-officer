@@ -82,3 +82,26 @@ roster and assignments, compares the entire reviewed proof, and atomically commi
 membership, receipt, native action history and audit. Audit failure rolls back the
 membership. Uncertain Portal dispatches block further SHO changes until reconciled.
 No new migration is required beyond the stacked workspace foundation.
+
+### Explicit project task handover (staging candidate)
+
+Additional-workspace project downgrade/removal can now review an explicit active
+Leader/Editor recipient. The signed Portal review pins task revisions, target
+collaborations, recipient account/project/workspace revisions and the full role
+roster. No recipient is inferred from email. Missing/ineligible recipients,
+new/changed work, inactive Leader duties, creator overrides and last-Leader
+removal fail closed.
+
+The same SERIALIZABLE transaction implements native `releasePerson` semantics:
+open assigned work goes to the selected recipient; approval duties go to the
+Leader (including the awaiting-approval holder/clear cases); completed/deleted
+assignee history is preserved. Viewer retains collaborations; removal drops
+only that person's collaboration rows in this project. Full task readback
+preserves content, status, hierarchy and other fields, except reviewed holder,
+approver and the native updated timestamp. Other collaborators, original
+accounts/workspaces and sessions remain unchanged. Audit, notices, receipt and
+role change commit together or roll back together. This is project handover,
+not automatic whole-workspace ownership transfer.
+
+No new schema migration or default-enabled gate. Existing private workspace and
+project writer gates remain required. Production is unchanged.
