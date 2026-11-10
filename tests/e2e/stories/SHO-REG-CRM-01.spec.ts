@@ -65,12 +65,27 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, role denial, duplicate, 
   expect((await member.c.get(`/api/orgs/${id}`)).status).toBe(200);
   expect((await member.c.patch(`/api/orgs/${id}`, { country: 'Unauthorised' })).status).toBe(403);
   expect((await member.c.post(`/api/orgs/${id}/archive`, { archive: true })).status).toBe(403);
+  const ownName = zz('member-owned organisation');
+  const ownCreated = await member.c.post('/api/orgs', { name: ownName });
+  expect(ownCreated.status, JSON.stringify(ownCreated.json)).toBe(201);
+  const ownId = ownCreated.json.organisation.id as string;
+  owned.push(ownId);
+  await archiveAtCleanup(ownId);
+  expect((await member.c.patch(`/api/orgs/${ownId}`, { country: 'India' })).status).toBe(200);
+  expect((await member.c.get(`/api/orgs/${ownId}`)).json.organisation.country).toBe('India');
   const memberSession = await signInAs(browser, member.email, PW);
   try {
     await memberSession.page.goto(`/accounts/${id}`);
     await expect(memberSession.page.getByRole('heading', { name })).toBeVisible();
     await expect(memberSession.page.getByRole('button', { name: 'Edit organisation' })).toHaveCount(0);
+    await memberSession.page.goto(`/accounts/${ownId}`);
+    await expect(memberSession.page.getByRole('heading', { name: ownName })).toBeVisible();
+    await expect(memberSession.page.getByRole('button', { name: 'Edit organisation' })).toBeVisible();
   } finally { await memberSession.ctx.close(); }
+  expect((await member.c.post(`/api/orgs/${ownId}/archive`, { archive: true })).status).toBe(200);
+  expect((await member.c.get(`/api/orgs/${ownId}`)).json.organisation.archived).toBe(true);
+  expect((await member.c.post(`/api/orgs/${ownId}/archive`, { archive: false })).status).toBe(200);
+  expect((await member.c.get(`/api/orgs/${ownId}`)).json.organisation.archived).toBe(false);
   const afterDenied = await admin.api.get(`/api/orgs/${id}`);
   expect(createHash('sha256').update(JSON.stringify(afterDenied.json.organisation)).digest('hex')).toBe(roleFingerprint);
 
@@ -143,5 +158,5 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, role denial, duplicate, 
 
   const sentinelAfter = (await admin.api.get(`/api/orgs/${sentinelId}`)).json.organisation;
   expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(fingerprint);
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, id, dealId, sentinelId, created: true, edited: true, memberRead: true, memberWritesDenied: true, memberEditControlHidden: true, roleFingerprintPreserved: true, duplicateRefused: true, invalidIdsHidden: true, editUndo: true, archiveUndo: true, buyerLinkPreservedThroughArchiveUndo: true, sentinelFingerprint: fingerprint, sentinelPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, id, ownId, dealId, sentinelId, created: true, edited: true, memberRead: true, memberWritesDenied: true, memberEditControlHidden: true, memberOwnedEditAndArchive: true, roleFingerprintPreserved: true, duplicateRefused: true, invalidIdsHidden: true, editUndo: true, archiveUndo: true, buyerLinkPreservedThroughArchiveUndo: true, sentinelFingerprint: fingerprint, sentinelPreserved: true }, null, 2));
 });
