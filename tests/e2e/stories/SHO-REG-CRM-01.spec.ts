@@ -2,9 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { local2691, test } from '../helpers/2691-admin';
 import { raw } from '../helpers/jim-http';
-import { expect, zz } from './qa';
+import { account, PW } from '../local-api';
+import { expect, signInAs, zz } from './qa';
 
-test('SHO-REG-CRM-01 scoped: organisation create, edit, duplicate, archive Undo and unrelated control', async ({ admin, later }) => {
+test('SHO-REG-CRM-01 scoped: organisation create, edit, role denial, duplicate, archive Undo and unrelated control', async ({ admin, later, browser }) => {
   if (!local2691) throw new Error('This organisation audit fixture requires the guarded local test database.');
   test.setTimeout(180_000);
   const fixture = randomUUID();
@@ -54,6 +55,25 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, duplicate, archive Undo 
   owned.push(id);
   await archiveAtCleanup(id);
 
+  const member = await account(zz('organisation member'), `nakul17+zz-crm-01-${fixture}@aplyd.com`);
+  later(async () => {
+    expect((await admin.api.post(`/api/team/${member.id}/deactivate`, { reassign: 'leaders' })).status).toBe(200);
+  });
+  const beforeDenied = await admin.api.get(`/api/orgs/${id}`);
+  expect(beforeDenied.status).toBe(200);
+  const roleFingerprint = createHash('sha256').update(JSON.stringify(beforeDenied.json.organisation)).digest('hex');
+  expect((await member.c.get(`/api/orgs/${id}`)).status).toBe(200);
+  expect((await member.c.patch(`/api/orgs/${id}`, { country: 'Unauthorised' })).status).toBe(403);
+  expect((await member.c.post(`/api/orgs/${id}/archive`, { archive: true })).status).toBe(403);
+  const memberSession = await signInAs(browser, member.email, PW);
+  try {
+    await memberSession.page.goto(`/accounts/${id}`);
+    await expect(memberSession.page.getByRole('heading', { name })).toBeVisible();
+    await expect(memberSession.page.getByRole('button', { name: 'Edit organisation' })).toHaveCount(0);
+  } finally { await memberSession.ctx.close(); }
+  const afterDenied = await admin.api.get(`/api/orgs/${id}`);
+  expect(createHash('sha256').update(JSON.stringify(afterDenied.json.organisation)).digest('hex')).toBe(roleFingerprint);
+
   await admin.page.goto(`/accounts/${id}`);
   await admin.page.getByRole('button', { name: 'Edit organisation' }).click();
   const edit = admin.page.getByRole('dialog', { name: 'Edit organisation' });
@@ -95,5 +115,5 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, duplicate, archive Undo 
 
   const sentinelAfter = (await admin.api.get(`/api/orgs/${sentinelId}`)).json.organisation;
   expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(fingerprint);
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, id, sentinelId, created: true, edited: true, duplicateRefused: true, invalidIdsHidden: true, editUndo: true, archiveUndo: true, sentinelFingerprint: fingerprint, sentinelPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, id, sentinelId, created: true, edited: true, memberRead: true, memberWritesDenied: true, memberEditControlHidden: true, roleFingerprintPreserved: true, duplicateRefused: true, invalidIdsHidden: true, editUndo: true, archiveUndo: true, sentinelFingerprint: fingerprint, sentinelPreserved: true }, null, 2));
 });
