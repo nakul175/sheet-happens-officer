@@ -102,6 +102,32 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, role denial, duplicate, 
   expect((await admin.api.post(`/api/actions/${editUndo}/undo`, { anyway: false })).status).toBe(200);
   expect((await admin.api.get(`/api/orgs/${id}`)).json.organisation.country).toBe('Kenya');
 
+  const pipelines = await admin.api.get('/api/deals/pipelines');
+  expect(pipelines.status).toBe(200);
+  const pipeline = (pipelines.json.pipelines as { id: string; key: string }[]).find(row => row.key === 'DEAL_PROACTIVE');
+  expect(pipeline).toBeDefined();
+  const deal = await admin.api.post('/api/deals', {
+    name: zz('organisation reference deal'), organisationId: id, pipelineId: pipeline!.id,
+    leaderId: admin.user.id, whyPursue: 'ZZ-TEST reference preservation',
+    nextStep: { title: zz('organisation reference step'), dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) },
+  });
+  expect(deal.status, JSON.stringify(deal.json)).toBe(201);
+  const dealId = deal.json.deal.id as string;
+  later(async () => {
+    const loaded = await admin.api.get(`/api/projects/${dealId}`);
+    expect(loaded.status).toBe(200);
+    if (!loaded.json.project.archived)
+      expect((await admin.api.post(`/api/projects/${dealId}/archive`)).status).toBe(200);
+  });
+  async function assertBuyerLink() {
+    const loaded = await admin.api.get(`/api/projects/${dealId}`);
+    expect(loaded.status).toBe(200);
+    expect(loaded.json.project.deal.organisation).toMatchObject({ id, name: renamed });
+    expect(loaded.json.project.deal.parties.filter((party: { role: string }) => party.role === 'BUYER'))
+      .toEqual([expect.objectContaining({ organisation: expect.objectContaining({ id, name: renamed }) })]);
+  }
+  await assertBuyerLink();
+
   const archived = await raw(admin, 'POST', `/api/orgs/${id}/archive`, { archive: true });
   expect(archived.status).toBe(200);
   const archiveUndo = archived.headers['x-undo-id'];
@@ -109,11 +135,13 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, role denial, duplicate, 
   await admin.page.reload();
   await expect(admin.page.getByText('This organisation is archived.')).toBeVisible();
   await admin.page.screenshot({ path: `${evidenceDir}/archived.png`, fullPage: true });
+  await assertBuyerLink();
   expect((await admin.api.post(`/api/actions/${archiveUndo}/undo`, { anyway: false })).status).toBe(200);
   expect((await admin.api.get(`/api/orgs/${id}`)).json.organisation.archived).toBe(false);
+  await assertBuyerLink();
   expect((await admin.api.get(`/api/orgs?q=${encodeURIComponent(renamed)}`)).json.organisations.filter((org: { name: string }) => org.name === renamed)).toHaveLength(1);
 
   const sentinelAfter = (await admin.api.get(`/api/orgs/${sentinelId}`)).json.organisation;
   expect(createHash('sha256').update(JSON.stringify(sentinelAfter)).digest('hex')).toBe(fingerprint);
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, id, sentinelId, created: true, edited: true, memberRead: true, memberWritesDenied: true, memberEditControlHidden: true, roleFingerprintPreserved: true, duplicateRefused: true, invalidIdsHidden: true, editUndo: true, archiveUndo: true, sentinelFingerprint: fingerprint, sentinelPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, id, dealId, sentinelId, created: true, edited: true, memberRead: true, memberWritesDenied: true, memberEditControlHidden: true, roleFingerprintPreserved: true, duplicateRefused: true, invalidIdsHidden: true, editUndo: true, archiveUndo: true, buyerLinkPreservedThroughArchiveUndo: true, sentinelFingerprint: fingerprint, sentinelPreserved: true }, null, 2));
 });
