@@ -10,7 +10,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
  if(![database,base].every(u=>['localhost','127.0.0.1'].includes(u.hostname))||database.pathname!='/sho_test')throw Error('DISPOSABLE_LOOPBACK_FIXTURE_REQUIRED');
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
  const raw=randomBytes(32).toString('base64url');
- const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealList?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
+ const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
  let created=false;
  const originalProjects=await db.project.count(),originalUsers=await db.user.count();
  const read=async(route:string)=>{
@@ -67,6 +67,20 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
     expect(seen.size).toBe(1000);
     expect(pages).toBe(40);
     report.dealPaging={pages,uniqueDealIds:seen.size,exactTotal:1000};
+    const cursorRow=first.groups!.needsNextStep.items[24].id;
+    const pageUrl=new URL(`/api/my-tasks?v=2&group=needsNextStep&cursor=${encodeURIComponent(first.groups!.needsNextStep.nextCursor!)}`,base);
+    const beforeArchive=await fetch(pageUrl,{headers:{cookie:'sho_session='+raw}});
+    expect(beforeArchive.status).toBe(200);
+    const beforePage=await beforeArchive.json() as {page:{items:{id:string}[]}};
+    await db.project.update({where:{id:cursorRow},data:{archivedAt:new Date()}});
+    const afterArchive=await fetch(pageUrl,{headers:{cookie:'sho_session='+raw}});
+    expect(afterArchive.status).toBe(200);
+    const afterPage=await afterArchive.json() as {page:{items:{id:string}[];total:number}};
+    expect(afterPage.page.total).toBe(999);
+    expect(afterPage.page.items[0]?.id).toBe(beforePage.page.items[0]?.id);
+    expect(afterPage.page.items.some(row=>row.id===cursorRow)).toBe(false);
+    await db.project.update({where:{id:cursorRow},data:{archivedAt:null}});
+    report.dealCursorAfterArchive=true;
    }
   }
   // Populate the previously empty deals only after the approved My Tasks gate.

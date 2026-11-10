@@ -33,7 +33,7 @@ function decodeCursor(raw: string | null, group: MyTasksGroup, userId: string, f
   try {
     const value = JSON.parse(Buffer.from(payload, "base64url").toString()) as Cursor;
     if (value.group !== group || value.userId !== userId || value.filter !== filter || typeof value.id !== "string" || !value.id) throw invalidCursor();
-    if (group === "waitingOnOthers" && (typeof value.createdAt !== "string" || !(value.dueDate === null || typeof value.dueDate === "string"))) throw invalidCursor();
+    if (group !== "needsNextStep" && (typeof value.createdAt !== "string" || !(value.dueDate === null || typeof value.dueDate === "string"))) throw invalidCursor();
     return value;
   } catch { throw invalidCursor(); }
 }
@@ -105,14 +105,21 @@ function shape(user: Actor, task: SelectedTask, since: Map<string, Date>, now: n
 async function ordinaryPage(tx: Tx, user: Actor, group: (typeof TASK_GROUPS)[number], limit: number, cursor: Cursor | null, today: Date, weekEnd: Date, now: number, overdueOnly: boolean) {
   const where = taskWhere(user, group, today, weekEnd, overdueOnly);
   const total = await tx.task.count({ where });
-  const rows = await tx.task.findMany({ where, select: { ...select, project: { ...select.project, select: { ...select.project.select, members: { select: { role: true }, where: { userId: user.id } } } } }, orderBy: [...orderBy], take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor.id }, skip: 1 } : {}) });
+  const after: Prisma.TaskWhereInput | null = !cursor ? null : cursor.dueDate === null
+    ? { dueDate: null, OR: [{ createdAt: { gt: new Date(cursor.createdAt!) } }, { createdAt: new Date(cursor.createdAt!), id: { gt: cursor.id } }] }
+    : { OR: [
+      { dueDate: { gt: new Date(cursor.dueDate!) } }, { dueDate: null },
+      { dueDate: new Date(cursor.dueDate!), OR: [{ createdAt: { gt: new Date(cursor.createdAt!) } }, { createdAt: new Date(cursor.createdAt!), id: { gt: cursor.id } }] },
+    ] };
+  // Keyset comparison still works when the row that issued the cursor is later
+  // moved, completed or deleted; Prisma's row cursor silently drops that page.
+  const rows = await tx.task.findMany({ where: after ? { AND: [where, after] } : where, select: { ...select, project: { ...select.project, select: { ...select.project.select, members: { select: { role: true }, where: { userId: user.id } } } } }, orderBy: [...orderBy], take: limit + 1 });
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
   const since = group === "waitingOnMe" ? await waitingSince(tx, page.map(row => row.id)) : new Map<string, Date>();
   const last = page.at(-1);
   return { items: page.map(row => shape(user, row, since, now)), total, hasMore,
-    nextCursor: hasMore && last ? encodeCursor({ group, userId: user.id, id: last.id, ...(overdueOnly ? { filter: "overdue" as const } : {}) }) : null };
+    nextCursor: hasMore && last ? encodeCursor({ group, userId: user.id, id: last.id, dueDate: last.dueDate?.toISOString() ?? null, createdAt: last.createdAt.toISOString(), ...(overdueOnly ? { filter: "overdue" as const } : {}) }) : null };
 }
 
 async function othersPage(tx: Tx, user: Actor, limit: number, cursor: Cursor | null, now: number) {
@@ -149,8 +156,7 @@ async function needsStepPage(tx: Tx, user: Actor, limit: number, cursor: Cursor 
   // project-lookup-ok: The where clause requires the actor's LEADER membership and a working, unarchived deal; CRM visibility was checked above.
   const total = await tx.project.count({ where });
   // project-lookup-ok: The same actor-scoped where clause bounds the visible page; the signed cursor cannot widen it.
-  const rows = await tx.project.findMany({ where, orderBy: { id: "asc" }, take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor.id }, skip: 1 } : {}),
+  const rows = await tx.project.findMany({ where: cursor ? { AND: [where, { id: { gt: cursor.id } }] } : where, orderBy: { id: "asc" }, take: limit + 1,
     select: { id: true, name: true, stage: { select: { name: true } } } });
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
