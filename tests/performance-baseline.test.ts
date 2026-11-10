@@ -30,10 +30,10 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
    await db.task.createMany({data:Array.from({length:100},(_,t)=>({workspaceId:workspaces[0].id,projectId:p.id,sectionId:p.sections.find(s=>s.name==='To do')!.id,title:`${id} task ${n}-${t}`,assigneeId:id,createdById:id,dueDate:new Date()}))});
   }
   expect(await db.task.count({where:{projectId:{in:projectIds}}})).toBe(10000);
-  const workingStage=await db.stage.findFirst({where:{category:'ACTIVE'},select:{id:true}});
+  const workingStage=await db.stage.findFirst({where:{category:'ACTIVE',pipeline:{typeId:'wst_deal'}},select:{id:true,pipelineId:true}});
   expect(workingStage,'the seeded disposable database must have an active deal stage').toBeTruthy();
   for(let n=0;n<1000;n++)dealIds.push(`${id}-deal-${n}`);
-  await db.project.createMany({data:dealIds.map((dealId,n)=>({id:dealId,workspaceId:workspaces[0].id,name:`${id} deal ${n}`,typeId:'wst_deal',stageId:workingStage!.id}))});
+  await db.project.createMany({data:dealIds.map((dealId,n)=>({id:dealId,workspaceId:workspaces[0].id,name:`${id} deal ${n}`,typeId:'wst_deal',pipelineId:workingStage!.pipelineId,stageId:workingStage!.id}))});
   await db.projectMember.createMany({data:dealIds.map(dealId=>({projectId:dealId,userId:id,role:'LEADER'}))});
   expect(await db.project.count({where:{id:{in:dealIds}}})).toBe(1000);
   for(const route of ['/api/projects','/api/my-tasks','/api/my-tasks?v=2','/api/search?q='+id,'/api/projects/'+projectIds[0]]){
