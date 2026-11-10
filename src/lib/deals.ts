@@ -1,7 +1,7 @@
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
 import { createHash } from "node:crypto";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { isActive, isAdmin, projectAccess, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
@@ -445,10 +445,16 @@ export async function dealSignals(projects: SummaryProject[]) {
   const none = new Map<string, { nextStep: { id: string; title: string; dueDate: string } | null; lastActivity: Date }>();
   if (!ids.length) return none;
   const [tasks, logs, taskTouch, notes] = await Promise.all([
-    db.task.findMany({
-      where: { projectId: { in: ids }, deletedAt: null, completedAt: null, parentId: null, dueDate: { not: null } },
-      orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }], select: { id: true, title: true, dueDate: true, projectId: true },
-    }),
+    // A deal needs only its first dated open task. Keep the old due/created
+    // ordering while bounding the rows returned to one per visible deal.
+    db.$queryRaw<{ id: string; title: string; dueDate: Date; projectId: string }[]>(Prisma.sql`
+      SELECT DISTINCT ON ("projectId") "id", "title", "dueDate", "projectId"
+      FROM "Task"
+      WHERE "projectId" IN (${Prisma.join(ids)})
+        AND "deletedAt" IS NULL AND "completedAt" IS NULL
+        AND "parentId" IS NULL AND "dueDate" IS NOT NULL
+      ORDER BY "projectId", "dueDate" ASC, "createdAt" ASC, "id" ASC
+    `),
     db.actionLog.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, action: { not: "undo" } }, _max: { createdAt: true } }),
     db.task.groupBy({ by: ["projectId"], where: { projectId: { in: ids } }, _max: { updatedAt: true } }),
     db.note.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, removedAt: null }, _max: { createdAt: true } }),

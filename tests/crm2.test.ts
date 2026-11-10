@@ -1,6 +1,7 @@
 // CRM slice 2: next step notices (12.5), parties (12.4), board data (12.6 AC2, AC3, AC6).
 import { describe, expect, it } from "vitest";
 import { account, istDate, task, type Account, patchTask, withVersion } from "./helpers";
+import { db } from "@/lib/db";
 
 let seq = 0;
 async function setup(leader: Account, bid = false) {
@@ -20,6 +21,19 @@ const notices = async (a: Account, id: string) =>
   ((await a.c.get("/api/notifications")).json.items as { text: string; href: string }[]).filter((n) => /needs a next step/.test(n.text) && n.href.includes(id));
 
 describe("next step notices (12.5)", () => {
+  it("keeps the earliest next step with many eligible tasks on one deal", async () => {
+    const lead = await account("nsbounded");
+    const d = await setup(lead);
+    const seed = await db.task.findUniqueOrThrow({ where: { id: (await d.nextId())! } });
+    await db.task.createMany({ data: Array.from({ length: 120 }, (_, n) => ({
+      workspaceId: seed.workspaceId, projectId: d.id, sectionId: seed.sectionId,
+      title: `ZZ-TEST later next step ${n}`, assigneeId: lead.id, createdById: lead.id,
+      dueDate: new Date(istDate(9)),
+    })) });
+    const earliest = await task(lead, d.id, { title: "ZZ-TEST earliest next step", dueDate: istDate(1) });
+    expect(await d.nextId()).toBe(earliest);
+    expect((await lead.c.get(`/api/projects/${d.id}`)).json.project.deal.nextStep.id).toBe(earliest);
+  });
   it("notifies the Leader once when the last dated task is completed, and flags the deal", async () => {
     const lead = await account("nslead");
     const d = await setup(lead);
