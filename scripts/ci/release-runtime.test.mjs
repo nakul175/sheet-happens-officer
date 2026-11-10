@@ -13,6 +13,7 @@ function exercise(failure='') {
   writeFileSync(path.join(prev,'COMMIT'),'b'.repeat(40));
   mkdirSync(path.join(prev,'deploy'));writeFileSync(path.join(prev,'deploy','verify-release.mjs'),'// synthetic previous verifier\n');
   mkdirSync(path.join(rel,'deploy'));writeFileSync(path.join(rel,'deploy','verify-previous-release.mjs'),'// synthetic fallback verifier\n');
+  writeFileSync(path.join(rel,'deploy','verify-release.mjs'),'// synthetic candidate verifier\n');
   if(failure==='candidate-symlink'){rmSync(rel,{recursive:true});symlinkSync(prev,rel);}
   if(failure==='previous-outside'){
    const outside=path.join(dir,'outside-release');mkdirSync(outside);writeFileSync(path.join(outside,'COMMIT'),'b'.repeat(40));
@@ -35,6 +36,15 @@ function exercise(failure='') {
    const outside=path.join(dir,'outside-fallback-deploy');mkdirSync(outside);
    writeFileSync(path.join(outside,'verify-previous-release.mjs'),'// synthetic outside fallback\n');
    unlinkSync(path.join(prev,'deploy','verify-release.mjs'));
+   rmSync(path.join(rel,'deploy'),{recursive:true});symlinkSync(outside,path.join(rel,'deploy'));
+  }
+  if(failure==='candidate-verifier-symlink'){
+   unlinkSync(path.join(rel,'deploy','verify-release.mjs'));
+   symlinkSync(path.join(prev,'COMMIT'),path.join(rel,'deploy','verify-release.mjs'));
+  }
+  if(failure==='candidate-deploy-symlink'){
+   const outside=path.join(dir,'outside-candidate-deploy');mkdirSync(outside);
+   for(const name of ['verify-release.mjs','verify-previous-release.mjs'])writeFileSync(path.join(outside,name),'// synthetic outside verifier\n');
    rmSync(path.join(rel,'deploy'),{recursive:true});symlinkSync(outside,path.join(rel,'deploy'));
   }
   writeFileSync(path.join(dir,'app.env'),'DATABASE_URL=postgresql://synthetic@127.0.0.1:1/unused\nDIRECT_DATABASE_URL=postgresql://synthetic-admin@127.0.0.1:1/unused\nUNKNOWN_SENTINEL=preserve-me\n');
@@ -78,7 +88,7 @@ test('invalid revision executes no install/build/service commands',()=>{
  const r=exercise('revision');assert.equal(r.status,1,r.output);assert.equal(r.calls.length,0);assert.equal(r.current,r.previous);
 });
 
-for(const failure of ['candidate-symlink','previous-outside','previous-mismatch','previous-verifier-symlink','previous-deploy-symlink','fallback-missing','fallback-symlink','fallback-deploy-symlink','precut-verification']){
+for(const failure of ['candidate-symlink','candidate-verifier-symlink','candidate-deploy-symlink','previous-outside','previous-mismatch','previous-verifier-symlink','previous-deploy-symlink','fallback-missing','fallback-symlink','fallback-deploy-symlink','precut-verification']){
  test(`${failure} refuses build and service changes before switch`,()=>{
   const r=exercise(failure);assert.equal(r.status,1,r.output);
   assert.equal(r.calls.some(c=>['npm','npx','sudo','mv'].includes(c.cmd)),false,r.output);

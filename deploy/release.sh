@@ -50,6 +50,8 @@ trap recover ERR
 
 [ -d "$ROOT/releases" ] && [ ! -L "$ROOT/releases" ] || { echo "Release parent is missing or symlinked"; exit 1; }
 [ -d "$REL" ] && [ ! -L "$REL" ] && [ "$(readlink -f "$REL")" = "$REL" ] || { echo "Release folder is missing or resolves outside its reserved path"; exit 1; }
+[ -f "$REL/deploy/verify-release.mjs" ] && [ ! -L "$REL/deploy/verify-release.mjs" ] &&
+  [ "$(readlink -f "$REL/deploy/verify-release.mjs")" = "$REL/deploy/verify-release.mjs" ] || { echo "Candidate release verifier is missing or outside its release"; exit 1; }
 [ -f /etc/sho/app.env ] || { echo "/etc/sho/app.env is missing"; exit 1; }
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 [ "$PREV" != "$REL" ] || { echo "Refusing to rebuild the active release"; exit 1; }
