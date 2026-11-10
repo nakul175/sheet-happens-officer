@@ -454,10 +454,11 @@ describe("keyboard", () => {
     const firstLoad = page.waitForResponse(r => new URL(r.url()).pathname === "/api/my-tasks" && r.ok());
     await page.goto("/my-tasks", { waitUntil: "load" });
     await firstLoad;
-    await page.getByText("Prepare the quarterly review pack with the finance team", { exact: true }).first().waitFor();
+    await page.getByRole("heading", { name: "My tasks", exact: true }).waitFor();
+    await page.getByRole("region", { name: "Next 7 days", exact: true }).waitFor();
     await page.evaluate(() => { (window as unknown as { __kept: number }).__kept = 1; });
     let aborted = 0;
-    await page.route("**/api/my-tasks", r => { aborted++; return r.abort(); });
+    await page.route("**/api/my-tasks*", r => { aborted++; return r.abort(); });
     await page.getByRole("button", { name: "Open menu", exact: true }).click();
     await page.locator('.side.open a[href="/projects"]').click();
     // Finish leaving My tasks before returning; rapid clicks may coalesce navigation
@@ -469,12 +470,12 @@ describe("keyboard", () => {
     await page.waitForURL(new URL("/my-tasks", BASE).href);
     await page.getByText("Could not reach the server.").waitFor();
     expect(aborted, "the intended API failure must actually have been injected").toBeGreaterThan(0);
-    await page.unroute("**/api/my-tasks");
+    await page.unroute("**/api/my-tasks*");
     const recovered = page.waitForResponse(r => new URL(r.url()).pathname === "/api/my-tasks" && r.ok());
     await page.getByRole("button", { name: "Retry" }).click();
     await recovered;
     await page.getByText("Could not reach the server.").waitFor({ state: "detached" });
-    await page.getByText("Prepare the quarterly review pack with the finance team", { exact: true }).first().waitFor();
+    await page.getByRole("region", { name: "Next 7 days", exact: true }).waitFor();
     expect(await page.evaluate(() => (window as unknown as { __kept?: number }).__kept)).toBe(1);
     await ctx.close();
   });
@@ -483,7 +484,7 @@ describe("keyboard", () => {
     const page = await ctx.newPage();
     await page.goto("/projects", { waitUntil: "load" });
     await page.waitForSelector("main#main");
-    await page.route("**/api/my-tasks", async (r) => { await new Promise((x) => setTimeout(x, 1500)); await r.continue(); });
+    await page.route("**/api/my-tasks*", async (r) => { await new Promise((x) => setTimeout(x, 1500)); await r.continue(); });
     await page.getByRole("button", { name: "Open menu", exact: true }).click();
     await page.locator('.side.open a[href="/my-tasks"]').click();
     await page.waitForSelector(".skel-wrap");

@@ -80,7 +80,8 @@ test("AC3: a task in a project I was removed from, or an archived project, no lo
 
 test("AC4: with no assigned tasks a clear empty state shows", async ({ admin }) => {
   // A live account may hold tasks, so the empty list is served to the page by intercepting the one request.
-  await admin.page.route("**/api/my-tasks*", (route) => route.fulfill({ json: { waitingOnMe: [], waitingOnOthers: [], overdue: [], next7: [], later: [], needsNextStep: [] } }));
+  const empty = { items: [], total: 0, hasMore: false, nextCursor: null };
+  await admin.page.route("**/api/my-tasks*", (route) => route.fulfill({ json: { version: 2, groups: { waitingOnMe: empty, waitingOnOthers: empty, overdue: empty, next7: empty, later: empty, needsNextStep: empty } } }));
   await admin.page.goto("/my-tasks");
   await expect(admin.page.getByText("Nothing on your plate.")).toBeVisible();
   await expect(admin.page.getByText("Tasks assigned to you, or that you collaborate on, show up here.")).toBeVisible();

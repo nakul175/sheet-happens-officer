@@ -233,9 +233,20 @@ const strip = (x: Awaited<ReturnType<typeof surfaces>>) => { const { plainShown,
 async function myTasksScreen(mode: Mode, who: Who, waitFor: string, project: string) {
   const page = await pageAs(mode, who);
   try {
+    const initial = page.waitForResponse(response => new URL(response.url()).pathname === "/api/my-tasks" && new URL(response.url()).searchParams.get("v") === "2");
     await page.goto(`${server(mode).base}/my-tasks`, { waitUntil: "domcontentloaded" });
+    const initialResponse = await initial;
+    expect(initialResponse.status(), await initialResponse.text()).toBe(200);
     // The task's row in its own list section. The concierge panel can link the same task, so the page as a whole is not enough.
     const row = (section: string) => page.getByRole("region", { name: section, exact: true }).getByRole("link", { name: waitFor, exact: true });
+    // The fixture can fall beyond the first 25 rows in a shared test database.
+    for (let pageIndex = 0; pageIndex < 20 && await row("Next 7 days").count() === 0; pageIndex++) {
+      const more = page.getByRole("button", { name: "Load more next 7 days" });
+      if (await more.count() === 0) break;
+      const before = await page.getByRole("region", { name: "Next 7 days", exact: true }).locator(".item.click").count();
+      await more.click();
+      await expect.poll(() => page.getByRole("region", { name: "Next 7 days", exact: true }).locator(".item.click").count(), { timeout: 10_000 }).toBeGreaterThan(before);
+    }
     await row("Next 7 days").waitFor({ timeout: 30_000 });
     const grouping = (await page.getByRole("group", { name: "Group tasks" }).count()) > 0;
     if (grouping) {
