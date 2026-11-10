@@ -24,7 +24,7 @@ test('SHO-REG-PROJECTS-03: eight-section limit, persistent reorder and populated
     mkdirSync(evidenceDir, { recursive: true });
     writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, people: ownedPeople, projects: ownedProjects, cleanup: true }, null, 2));
   });
-  const people = await Promise.all(['editor', 'viewer'].map(async role => {
+  const people = await Promise.all(['editor', 'viewer', 'outsider'].map(async role => {
     const person = await account(zz(`section ${role}`), `nakul17+zz-projects-03-${fixture}-${role}@aplyd.com`);
     ownedPeople.push(person.id);
     later(async () => {
@@ -33,7 +33,7 @@ test('SHO-REG-PROJECTS-03: eight-section limit, persistent reorder and populated
     });
     return person;
   }));
-  const [editor, viewer] = people;
+  const [editor, viewer, outsider] = people;
   const sentinel = await newProject(admin, later, { label: 'sections sentinel' }); ownedProjects.push(sentinel.id);
   const sentinelBefore = (await admin.api.get(`/api/projects/${sentinel.id}`)).json.project;
   const sentinelFingerprint = createHash('sha256').update(JSON.stringify(sentinelBefore)).digest('hex');
@@ -43,6 +43,8 @@ test('SHO-REG-PROJECTS-03: eight-section limit, persistent reorder and populated
     expect(added.status, JSON.stringify(added.json)).toBe(201);
     expect((await person.c.post(`/api/projects/${project.id}/sections`, { name: 'Denied' })).status).toBe(403);
   }
+  expect((await outsider.c.get(`/api/projects/${project.id}`)).status).toBe(404);
+  expect((await outsider.c.post(`/api/projects/${project.id}/sections`, { name: 'Denied' })).status).toBe(404);
   const names = ['Audit source', 'Audit moving', 'Audit extra one', 'Audit extra two'];
   const added: { id: string; name: string }[] = [];
   for (const name of names) {
@@ -85,7 +87,9 @@ test('SHO-REG-PROJECTS-03: eight-section limit, persistent reorder and populated
   }
   const raced = await Promise.all(['a', 'b'].map(suffix => admin.api.post(`/api/projects/${raceProject.id}/sections`, { name: `Race eighth ${suffix}` })));
   expect(raced.map(result => result.status).sort()).toEqual([201, 409]);
-  expect((await admin.api.get(`/api/projects/${raceProject.id}`)).json.project.sections).toHaveLength(8);
+  const raceSections = (await admin.api.get(`/api/projects/${raceProject.id}`)).json.project.sections as { position: number }[];
+  expect(raceSections).toHaveLength(8);
+  expect(raceSections.map(section => section.position)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
 
   await page.getByRole('button', { name: 'Section menu for Audit moving' }).click();
   await page.getByRole('menuitem', { name: 'Move left' }).click();
