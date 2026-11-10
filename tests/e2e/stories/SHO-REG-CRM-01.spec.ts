@@ -11,14 +11,24 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, role denial, duplicate, 
   const fixture = randomUUID();
   const evidenceDir = 'test-results/organisation-crud';
   const owned: string[] = [];
+  let memberId: string | null = null;
+  let dealIdForCleanup: string | null = null;
   later(async () => {
     for (const id of owned) {
       const loaded = await admin.api.get(`/api/orgs/${id}`);
       expect(loaded.status).toBe(200);
       expect(loaded.json.organisation.archived).toBe(true);
     }
+    expect(memberId).toBeTruthy();
+    expect(dealIdForCleanup).toBeTruthy();
+    const memberAfter = await admin.api.get(`/api/team/${memberId}`);
+    expect(memberAfter.status).toBe(200);
+    expect(memberAfter.json.person.status).toBe('DEACTIVATED');
+    const dealAfter = await admin.api.get(`/api/projects/${dealIdForCleanup}`);
+    expect(dealAfter.status).toBe(200);
+    expect(dealAfter.json.project.archived).toBe(true);
     mkdirSync(evidenceDir, { recursive: true });
-    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, owned, archived: true }, null, 2));
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, owned, organisationsArchived: true, dealId: dealIdForCleanup, dealArchived: true, memberId, memberDeactivated: true, cleanup: true }, null, 2));
   });
   async function archiveAtCleanup(id: string) {
     later(async () => {
@@ -56,6 +66,7 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, role denial, duplicate, 
   await archiveAtCleanup(id);
 
   const member = await account(zz('organisation member'), `nakul17+zz-crm-01-${fixture}@aplyd.com`);
+  memberId = member.id;
   later(async () => {
     expect((await admin.api.post(`/api/team/${member.id}/deactivate`, { reassign: 'leaders' })).status).toBe(200);
   });
@@ -128,6 +139,7 @@ test('SHO-REG-CRM-01 scoped: organisation create, edit, role denial, duplicate, 
   });
   expect(deal.status, JSON.stringify(deal.json)).toBe(201);
   const dealId = deal.json.deal.id as string;
+  dealIdForCleanup = dealId;
   later(async () => {
     const loaded = await admin.api.get(`/api/projects/${dealId}`);
     expect(loaded.status).toBe(200);
