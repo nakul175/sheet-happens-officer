@@ -10,7 +10,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
  if(![database,base].every(u=>['localhost','127.0.0.1'].includes(u.hostname))||database.pathname!='/sho_test')throw Error('DISPOSABLE_LOOPBACK_FIXTURE_REQUIRED');
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
  const raw=randomBytes(32).toString('base64url');
- const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
+ const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealList?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
  let created=false;
  const originalProjects=await db.project.count(),originalUsers=await db.user.count();
  const read=async(route:string)=>{
@@ -69,13 +69,33 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
     report.dealPaging={pages,uniqueDealIds:seen.size,exactTotal:1000};
    }
   }
+  // Populate the previously empty deals only after the approved My Tasks gate.
+  // This is a Deals measurement, with no owner-approved latency/size threshold yet.
+  await db.section.createMany({data:dealIds.map(dealId=>({id:`${dealId}-section`,projectId:dealId,name:'To do',position:0}))});
+  for(let start=0;start<dealIds.length;start+=100){
+   await db.task.createMany({data:dealIds.slice(start,start+100).flatMap(dealId=>Array.from({length:10},(_,n)=>({
+    workspaceId:workspaces[0].id,projectId:dealId,sectionId:`${dealId}-section`,
+    title:`${id} deal task ${n}`,assigneeId:id,createdById:id,dueDate:new Date(Date.now()+n*86400_000),
+   })))});
+  }
+  expect(await db.task.count({where:{projectId:{in:dealIds}}})).toBe(10000);
+  const firstDeals=await read('/api/deals'),dealSamples:Awaited<ReturnType<typeof read>>[]=[];
+  for(let batch=0;batch<2;batch++)dealSamples.push(...await Promise.all(Array.from({length:5},()=>read('/api/deals'))));
+  const dealTimes=dealSamples.map(x=>x.ms).sort((a,b)=>a-b);
+  const response=await fetch(new URL('/api/deals',base),{headers:{cookie:'sho_session='+raw},signal:AbortSignal.timeout(20000)});
+  expect(response.status).toBe(200);
+  const owned=(await response.json() as {deals:{id:string;nextStep:{id:string}|null}[]}).deals.filter(row=>dealIds.includes(row.id));
+  expect(owned).toHaveLength(1000);
+  expect(owned.every(row=>row.nextStep?.id)).toBe(true);
+  report.dealList={dealCount:owned.length,eligibleTasks:10000,firstRequestMs:Math.round(firstDeals.ms),p95Ms:Math.round(dealTimes[9]),maxBytes:Math.max(firstDeals.bytes,...dealSamples.map(x=>x.bytes))};
   report.status='MY_TASKS_TARGET_PASS';
  }finally{
   try{
-   if(created){await db.task.deleteMany({where:{projectId:{in:projectIds}}});await db.project.deleteMany({where:{id:{in:[...projectIds,...dealIds]}}});await db.user.delete({where:{id}});}
+   if(created){await db.task.deleteMany({where:{projectId:{in:[...projectIds,...dealIds]}}});await db.section.deleteMany({where:{projectId:{in:dealIds}}});await db.project.deleteMany({where:{id:{in:[...projectIds,...dealIds]}}});await db.user.delete({where:{id}});}
    expect(await db.project.count({where:{id:{in:projectIds}}})).toBe(0);
    expect(await db.task.count({where:{projectId:{in:projectIds}}})).toBe(0);
    expect(await db.project.count({where:{id:{in:dealIds}}})).toBe(0);
+   expect(await db.task.count({where:{projectId:{in:dealIds}}})).toBe(0);
    expect(await db.project.count()).toBe(originalProjects);
    expect(await db.user.count()).toBe(originalUsers);
    report.cleanup=true;
