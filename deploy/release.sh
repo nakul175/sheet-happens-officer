@@ -67,10 +67,12 @@ fi
 PREV_SHA="$(cat "$PREV/COMMIT")"
 [ "$PREV_SHA" = "$PREV_EXPECTED_SHA" ] || { echo "Previous release identity does not match its directory"; exit 1; }
 if [ -e "$PREV/deploy/verify-release.mjs" ] || [ -L "$PREV/deploy/verify-release.mjs" ]; then
-  [ -f "$PREV/deploy/verify-release.mjs" ] && [ ! -L "$PREV/deploy/verify-release.mjs" ] || { echo "Previous release verifier is invalid"; exit 1; }
+  [ -f "$PREV/deploy/verify-release.mjs" ] && [ ! -L "$PREV/deploy/verify-release.mjs" ] &&
+    [ "$(readlink -f "$PREV/deploy/verify-release.mjs")" = "$PREV/deploy/verify-release.mjs" ] || { echo "Previous release verifier is invalid"; exit 1; }
   PREV_VERIFIER="$PREV/deploy/verify-release.mjs"
 else
-  [ -f "$REL/deploy/verify-previous-release.mjs" ] && [ ! -L "$REL/deploy/verify-previous-release.mjs" ] || { echo "Legacy rollback verifier is missing or symlinked"; exit 1; }
+  [ -f "$REL/deploy/verify-previous-release.mjs" ] && [ ! -L "$REL/deploy/verify-previous-release.mjs" ] &&
+    [ "$(readlink -f "$REL/deploy/verify-previous-release.mjs")" = "$REL/deploy/verify-previous-release.mjs" ] || { echo "Legacy rollback verifier is missing or symlinked"; exit 1; }
   PREV_VERIFIER="$REL/deploy/verify-previous-release.mjs"
 fi
 pid="$(systemctl show sho -p MainPID --value)"
