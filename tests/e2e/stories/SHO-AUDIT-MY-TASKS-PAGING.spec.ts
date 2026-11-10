@@ -82,5 +82,11 @@ test('audit My Tasks v2 pages exact own work, keeps legacy response and denies f
     mkdirSync(dir, { recursive: true });
     await page.screenshot({ path: `${dir}/loaded.png`, fullPage: true });
   } finally { await context.close(); }
-  writeFileSync(`${dir}/verification.json`, JSON.stringify({ fixture, firstPage: 25, secondPage: 1, next7Total: 26, overdueTotal: 1, initialBytes: bytes, foreignHidden: true, cursorDenied: true, legacyPreserved: true, uiLoaded: 27 }, null, 2));
+  const cursorTask = first.json.groups.next7.items[24].id as string;
+  expect((await actor.c.del(`/api/tasks/${cursorTask}`)).status).toBe(204);
+  const afterDelete = await actor.c.get(`/api/my-tasks?v=2&group=next7&cursor=${encodeURIComponent(cursor)}`);
+  expect(afterDelete.status, JSON.stringify(afterDelete.json)).toBe(200);
+  expect(afterDelete.json.page).toMatchObject({ total: 25, hasMore: false, nextCursor: null });
+  expect(afterDelete.json.page.items.map((row: { id: string }) => row.id)).toEqual(second.json.page.items.map((row: { id: string }) => row.id));
+  writeFileSync(`${dir}/verification.json`, JSON.stringify({ fixture, firstPage: 25, secondPage: 1, next7Total: 26, overdueTotal: 1, initialBytes: bytes, foreignHidden: true, cursorDenied: true, legacyPreserved: true, uiLoaded: 27, deletedCursorRowStillPaginates: true }, null, 2));
 });
