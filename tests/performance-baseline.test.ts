@@ -1,4 +1,4 @@
-// Bounded synthetic baseline, not a production load test or an SLA assertion.
+// Disposable synthetic acceptance fixture; never a production load test or live SLA claim.
 import { expect,it } from 'vitest';
 import { randomUUID,createHash,randomBytes } from 'node:crypto';
 import { mkdirSync,writeFileSync } from 'node:fs';
@@ -10,7 +10,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
  if(![database,base].every(u=>['localhost','127.0.0.1'].includes(u.hostname))||database.pathname!='/sho_test')throw Error('DISPOSABLE_LOOPBACK_FIXTURE_REQUIRED');
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
  const raw=randomBytes(32).toString('base64url');
- const report:{fixture:unknown;environment:unknown;measurements:unknown[];cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
+ const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
  let created=false;
  const originalProjects=await db.project.count(),originalUsers=await db.user.count();
  const read=async(route:string)=>{
@@ -18,7 +18,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
   const response=await fetch(new URL(route,base),{headers:{cookie:'sho_session='+raw},signal:AbortSignal.timeout(20000)});
   const body=await response.arrayBuffer();
   expect(response.status,route).toBe(200);
-  const groups=route==='/api/my-tasks?v=2'?(JSON.parse(new TextDecoder().decode(body)) as {groups:{next7:{total:number;items:unknown[]};needsNextStep:{total:number;items:unknown[]}}}).groups:null;
+  const groups=route==='/api/my-tasks?v=2'?(JSON.parse(new TextDecoder().decode(body)) as {groups:{next7:{total:number;items:unknown[]};needsNextStep:{total:number;items:{id:string}[];nextCursor:string|null}}}).groups:null;
   return{ms:performance.now()-start,bytes:body.byteLength,groups};
  };
  try{
@@ -51,6 +51,22 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
    if(route==='/api/my-tasks?v=2'){
     expect(measurement.maxBytes,'approved My Tasks initial response budget').toBeLessThanOrEqual(512*1024);
     expect(sorted[9],'approved My Tasks p95 budget at five concurrent reads').toBeLessThanOrEqual(1000);
+    const seen=new Set(first.groups!.needsNextStep.items.map(row=>row.id));
+    let cursor=first.groups!.needsNextStep.nextCursor;
+    let pages=1;
+    while(cursor){
+     const response=await fetch(new URL(`/api/my-tasks?v=2&group=needsNextStep&cursor=${encodeURIComponent(cursor)}`,base),{headers:{cookie:'sho_session='+raw},signal:AbortSignal.timeout(20000)});
+     expect(response.status).toBe(200);
+     const body=await response.json() as {page:{items:{id:string}[];total:number;nextCursor:string|null}};
+     expect(body.page.total).toBe(1000);
+     for(const row of body.page.items){expect(seen.has(row.id),'deal page must not repeat a row').toBe(false);seen.add(row.id);}
+     cursor=body.page.nextCursor;
+     pages++;
+     expect(pages,'deal cursor must terminate').toBeLessThanOrEqual(40);
+    }
+    expect(seen.size).toBe(1000);
+    expect(pages).toBe(40);
+    report.dealPaging={pages,uniqueDealIds:seen.size,exactTotal:1000};
    }
   }
   report.status='MY_TASKS_TARGET_PASS';

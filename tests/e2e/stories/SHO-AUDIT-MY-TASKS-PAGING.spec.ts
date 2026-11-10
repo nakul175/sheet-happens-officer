@@ -39,6 +39,7 @@ test('audit My Tasks v2 pages exact own work, keeps legacy response and denies f
   expect(first.json.version).toBe(2);
   expect(first.json.groups.next7).toMatchObject({ total: 26, hasMore: true });
   expect(first.json.groups.next7.items).toHaveLength(25);
+  expect(first.json.groups.waitingOnMe).toMatchObject({ total: 0, items: [], hasMore: false, nextCursor: null });
   expect(first.json.groups.overdue).toMatchObject({ total: 1, hasMore: false });
   expect(first.json.groups.overdue.items.map((row: { id: string }) => row.id)).toEqual([overdue]);
   expect(JSON.stringify(first.json)).not.toContain(foreignTask);
@@ -50,8 +51,13 @@ test('audit My Tasks v2 pages exact own work, keeps legacy response and denies f
   expect(second.status, JSON.stringify(second.json)).toBe(200);
   expect(second.json.page).toMatchObject({ total: 26, hasMore: false, nextCursor: null });
   expect(second.json.page.items).toHaveLength(1);
+  const largest = await actor.c.get('/api/my-tasks?v=2&limit=100');
+  expect(largest.status, JSON.stringify(largest.json)).toBe(200);
+  expect(largest.json.groups.next7).toMatchObject({ total: 26, hasMore: false, nextCursor: null });
+  expect(largest.json.groups.next7.items).toHaveLength(26);
   expect([...first.json.groups.next7.items, ...second.json.page.items].map((row: { id: string }) => row.id).sort()).toEqual(ids.filter(id => id !== overdue).sort());
   expect((await outsider.c.get(`/api/my-tasks?v=2&group=next7&cursor=${encodeURIComponent(cursor)}`)).status).toBe(400);
+  expect((await actor.c.get(`/api/my-tasks?v=2&group=later&cursor=${encodeURIComponent(cursor)}`)).status).toBe(400);
   expect((await actor.c.get(`/api/my-tasks?v=2&group=next7&cursor=${encodeURIComponent(cursor + 'x')}`)).status).toBe(400);
   expect((await actor.c.get('/api/my-tasks?v=2&limit=101')).status).toBe(400);
   const filtered = await actor.c.get('/api/my-tasks?v=2&filter=overdue');
