@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { test, local2691 } from '../helpers/2691-admin';
 import { BASE, PW, task, zzTestData } from '../local-api';
 import { expect } from './qa';
+import { db } from '@/lib/db';
 
 const day = (offset: number) => new Date(Date.now() + 5.5 * 3600_000 + offset * 86400_000).toISOString().slice(0, 10);
 
@@ -19,12 +20,15 @@ test('audit My Tasks v2 pages exact own work, keeps legacy response and denies f
   const project = await data.project(actor);
   const foreign = await data.project(outsider);
   const ids: string[] = [];
+  const laterIds: string[] = [];
   later(async () => {
     for (const id of ids) {
       const removed = await actor.c.del(`/api/tasks/${id}`);
       expect([204, 404]).toContain(removed.status);
       expect((await actor.c.get(`/api/tasks/${id}`)).status).toBe(404);
     }
+    const removedLater = await db.task.deleteMany({ where: { id: { in: laterIds } } });
+    expect(removedLater.count).toBe(laterIds.length);
     const errors = await data.cleanUp();
     expect(errors).toEqual([]);
     mkdirSync(dir, { recursive: true });
@@ -88,5 +92,37 @@ test('audit My Tasks v2 pages exact own work, keeps legacy response and denies f
   expect(afterDelete.status, JSON.stringify(afterDelete.json)).toBe(200);
   expect(afterDelete.json.page).toMatchObject({ total: 25, hasMore: false, nextCursor: null });
   expect(afterDelete.json.page.items.map((row: { id: string }) => row.id)).toEqual(second.json.page.items.map((row: { id: string }) => row.id));
-  writeFileSync(`${dir}/verification.json`, JSON.stringify({ fixture, firstPage: 25, secondPage: 1, next7Total: 26, overdueTotal: 1, initialBytes: bytes, foreignHidden: true, cursorDenied: true, legacyPreserved: true, uiLoaded: 27, deletedCursorRowStillPaginates: true }, null, 2));
+  const seed = await db.task.findUniqueOrThrow({ where: { id: ids[0] } });
+  for (let index = 0; index < 51; index++) laterIds.push(randomUUID());
+  await db.task.createMany({ data: laterIds.map((id, index) => ({
+    id, workspaceId: seed.workspaceId, projectId: project.id, sectionId: seed.sectionId,
+    title: `ZZ-TEST later paging ${fixture} ${index}`, assigneeId: actor.id, createdById: actor.id,
+    dueDate: index < 25 ? new Date(day(30)) : null,
+  })) });
+  const laterFirst = await actor.c.get('/api/my-tasks?v=2&group=later');
+  expect(laterFirst.status).toBe(200);
+  expect(laterFirst.json.page).toMatchObject({ total: 51, hasMore: true });
+  expect(laterFirst.json.page.items).toHaveLength(25);
+  expect(laterFirst.json.page.items.every((row: { dueDate: string | null }) => row.dueDate !== null)).toBe(true);
+  const datedCursor = laterFirst.json.page.nextCursor as string;
+  const laterSecond = await actor.c.get(`/api/my-tasks?v=2&group=later&cursor=${encodeURIComponent(datedCursor)}`);
+  expect(laterSecond.status).toBe(200);
+  expect(laterSecond.json.page.items).toHaveLength(25);
+  expect(laterSecond.json.page.items.every((row: { dueDate: string | null }) => row.dueDate === null)).toBe(true);
+  await db.task.update({ where: { id: laterFirst.json.page.items[24].id }, data: { deletedAt: new Date() } });
+  const afterDatedCursorDelete = await actor.c.get(`/api/my-tasks?v=2&group=later&cursor=${encodeURIComponent(datedCursor)}`);
+  expect(afterDatedCursorDelete.status).toBe(200);
+  expect(afterDatedCursorDelete.json.page.total).toBe(50);
+  expect(afterDatedCursorDelete.json.page.items.map((row: { id: string }) => row.id)).toEqual(laterSecond.json.page.items.map((row: { id: string }) => row.id));
+  const undatedCursor = laterSecond.json.page.nextCursor as string;
+  const laterThird = await actor.c.get(`/api/my-tasks?v=2&group=later&cursor=${encodeURIComponent(undatedCursor)}`);
+  expect(laterThird.status).toBe(200);
+  expect(laterThird.json.page).toMatchObject({ total: 50, hasMore: false });
+  expect(laterThird.json.page.items).toHaveLength(1);
+  await db.task.update({ where: { id: laterSecond.json.page.items[24].id }, data: { deletedAt: new Date() } });
+  const afterUndatedCursorDelete = await actor.c.get(`/api/my-tasks?v=2&group=later&cursor=${encodeURIComponent(undatedCursor)}`);
+  expect(afterUndatedCursorDelete.status).toBe(200);
+  expect(afterUndatedCursorDelete.json.page.total).toBe(49);
+  expect(afterUndatedCursorDelete.json.page.items.map((row: { id: string }) => row.id)).toEqual(laterThird.json.page.items.map((row: { id: string }) => row.id));
+  writeFileSync(`${dir}/verification.json`, JSON.stringify({ fixture, firstPage: 25, secondPage: 1, next7Total: 26, overdueTotal: 1, initialBytes: bytes, foreignHidden: true, cursorDenied: true, legacyPreserved: true, uiLoaded: 27, deletedCursorRowStillPaginates: true, datedToUndatedCursorSurvivesDelete: true, undatedCursorSurvivesDelete: true }, null, 2));
 });
