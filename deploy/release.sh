@@ -13,16 +13,17 @@ CUR="$ROOT/current"
 PORT=3000
 KEEP=3
 PREV=""
+PREV_VERIFIER=""
 # Serialize the entire build/switch/recovery path; never race another app cut.
 exec 9>"$ROOT/.release.lock"
 flock -n 9 || { echo "Another app release holds the deployment lock"; exit 1; }
 
 log() { printf '[release %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 healthy() {
-  local release_root="$1" expected="$2" _ pid
+  local release_root="$1" expected="$2" verifier="$3" _ pid
   for _ in $(seq 1 45); do
     pid="$(systemctl show sho -p MainPID --value)"
-    if node "$release_root/deploy/verify-release.mjs" "$release_root" "$expected" "http://127.0.0.1:$PORT" "$pid"; then return 0; fi
+    if node "$verifier" "$release_root" "$expected" "http://127.0.0.1:$PORT" "$pid"; then return 0; fi
     sleep 2
   done
   return 1
@@ -35,7 +36,7 @@ recover() {
   set +e
   if [ "$(readlink -f "$CUR" 2>/dev/null)" = "$REL" ] && [ -n "$PREV" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
     log "release failed; restoring previous release"
-    if switch "$PREV" && sudo -n systemctl restart sho && healthy "$PREV" "$PREV_SHA"; then
+    if switch "$PREV" && sudo -n systemctl restart sho && healthy "$PREV" "$PREV_SHA" "$PREV_VERIFIER"; then
       log "rollback verified: $(basename "$PREV")"
     else
       log "RECOVERY_FAILED: operator attention required"
@@ -65,7 +66,15 @@ fi
 [ -f "$PREV/COMMIT" ] && [ ! -L "$PREV/COMMIT" ] || { echo "Previous release identity missing"; exit 1; }
 PREV_SHA="$(cat "$PREV/COMMIT")"
 [ "$PREV_SHA" = "$PREV_EXPECTED_SHA" ] || { echo "Previous release identity does not match its directory"; exit 1; }
-[ -f "$PREV/deploy/verify-release.mjs" ] && [ ! -L "$PREV/deploy/verify-release.mjs" ] || { echo "Previous release verifier is missing or symlinked"; exit 1; }
+if [ -e "$PREV/deploy/verify-release.mjs" ] || [ -L "$PREV/deploy/verify-release.mjs" ]; then
+  [ -f "$PREV/deploy/verify-release.mjs" ] && [ ! -L "$PREV/deploy/verify-release.mjs" ] || { echo "Previous release verifier is invalid"; exit 1; }
+  PREV_VERIFIER="$PREV/deploy/verify-release.mjs"
+else
+  [ -f "$REL/deploy/verify-previous-release.mjs" ] && [ ! -L "$REL/deploy/verify-previous-release.mjs" ] || { echo "Legacy rollback verifier is missing or symlinked"; exit 1; }
+  PREV_VERIFIER="$REL/deploy/verify-previous-release.mjs"
+fi
+pid="$(systemctl show sho -p MainPID --value)"
+node "$PREV_VERIFIER" "$PREV" "$PREV_SHA" "http://127.0.0.1:$PORT" "$pid" || { echo "Previous release failed pre-cut verification"; exit 1; }
 cd "$REL"
 set -a
 # shellcheck disable=SC1091
@@ -90,7 +99,7 @@ printf 'RELEASE=%s\n' "$SHA" > release.env
 switch "$REL"
 log "restarting the app"
 sudo -n systemctl restart sho
-healthy "$REL" "$SHA" || { log "health check failed"; false; }
+healthy "$REL" "$SHA" "$REL/deploy/verify-release.mjs" || { log "health check failed"; false; }
 log "healthy: $SHA is live"
 # Retention is best effort after a verified cut. A cleanup failure must not
 # roll back a healthy release; incomplete or unknown directories are preserved.
