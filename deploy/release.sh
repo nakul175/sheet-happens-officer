@@ -22,7 +22,7 @@ healthy() {
   local release_root="$1" expected="$2" _ pid
   for _ in $(seq 1 45); do
     pid="$(systemctl show sho -p MainPID --value)"
-    if node "$REL/deploy/verify-release.mjs" "$release_root" "$expected" "http://127.0.0.1:$PORT" "$pid"; then return 0; fi
+    if node "$release_root/deploy/verify-release.mjs" "$release_root" "$expected" "http://127.0.0.1:$PORT" "$pid"; then return 0; fi
     sleep 2
   done
   return 1
@@ -65,6 +65,7 @@ fi
 [ -f "$PREV/COMMIT" ] && [ ! -L "$PREV/COMMIT" ] || { echo "Previous release identity missing"; exit 1; }
 PREV_SHA="$(cat "$PREV/COMMIT")"
 [ "$PREV_SHA" = "$PREV_EXPECTED_SHA" ] || { echo "Previous release identity does not match its directory"; exit 1; }
+[ -f "$PREV/deploy/verify-release.mjs" ] && [ ! -L "$PREV/deploy/verify-release.mjs" ] || { echo "Previous release verifier is missing or symlinked"; exit 1; }
 cd "$REL"
 set -a
 # shellcheck disable=SC1091
