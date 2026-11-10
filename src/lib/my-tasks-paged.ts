@@ -73,14 +73,19 @@ function taskWhere(user: Actor, group: Exclude<MyTasksGroup, "needsNextStep">, t
 async function waitingSince(tx: Tx, ids: string[]) {
   const result = new Map<string, Date>();
   if (!ids.length) return result;
-  const rows = await tx.actionLog.findMany({
-    where: { targetType: "task", targetId: { in: ids }, action: { in: ["task.sent_for_approval", "task.assigned", "task.approver_changed"] }, undoneAt: null },
-    orderBy: { createdAt: "desc" }, select: { targetId: true, createdAt: true, afterState: true },
-  });
-  for (const row of rows) {
-    const after = (row.afterState ?? {}) as { assigneeId?: string };
-    if (!result.has(row.targetId) && after.assigneeId) result.set(row.targetId, row.createdAt);
-  }
+  // Return at most one row per visible task. A busy task can have arbitrarily many
+  // historical actions, so fetching all of them would undo the page-size bound.
+  const rows = await tx.$queryRaw<{ targetId: string; createdAt: Date }[]>(Prisma.sql`
+    SELECT DISTINCT ON ("targetId") "targetId", "createdAt"
+    FROM "ActionLog"
+    WHERE "targetType" = 'task' AND "targetId" IN (${Prisma.join(ids)})
+      AND "action" IN ('task.sent_for_approval', 'task.assigned', 'task.approver_changed')
+      AND "undoneAt" IS NULL
+      AND jsonb_typeof("afterState"->'assigneeId') = 'string'
+      AND "afterState"->>'assigneeId' <> ''
+    ORDER BY "targetId", "createdAt" DESC, "id" DESC
+  `);
+  for (const row of rows) result.set(row.targetId, row.createdAt);
   return result;
 }
 
