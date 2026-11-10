@@ -14,6 +14,7 @@ function exercise(failure='') {
   mkdirSync(path.join(prev,'deploy'));writeFileSync(path.join(prev,'deploy','verify-release.mjs'),'// synthetic previous verifier\n');
   mkdirSync(path.join(rel,'deploy'));writeFileSync(path.join(rel,'deploy','verify-previous-release.mjs'),'// synthetic fallback verifier\n');
   writeFileSync(path.join(rel,'deploy','verify-release.mjs'),'// synthetic candidate verifier\n');
+  writeFileSync(path.join(rel,'deploy','prune-releases.mjs'),'// synthetic retention script\n');
   if(failure==='candidate-symlink'){rmSync(rel,{recursive:true});symlinkSync(prev,rel);}
   if(failure==='previous-outside'){
    const outside=path.join(dir,'outside-release');mkdirSync(outside);writeFileSync(path.join(outside,'COMMIT'),'b'.repeat(40));
@@ -47,6 +48,11 @@ function exercise(failure='') {
    for(const name of ['verify-release.mjs','verify-previous-release.mjs'])writeFileSync(path.join(outside,name),'// synthetic outside verifier\n');
    rmSync(path.join(rel,'deploy'),{recursive:true});symlinkSync(outside,path.join(rel,'deploy'));
   }
+  if(failure==='prune-symlink'){
+   const outside=path.join(dir,'outside-prune.mjs');writeFileSync(outside,'// synthetic outside retention script\n');
+   unlinkSync(path.join(rel,'deploy','prune-releases.mjs'));
+   symlinkSync(outside,path.join(rel,'deploy','prune-releases.mjs'));
+  }
   writeFileSync(path.join(dir,'app.env'),'DATABASE_URL=postgresql://synthetic@127.0.0.1:1/unused\nDIRECT_DATABASE_URL=postgresql://synthetic-admin@127.0.0.1:1/unused\nUNKNOWN_SENTINEL=preserve-me\n');
   const dispatcher=`#!${process.execPath}\nconst fs=require('fs'),path=require('path');const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);fs.appendFileSync(process.env.CALL_LOG,JSON.stringify({cmd,args})+'\\n');if(cmd==='mv'){const a=args.filter(x=>x!=='-T');fs.renameSync(a[0],a[1]);}if(cmd==='npx'&&args.includes('status')&&process.env.FAILURE==='migration')process.exit(7);if(cmd==='npx'&&args.includes('build')&&process.env.FAILURE==='build')process.exit(8);if(cmd==='flock'&&process.env.FAILURE==='lock')process.exit(1);if(cmd==='sudo'&&(process.env.FAILURE==='rollback'||(process.env.FAILURE==='restart'&&fs.readFileSync(process.env.CALL_LOG,'utf8').split('\"cmd\":\"sudo\"').length===2)))process.exit(9);if(cmd==='systemctl')console.log('123');if(cmd==='node'&&process.env.FAILURE==='verify'&&args[2]==='${sha}')process.exit(10);if(cmd==='node'&&['candidate-verifier','legacy-candidate-verifier'].includes(process.env.FAILURE)&&args[0]==='${rel}/deploy/verify-release.mjs')process.exit(10);if(cmd==='node'&&process.env.FAILURE==='precut-verification'&&args[2]==='${'b'.repeat(40)}')process.exit(12);if(cmd==='node'&&process.env.FAILURE==='prune'&&args[0]?.endsWith('/prune-releases.mjs'))process.exit(11);if(cmd==='curl')console.log(JSON.stringify({ok:true,release:'${sha}'}));`;
   for(const cmd of ['npm','npx','sudo','curl','sleep','find','mv','crontab','install','flock','node','systemctl']){writeFileSync(path.join(bin,cmd),dispatcher,{mode:0o755});}
@@ -68,6 +74,7 @@ test('pending migration fails before build/switch without attempting DDL',()=>{
 });
 test('successful app cut invokes no migration apply or scheduler commands',()=>{
  const r=exercise();assert.equal(r.status,0,r.output);assert.equal(r.current,r.candidate);
+ assert.match(r.output,/retention checked/);
  assert.equal(r.calls.some(c=>['crontab','install'].includes(c.cmd)),false);
  assert.equal(r.calls.some(c=>c.cmd==='npx'&&c.args.includes('deploy')),false);
 });
@@ -82,6 +89,11 @@ test('legacy previous release without its own verifier can be promoted after ind
 test('retention failure is reported without rolling back a verified healthy release',()=>{
  const r=exercise('prune');assert.equal(r.status,0,r.output);assert.equal(r.current,r.candidate);
  assert.match(r.output,/retention deferred/);assert.equal(r.calls.filter(c=>c.cmd==='sudo').length,1);
+});
+test('symlinked retention script is not executed after a healthy cut',()=>{
+ const r=exercise('prune-symlink');assert.equal(r.status,0,r.output);assert.equal(r.current,r.candidate);
+ assert.match(r.output,/retention deferred/);
+ assert.equal(r.calls.some(c=>c.cmd==='node'&&c.args[0]?.endsWith('/deploy/prune-releases.mjs')),false,r.output);
 });
 
 test('invalid revision executes no install/build/service commands',()=>{

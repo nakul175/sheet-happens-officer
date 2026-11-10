@@ -107,7 +107,9 @@ healthy "$REL" "$SHA" "$REL/deploy/verify-release.mjs" || { log "health check fa
 log "healthy: $SHA is live"
 # Retention is best effort after a verified cut. A cleanup failure must not
 # roll back a healthy release; incomplete or unknown directories are preserved.
-if node "$REL/deploy/prune-releases.mjs" "$ROOT/releases" "$REL" "$PREV" "$KEEP"; then
+if [ -f "$REL/deploy/prune-releases.mjs" ] && [ ! -L "$REL/deploy/prune-releases.mjs" ] &&
+  [ "$(readlink -f "$REL/deploy/prune-releases.mjs")" = "$REL/deploy/prune-releases.mjs" ] &&
+  node "$REL/deploy/prune-releases.mjs" "$ROOT/releases" "$REL" "$PREV" "$KEEP"; then
   log "release retention checked"
 else
   log "release retention deferred for operator review"
