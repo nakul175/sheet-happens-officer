@@ -64,7 +64,10 @@ function taskWhere(user: Actor, group: Exclude<MyTasksGroup, "needsNextStep">, t
   const date: Prisma.TaskWhereInput = group === "overdue" ? { dueDate: { lt: today } }
     : group === "next7" ? { dueDate: { gte: today, lt: weekEnd } }
       : { OR: [{ dueDate: null }, { dueDate: { gte: weekEnd } }] };
-  return { AND: [base, { NOT: waiting }, date] };
+  // A plain NOT over nullable approverId drops ordinary tasks under SQL's three-valued logic.
+  // Name each non-waiting case so NULL approvers remain visible in their due-date group.
+  const notWaiting: Prisma.TaskWhereInput = { OR: [{ approverId: null }, { approverId: { not: user.id } }, { assigneeId: { not: user.id } }] };
+  return { AND: [base, notWaiting, date] };
 }
 
 async function waitingSince(tx: Tx, ids: string[]) {
