@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { test, local2691 } from "../helpers/2691-admin";
 import { newProject, newTask, postTaskCurrent } from "../helpers/migration-2731";
 import { account, PW } from "../local-api";
-import { expect, signInAs, zz } from "./qa";
+import { archiveProject, expect, signInAs, zz } from "./qa";
 
 test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal and Undo", async ({ admin, later, browser }) => {
   if (!local2691) throw new Error("Contact audit requires the guarded local test database.");
@@ -11,14 +11,27 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   const fixture = randomUUID();
   const evidenceDir = "test-results/contact-organisation-browser";
   const owned: string[] = [];
+  let dealIdForCleanup: string | null = null;
+  let contactIdForCleanup: string | null = null;
+  let observerIdForCleanup: string | null = null;
   later(async () => {
     for (const id of owned) {
       const response = await admin.api.get(`/api/orgs/${id}`);
       expect(response.status).toBe(200);
       expect(response.json.organisation.archived).toBe(true);
     }
+    expect(dealIdForCleanup).toBeTruthy();
+    expect(contactIdForCleanup).toBeTruthy();
+    expect(observerIdForCleanup).toBeTruthy();
+    const dealAfter = await admin.api.get(`/api/projects/${dealIdForCleanup}`);
+    expect(dealAfter.status).toBe(200);
+    expect(dealAfter.json.project.archived).toBe(true);
+    expect((await admin.api.get(`/api/contacts/${contactIdForCleanup}`)).status).toBe(404);
+    const observerAfter = await admin.api.get(`/api/team/${observerIdForCleanup}`);
+    expect(observerAfter.status).toBe(200);
+    expect(observerAfter.json.person.status).toBe("DEACTIVATED");
     mkdirSync(evidenceDir, { recursive: true });
-    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, owned, archived: true, cleanup: true }, null, 2));
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, owned, organisationsArchived: true, dealId: dealIdForCleanup, dealArchived: true, contactId: contactIdForCleanup, contactRemoved: true, observerId: observerIdForCleanup, observerDeactivated: true, cleanup: true }, null, 2));
   });
   async function makeOrg(label: string) {
     const created = await admin.api.post("/api/orgs", { name: zz(label) });
@@ -40,6 +53,16 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   const sentinelHash = createHash("sha256").update(JSON.stringify(sentinelBefore)).digest("hex");
   const project = await newProject(admin, later, { label: "contact linked project" });
   const taskId = await newTask(admin, project.id, { title: zz("contact linked task") });
+  const pipelines = await admin.api.get("/api/deals/pipelines");
+  expect(pipelines.status).toBe(200);
+  const pipeline = (pipelines.json.pipelines as { id: string; key: string }[]).find(row => row.key === "DEAL_PROACTIVE");
+  expect(pipeline).toBeDefined();
+  const deal = await admin.api.post("/api/deals", { name: zz("contact linked deal"), organisationId: orgId, pipelineId: pipeline!.id, leaderId: admin.user.id, whyPursue: "ZZ-TEST contact link", nextStep: { title: zz("deal first step"), dueDate: new Date(Date.now() + 3 * 86400_000).toISOString().slice(0, 10) } });
+  expect(deal.status, JSON.stringify(deal.json)).toBe(201);
+  const dealId = deal.json.deal.id as string;
+  dealIdForCleanup = dealId;
+  later(async () => archiveProject(admin.api, dealId, admin.user.id));
+  const dealTaskId = await newTask(admin, dealId, { title: zz("contact linked deal task") });
   const name = zz("contact fixed organisation");
   const page = admin.page;
   await page.setViewportSize({ width: 390, height: 800 });
@@ -55,12 +78,14 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   const contact = (list.json.contacts as { id: string; name: string }[]).find((row) => row.name === name);
   expect(contact).toBeDefined();
   const contactId = contact!.id;
+  contactIdForCleanup = contactId;
   later(async () => {
     const loaded = await admin.api.get(`/api/contacts/${contactId}`);
     if (loaded.status === 200) expect((await admin.api.del(`/api/contacts/${contactId}`)).status).toBe(204);
     else expect(loaded.status).toBe(404);
   });
   const observer = await account(zz("contact observer"), `nakul17+zz-crm-02-${fixture}@aplyd.com`);
+  observerIdForCleanup = observer.id;
   later(async () => {
     expect((await admin.api.post(`/api/team/${observer.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
   });
@@ -85,9 +110,11 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   } finally { await observerSession.ctx.close(); }
   const linked = await postTaskCurrent(admin, taskId, "links", { contactId });
   expect(linked.status).toBe(201);
+  expect((await postTaskCurrent(admin, dealTaskId, "links", { contactId })).status).toBe(201);
   const linkedTask = await admin.api.get(`/api/tasks/${taskId}`);
   expect(linkedTask.status).toBe(200);
   expect(linkedTask.json.task.links).toEqual([expect.objectContaining({ contact: expect.objectContaining({ id: contactId, organisationId: orgId }) })]);
+  expect((await admin.api.get(`/api/tasks/${dealTaskId}`)).json.task.links).toEqual([expect.objectContaining({ contact: expect.objectContaining({ id: contactId, organisationId: orgId }) })]);
 
   const row = page.getByRole("region", { name: "Organisation contacts", exact: true })
     .getByRole("row").filter({ has: page.getByText(name, { exact: true }) });
@@ -99,7 +126,7 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   const edited = await admin.api.get(`/api/contacts/${contactId}`);
   expect(edited.status).toBe(200);
   expect(edited.json.contact).toMatchObject({ organisationId: orgId, role: "Senior liaison" });
-  expect(edited.json.contact.tasks.map((item: { id: string }) => item.id)).toContain(taskId);
+  expect(edited.json.contact.tasks.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining([taskId, dealTaskId]));
   const reassignment = await admin.api.patch(`/api/contacts/${contactId}`, { organisationId: sentinelId, role: "Senior liaison" });
   expect(reassignment.status).toBe(400);
   expect((await admin.api.get(`/api/contacts/${contactId}`)).json.contact.organisationId).toBe(orgId);
@@ -118,6 +145,7 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   await expect(row).toHaveCount(0);
   expect((await admin.api.get(`/api/contacts/${contactId}`)).status).toBe(404);
   expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.links).toHaveLength(0);
+  expect((await admin.api.get(`/api/tasks/${dealTaskId}`)).json.task.links).toHaveLength(0);
   expect((await admin.api.get(`/api/orgs/${orgId}`)).json.organisation.tasks.map((item: { id: string }) => item.id)).not.toContain(taskId);
 
   expect((await admin.api.post(`/api/actions/${undoId}/undo`, {})).status).toBe(200);
@@ -125,9 +153,10 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   const restored = await admin.api.get(`/api/contacts/${contactId}`);
   expect(restored.status).toBe(200);
   expect(restored.json.contact).toMatchObject({ organisationId: orgId, role: "Senior liaison" });
-  expect(restored.json.contact.tasks.map((item: { id: string }) => item.id)).toContain(taskId);
+  expect(restored.json.contact.tasks.map((item: { id: string }) => item.id)).toEqual(expect.arrayContaining([taskId, dealTaskId]));
   expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.links).toEqual([expect.objectContaining({ contact: expect.objectContaining({ id: contactId, organisationId: orgId }) })]);
+  expect((await admin.api.get(`/api/tasks/${dealTaskId}`)).json.task.links).toEqual([expect.objectContaining({ contact: expect.objectContaining({ id: contactId, organisationId: orgId }) })]);
   expect(createHash("sha256").update(JSON.stringify((await admin.api.get(`/api/orgs/${sentinelId}`)).json.organisation)).digest("hex")).toBe(sentinelHash);
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, orgId, sentinelId, projectId: project.id, taskId, contactId, mobileWidth: 390,
-    originalOrganisationFixed: true, nonCreatorReadOnly: true, deniedWritesPreservedContact: true, linkedTaskHiddenOnRemoval: true, linkedTaskRestoredOnUndo: true, replayRejected: true, sentinelPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, orgId, sentinelId, projectId: project.id, dealId, taskId, dealTaskId, contactId, mobileWidth: 390,
+    originalOrganisationFixed: true, nonCreatorReadOnly: true, deniedWritesPreservedContact: true, linkedTaskHiddenOnRemoval: true, linkedTaskRestoredOnUndo: true, dealTaskContactLinkHiddenOnRemovalAndRestoredOnUndo: true, replayRejected: true, sentinelPreserved: true }, null, 2));
 });
