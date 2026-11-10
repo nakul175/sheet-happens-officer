@@ -19,8 +19,13 @@ function exercise(failure='') {
    unlinkSync(path.join(root,'current'));symlinkSync(outside,path.join(root,'current'));
   }
   if(failure==='previous-mismatch')writeFileSync(path.join(prev,'COMMIT'),'c'.repeat(40));
-  if(['legacy-no-verifier','legacy-candidate-verifier','fallback-missing'].includes(failure))unlinkSync(path.join(prev,'deploy','verify-release.mjs'));
-  if(failure==='fallback-missing')unlinkSync(path.join(rel,'deploy','verify-previous-release.mjs'));
+  if(['legacy-no-verifier','legacy-candidate-verifier','fallback-missing','fallback-symlink'].includes(failure))unlinkSync(path.join(prev,'deploy','verify-release.mjs'));
+  if(['fallback-missing','fallback-symlink'].includes(failure))unlinkSync(path.join(rel,'deploy','verify-previous-release.mjs'));
+  if(failure==='fallback-symlink')symlinkSync(path.join(prev,'COMMIT'),path.join(rel,'deploy','verify-previous-release.mjs'));
+  if(failure==='previous-verifier-symlink'){
+   unlinkSync(path.join(prev,'deploy','verify-release.mjs'));
+   symlinkSync(path.join(rel,'deploy','verify-previous-release.mjs'),path.join(prev,'deploy','verify-release.mjs'));
+  }
   writeFileSync(path.join(dir,'app.env'),'DATABASE_URL=postgresql://synthetic@127.0.0.1:1/unused\nDIRECT_DATABASE_URL=postgresql://synthetic-admin@127.0.0.1:1/unused\nUNKNOWN_SENTINEL=preserve-me\n');
   const dispatcher=`#!${process.execPath}\nconst fs=require('fs'),path=require('path');const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);fs.appendFileSync(process.env.CALL_LOG,JSON.stringify({cmd,args})+'\\n');if(cmd==='mv'){const a=args.filter(x=>x!=='-T');fs.renameSync(a[0],a[1]);}if(cmd==='npx'&&args.includes('status')&&process.env.FAILURE==='migration')process.exit(7);if(cmd==='npx'&&args.includes('build')&&process.env.FAILURE==='build')process.exit(8);if(cmd==='flock'&&process.env.FAILURE==='lock')process.exit(1);if(cmd==='sudo'&&(process.env.FAILURE==='rollback'||(process.env.FAILURE==='restart'&&fs.readFileSync(process.env.CALL_LOG,'utf8').split('\"cmd\":\"sudo\"').length===2)))process.exit(9);if(cmd==='systemctl')console.log('123');if(cmd==='node'&&process.env.FAILURE==='verify'&&args[2]==='${sha}')process.exit(10);if(cmd==='node'&&['candidate-verifier','legacy-candidate-verifier'].includes(process.env.FAILURE)&&args[0]==='${rel}/deploy/verify-release.mjs')process.exit(10);if(cmd==='node'&&process.env.FAILURE==='precut-verification'&&args[2]==='${'b'.repeat(40)}')process.exit(12);if(cmd==='node'&&process.env.FAILURE==='prune'&&args[0]?.endsWith('/prune-releases.mjs'))process.exit(11);if(cmd==='curl')console.log(JSON.stringify({ok:true,release:'${sha}'}));`;
   for(const cmd of ['npm','npx','sudo','curl','sleep','find','mv','crontab','install','flock','node','systemctl']){writeFileSync(path.join(bin,cmd),dispatcher,{mode:0o755});}
@@ -28,8 +33,8 @@ function exercise(failure='') {
   source=source.replace('ROOT=/opt/sho',`ROOT="${root}"`).replaceAll('/etc/sho/app.env',path.join(dir,'app.env')).replaceAll('/etc/sho/local.env',path.join(dir,'absent.env'));
   const script=path.join(dir,'release.sh');writeFileSync(script,source);
   const log=path.join(dir,'calls.jsonl');writeFileSync(log,'');
-  // The verify-failure path deliberately waits for health before rollback; ten seconds
-  // can expire before the script returns on a loaded CI runner.
+  // The verify-failure path deliberately waits for health before rollback; allow
+  // for that retry loop on a loaded CI runner.
   const result=spawnSync('bash',[script,failure==='revision'?'bad; touch unexpected':sha],{env:{...process.env,PATH:bin+':'+process.env.PATH,CALL_LOG:log,FAILURE:failure},encoding:'utf8',timeout:30000});
   const calls=readFileSync(log,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse);
   return {config:readFileSync(path.join(dir,'app.env'),'utf8'),status:result.status,error:result.error,output:result.stdout+result.stderr,calls,current:realpathSync(path.join(root,'current')),previous:realpathSync(prev),candidate:realpathSync(rel),previousCommit:readFileSync(path.join(prev,'COMMIT'),'utf8')};
@@ -62,7 +67,7 @@ test('invalid revision executes no install/build/service commands',()=>{
  const r=exercise('revision');assert.equal(r.status,1,r.output);assert.equal(r.calls.length,0);assert.equal(r.current,r.previous);
 });
 
-for(const failure of ['candidate-symlink','previous-outside','previous-mismatch','fallback-missing','precut-verification']){
+for(const failure of ['candidate-symlink','previous-outside','previous-mismatch','previous-verifier-symlink','fallback-missing','fallback-symlink','precut-verification']){
  test(`${failure} refuses build and service changes before switch`,()=>{
   const r=exercise(failure);assert.equal(r.status,1,r.output);
   assert.equal(r.calls.some(c=>['npm','npx','sudo','mv'].includes(c.cmd)),false,r.output);
