@@ -237,6 +237,8 @@ async function myTasksScreen(mode: Mode, who: Who, waitFor: string, project: str
     await page.goto(`${server(mode).base}/my-tasks`, { waitUntil: "domcontentloaded" });
     const initialResponse = await initial;
     expect(initialResponse.status(), await initialResponse.text()).toBe(200);
+    const initialBody = await initialResponse.json() as { groups?: { next7?: { total?: number } } };
+    expect(initialBody.groups?.next7?.total, "paged API must include the mode fixture").toBeGreaterThan(0);
     // The task's row in its own list section. The concierge panel can link the same task, so the page as a whole is not enough.
     const row = (section: string) => page.getByRole("region", { name: section, exact: true }).getByRole("link", { name: waitFor, exact: true });
     // The fixture can fall beyond the first 25 rows in a shared test database.

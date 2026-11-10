@@ -453,7 +453,9 @@ describe("keyboard", () => {
     // for that response here timed out. My tasks is the screen this Retry reloads.
     const firstLoad = page.waitForResponse(r => new URL(r.url()).pathname === "/api/my-tasks" && r.ok());
     await page.goto("/my-tasks", { waitUntil: "load" });
-    await firstLoad;
+    const firstResponse = await firstLoad;
+    const firstGroups = (await firstResponse.json()) as { groups?: { next7?: { total?: number } } };
+    expect(firstGroups.groups?.next7?.total, "fixture task must be present in the paged API").toBeGreaterThan(0);
     await page.getByRole("heading", { name: "My tasks", exact: true }).waitFor();
     await page.getByRole("region", { name: "Next 7 days", exact: true }).waitFor();
     await page.evaluate(() => { (window as unknown as { __kept: number }).__kept = 1; });
