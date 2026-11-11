@@ -65,6 +65,7 @@ test("SHO-REG-TASKS-01 task form validates and stores one assigned task", async 
   expect((await response).status()).toBe(201);
   await expect(form).toHaveCount(0);
   await page.reload();
+  await expect(page.getByText(taskTitle, { exact: true }).first()).toBeVisible();
   const list = await admin.api.get(`/api/projects/${project.id}/tasks`);
   expect(list.status).toBe(200);
   const matches = (list.json.sections as { tasks: { id: string; title: string; assignee: { id: string }; dueDate: string | null }[] }[])
