@@ -1,6 +1,8 @@
 "use client";
 // SHO-US-12.2: the gate dialog. The server enforces the same fields; this only helps fill them in.
 import { useRouter } from "next/navigation";
+import { SubmissionDeadlineFields } from "@/components/SubmissionDeadlineFields";
+import { DEFAULT_DEADLINE_ZONE } from "@/lib/submission-deadline";
 import { useState } from "react";
 import { api, useGet } from "@/components/api";
 import { Field, Modal } from "@/components/ui";
@@ -10,7 +12,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
   const orgs = useGet<{ organisations: { id: string; name: string }[] }>("/api/orgs");
   const pipes = useGet<{ pipelines: { id: string; key: string; name: string }[] }>("/api/deals/pipelines");
   const team = useGet<{ people: { id: string; name: string }[] }>("/api/team");
-  const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", value: "", currency: "INR", newOrg: "", newKind: "" });
+  const [v, setV] = useState({ organisationId: "", pipelineId: "", name: task.title, leaderId: task.assignee.id, whyPursue: "", dueDate: task.dueDate ?? "", submissionDeadline: "", submissionDeadlineTime: "", submissionDeadlineZone: DEFAULT_DEADLINE_ZONE, submissionDeadlineChoice: "", value: "", currency: "INR", newOrg: "", newKind: "" });
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -30,7 +32,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       organisationId: v.organisationId || undefined, pipelineId: pipe?.id, name: v.name, leaderId: v.leaderId, whyPursue: v.whyPursue,
       dueDate: task.dueDate ? undefined : v.dueDate || undefined, force,
     };
-    if (pipe?.key === "DEAL_BID") body.submissionDeadline = v.submissionDeadline || undefined;
+    if (pipe?.key === "DEAL_BID") Object.assign(body, { submissionDeadline: v.submissionDeadline || undefined, submissionDeadlineTime: v.submissionDeadlineTime || null, submissionDeadlineZone: v.submissionDeadlineZone || null, submissionDeadlineChoice: v.submissionDeadlineChoice || undefined });
     if (v.value) { body.value = Number(v.value); body.currency = v.currency; }
     const r = await api("POST", `/api/tasks/${task.id}/convert`, body);
     setBusy(false);
@@ -39,7 +41,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
     setErr(r.error ?? "Could not convert the task.");
   }
   const all = [...(orgs.data?.organisations ?? []), ...extraOrgs.filter((e) => !orgs.data?.organisations.some((o) => o.id === e.id))];
-  const ready = v.organisationId && pipe && v.name.trim() && v.whyPursue.trim() && (task.dueDate || v.dueDate) && (pipe.key !== "DEAL_BID" || v.submissionDeadline);
+  const ready = v.organisationId && pipe && v.name.trim() && v.whyPursue.trim() && (task.dueDate || v.dueDate) && (pipe.key !== "DEAL_BID" || (v.submissionDeadline && v.submissionDeadlineTime && v.submissionDeadlineZone));
   return (
     <Modal onClose={onClose} label="Convert to deal">
       <h2>Convert to deal</h2>
@@ -55,7 +57,7 @@ export function ConvertDialog({ task, meId, onClose }: { task: { id: string; tit
       <Field label="Leader">{(id) => <select id={id} className="in" value={v.leaderId} onChange={set("leaderId")}>{team.data?.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       <Field label="Why are we pursuing this?">{(id) => <input id={id} className="in" value={v.whyPursue} onChange={set("whyPursue")} />}</Field>
       {!task.dueDate && <Field label="Due date (becomes the next step)">{(id) => <input id={id} className="in" type="date" value={v.dueDate} onChange={set("dueDate")} />}</Field>}
-      {pipe?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
+      {pipe?.key === "DEAL_BID" && <SubmissionDeadlineFields value={v} onChange={patch => setV({ ...v, ...patch })} />}
       <div style={{ display: "flex", gap: 10 }}>
         <Field label="Value (optional)">{(id) => <input id={id} className="in" type="number" min="1" value={v.value} onChange={set("value")} />}</Field>
         <Field label="Currency">{(id) => <select id={id} className="in" value={v.currency} onChange={set("currency")}><option>INR</option><option>USD</option><option>EUR</option></select>}</Field>

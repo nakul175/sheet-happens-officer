@@ -1,6 +1,7 @@
 "use client";
 // SHO-US-10.5 / 12.6: the one grouped view of deals. Columns are a pipeline's stages (Paused, Done and Lost share the last
 // column). Desktop: columns scroll sideways inside the board. Phone: the same groups as a vertical list.
+import { compareSubmissionDeadlines, submissionDeadlineLabel, submissionDeadlinePassed } from "@/lib/submission-deadline";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { api, dueLabel, isOverdue } from "@/components/api";
@@ -10,7 +11,7 @@ import { Menu, Modal } from "@/components/ui";
 export type BoardDeal = {
   id: string; name: string; archived: boolean; pipeline: { id: string; key: string; name: string } | null; stage: { id: string; name: string; category: string } | null;
   organisation: { id: string; name: string } | null; leader: { id: string; name: string } | null; value: number | null; currency: string | null;
-  submissionDeadline: string | null; nextStep: { title: string; dueDate: string | null } | null; needsNextStep: boolean; stalled: boolean;
+  submissionDeadline: string | null; submissionDeadlineAt?: string | null; submissionDeadlineZone?: string | null; submissionDeadlineTime?: string | null; nextStep: { title: string; dueDate: string | null } | null; needsNextStep: boolean; stalled: boolean;
 };
 export type BoardStage = Stage & { id: string; name: string; category: string };
 type Col = { key: string; title: string; stages: BoardStage[]; deals: BoardDeal[] };
@@ -26,7 +27,7 @@ export function columnsFor(stages: BoardStage[], deals: BoardDeal[], bid: boolea
     const c = cols.find((c) => c.stages.some((s) => s.id === d.stage!.id));
     c?.deals.push(d);
   }
-  if (bid) for (const c of cols) c.deals.sort((a, b) => (a.submissionDeadline ?? "9999").localeCompare(b.submissionDeadline ?? "9999"));
+  if (bid) for (const c of cols) c.deals.sort((a, b) => compareSubmissionDeadlines(a, b));
   return cols;
 }
 
@@ -54,7 +55,7 @@ function Card({ d, stages, onMove, bid }: { d: BoardDeal; stages: BoardStage[]; 
       </div>
       {d.organisation && <div className="sub2">{d.organisation.name}</div>}
       <div className="sub2">{money(d.value, d.currency)}{d.leader ? ` · ${d.leader.name}` : ""}</div>
-      {bid && d.submissionDeadline && <div className={`sub2${isOverdue(d.submissionDeadline) ? " over" : ""}`}>{isOverdue(d.submissionDeadline) ? "Deadline passed " : "Submit by "}{dueLabel(d.submissionDeadline)}</div>}
+      {bid && d.submissionDeadline && <div className={`sub2${submissionDeadlinePassed(d) ? " over" : ""}`}>{submissionDeadlinePassed(d) ? "Deadline passed " : "Submit by "}{submissionDeadlineLabel(d)}</div>}
       <div className="sub2">
         {d.nextStep ? <>Next: {d.nextStep.title} · <span className={isOverdue(d.nextStep.dueDate) ? "over" : ""}>{dueLabel(d.nextStep.dueDate)}</span></> : d.needsNextStep ? <span className="chip red">Needs a next step</span> : null}
         {d.stalled && <span className="chip gold" style={{ marginLeft: 4 }}>Stalled</span>}

@@ -8,6 +8,7 @@ import { WORKSTREAM_DEAL, crmMode, crmProjectWhere, crmVisible, requireCrm } fro
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { orgOf } from "@/lib/orgs";
+import { deadlineJSON, deadlinePatch, type DeadlineInput } from "@/lib/submission-deadline-data";
 import { taskAccess } from "@/lib/tasks";
 
 export const STALL_DAYS = 30;
@@ -16,7 +17,7 @@ export const OPEN_CATEGORIES = ["NOT_STARTED", "ACTIVE", "PAUSED"] as const;
 const WORKING_CATEGORIES = ["NOT_STARTED", "ACTIVE"] as const; // "Needs a next step" and "Stalled" apply to these only
 
 export type Currency = "INR" | "USD" | "EUR";
-export type DealDetailsInput = {
+export type DealDetailsInput = DeadlineInput & {
   whyPursue?: string; need?: string | null; serviceLine?: string | null; value?: number | null; currency?: Currency | null;
   probability?: number | null; expectedClose?: string | null; introducedBy?: string | null; submissionDeadline?: string | null;
 };
@@ -72,6 +73,7 @@ export async function createDeal(
   isoDate(input.nextStep.dueDate);
   const isBid = pipeline.key === "DEAL_BID";
   if (isBid && !input.submissionDeadline) throw new ApiError(400, "A bid needs a submission deadline.");
+  const cutoff = deadlinePatch(input, undefined, isBid);
   const leader = await db.user.findUnique({ where: { id: input.leaderId } });
   if (!leader || !isActive(leader) || leader.workspaceId !== u.workspaceId) throw new ApiError(400, "Choose an active person as Leader.");
   const { value, currency } = normaliseValue(input.value, input.currency);
@@ -98,7 +100,7 @@ export async function createDeal(
       data: {
         projectId: project.id, workspaceId: u.workspaceId, whyPursue: why, need: clean(input.need), serviceLine: clean(input.serviceLine),
         value, currency, probability, expectedClose: input.expectedClose ? isoDate(input.expectedClose) : null,
-        introducedBy: clean(input.introducedBy), submissionDeadline: input.submissionDeadline ? isoDate(input.submissionDeadline) : null,
+        introducedBy: clean(input.introducedBy), ...cutoff,
       },
     });
     await tx.dealParty.create({ data: { projectId: project.id, organisationId: org.id, role: "BUYER" } });
@@ -198,11 +200,12 @@ function detailsState(d: DetailsRow | Record<string, unknown>) {
     whyPursue: r.whyPursue, need: r.need, serviceLine: r.serviceLine, value: r.value === null || r.value === undefined ? null : Number(r.value), currency: r.currency,
     probability: r.probability, expectedClose: r.expectedClose ? dayOnly(r.expectedClose) : null, introducedBy: r.introducedBy,
     submissionDeadline: r.submissionDeadline ? dayOnly(r.submissionDeadline) : null,
+    submissionDeadlineAt: r.submissionDeadlineAt?.toISOString() ?? null, submissionDeadlineZone: r.submissionDeadlineZone ?? null,
   };
 }
 
 /** Builds a Prisma update from a validated patch. Returns what changed for the action log. */
-function detailsPatch(input: DealDetailsInput, cur: DetailsRow) {
+function detailsPatch(input: DealDetailsInput, cur: DetailsRow, bid = true) {
   const data: Prisma.DealDetailsUpdateInput = {};
   if (input.whyPursue !== undefined) { const v = input.whyPursue.trim(); if (!v) throw new ApiError(400, "Say in one line why to pursue this."); data.whyPursue = v; }
   if (input.need !== undefined) data.need = clean(input.need);
@@ -216,12 +219,14 @@ function detailsPatch(input: DealDetailsInput, cur: DetailsRow) {
   if (input.probability !== undefined) data.probability = checkProbability(input.probability);
   if (input.expectedClose !== undefined) data.expectedClose = input.expectedClose ? isoDate(input.expectedClose) : null;
   if (input.introducedBy !== undefined) data.introducedBy = clean(input.introducedBy);
-  if (input.submissionDeadline !== undefined) data.submissionDeadline = input.submissionDeadline ? isoDate(input.submissionDeadline) : null;
+  Object.assign(data, deadlinePatch(input, cur, bid));
   return data;
 }
 
 async function applyDetails(tx: Parameters<Parameters<typeof db.$transaction>[0]>[0], projectId: string, input: DealDetailsInput, cur: DetailsRow) {
-  const data = detailsPatch(input, cur);
+  // project-lookup-ok: caller authorized projectAccess for this deal before reading its pipeline.
+  const p = await tx.project.findUnique({ where: { id: projectId }, select: { pipeline: { select: { key: true } } } });
+  const data = detailsPatch(input, cur, p?.pipeline?.key === "DEAL_BID");
   if (Object.keys(data).length) await tx.dealDetails.update({ where: { projectId }, data });
 }
 
@@ -289,7 +294,9 @@ export async function updateDealDetails(user: Actor, projectId: string, input: D
   if (a.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only deals have these details.");
   const cur = await db.dealDetails.findUnique({ where: { projectId } });
   if (!cur) throw notFound("Deal");
-  const data = detailsPatch(input, cur);
+  // project-lookup-ok: caller authorized projectAccess for this deal before reading its pipeline.
+  const p = await db.project.findUnique({ where: { id: projectId }, select: { pipeline: { select: { key: true } } } });
+  const data = detailsPatch(input, cur, p?.pipeline?.key === "DEAL_BID");
   if (!Object.keys(data).length) return;
   const before = detailsState(cur);
   await db.$transaction(async (tx) => {
@@ -365,7 +372,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
       stage: p.stage ? { id: p.stage.id, name: p.stage.name, category: p.stage.category } : null,
       organisation: p.parties[0]?.organisation ?? null, leader: p.members[0]?.user ?? null,
       value: p.deal?.value === null || p.deal?.value === undefined ? null : Number(p.deal.value), currency: p.deal?.currency ?? null,
-      submissionDeadline: dayOnly(p.deal?.submissionDeadline ?? null),
+      ...(p.deal ? deadlineJSON(p.deal) : { submissionDeadline: null, submissionDeadlineAt: null, submissionDeadlineZone: null, submissionDeadlineTime: null }),
       nextStep: sig.nextStep,
       needsNextStep: isWorking(p.stage?.category) && !p.archivedAt && !sig.nextStep,
       stalled: !p.archivedAt && isStalled(p.stage?.category, sig.lastActivity, now),
@@ -390,7 +397,7 @@ export async function dealBlock(projectId: string) {
     stageReason: p.stageReason,
     details: d ? {
       whyPursue: d.whyPursue, need: d.need, serviceLine: d.serviceLine, value: d.value === null ? null : Number(d.value), currency: d.currency,
-      probability: d.probability, expectedClose: dayOnly(d.expectedClose), introducedBy: d.introducedBy, submissionDeadline: dayOnly(d.submissionDeadline),
+      probability: d.probability, expectedClose: dayOnly(d.expectedClose), introducedBy: d.introducedBy, ...deadlineJSON(d),
     } : null,
     parties: p.parties.map((x) => ({ id: x.id, role: x.role, organisation: x.organisation })),
     organisation: p.parties.find((x) => x.role === "BUYER")?.organisation ?? null,
@@ -497,6 +504,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
   });
   if (dup && !input.force) throw new ApiError(409, `A deal called "${name}" already exists for ${org.name}.`, { needsConfirm: "duplicate", existingId: dup.id });
 
+  const cutoff = deadlinePatch(input, undefined, pipeline!.key === "DEAL_BID");
   const first = pipeline!.stages[0];
   return db.$transaction(async (tx) => {
     const project = await tx.project.create({
@@ -520,7 +528,7 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
       data: {
         projectId: project.id, workspaceId: u.workspaceId, whyPursue: why!, need: clean(input.need), serviceLine: clean(input.serviceLine), value, currency, probability,
         expectedClose: input.expectedClose ? isoDate(input.expectedClose) : null, introducedBy: clean(input.introducedBy),
-        submissionDeadline: input.submissionDeadline ? isoDate(input.submissionDeadline) : null,
+        ...cutoff,
       },
     });
     await tx.dealParty.create({ data: { projectId: project.id, organisationId: org.id, role: "BUYER" } });

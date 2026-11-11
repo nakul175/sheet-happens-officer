@@ -1,4 +1,5 @@
 "use client";
+import { submissionDeadlineLabel, submissionDeadlinePassed } from "@/lib/submission-deadline";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui";
 import { useState } from "react";
@@ -51,7 +52,7 @@ export default function DealsView() {
             <tbody>
               {deals.map((d) => (
                 <tr key={d.id}>
-                  <td><Link href={`/projects/${d.id}`}>{d.name}</Link> {d.stalled && <span className="chip gold">Stalled</span>}</td>
+                  <td><Link href={`/projects/${d.id}`}>{d.name}</Link> {d.submissionDeadline && <div className={submissionDeadlinePassed(d) ? "over" : ""}>Submit by {submissionDeadlineLabel(d)}</div>} {d.stalled && <span className="chip gold">Stalled</span>}</td>
                   <td>{d.organisation ? <Link href={`/accounts/${d.organisation.id}`}>{d.organisation.name}</Link> : "—"}</td>
                   <td><span className="chip">{d.stage?.name}</span><div style={{ fontSize: 12, color: "var(--muted)" }}>{d.pipeline?.name}</div></td>
                   <td>{money(d.value, d.currency)}</td>
