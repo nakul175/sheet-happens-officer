@@ -149,6 +149,12 @@ export const dealCreate = dealDetails.extend({
   nextStep: z.object({ title: z.string().trim().min(1, "Add a first next step.").max(500), dueDate: isoDay }),
   force: z.boolean().optional(),
 });
+export const dealDetailsEdit = dealDetails.extend({ expectedPipelineId: z.string().min(1).optional() });
+export const dealBidConversion = z.object({
+  expectedRevision: z.string().regex(/^[a-f0-9]{64}$/, "Reopen conversion to load the current deal."),
+  stageId: z.string().min(1, "Choose a Bid stage."), submissionDeadline: isoDay,
+  reason: z.string().trim().max(1000).nullish(), fields: dealDetails.strict().optional(),
+}).strict();
 export const dealStage = z.object({ stageId: z.string().min(1), reason: z.string().trim().max(1000).nullish(), fields: dealDetails.optional() });
 export const dealParty = z.object({ organisationId: z.string().min(1, "Choose an organisation."), role: z.enum(["FUNDER", "IMPLEMENTING_OFFICE", "PARTNER", "OTHER", "BUYER"]) });
 export const taskIdea = z.object({ isIdea: z.boolean() });
