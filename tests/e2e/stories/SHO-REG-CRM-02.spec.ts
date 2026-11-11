@@ -150,6 +150,10 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
     expect((await observer.c.get(`/api/orgs/${orgId}/history`)).status).toBe(200);
     expect((await observer.c.patch(`/api/contacts/${contactId}`, { role: "Ordinary Admin override" })).status).toBe(200);
     expect((await admin.api.get(`/api/contacts/${contactId}`)).json.contact.role).toBe("Ordinary Admin override");
+    await observerSession.page.reload();
+    await observerSession.page.getByRole("main").getByText("More", { exact: true }).click();
+    await observerSession.page.getByRole("button", { name: "History", exact: true }).click();
+    await expect(observerSession.page.getByText("contact.created", { exact: false }).first()).toBeVisible();
   } finally { await observerSession.ctx.close(); }
   const linked = await postTaskCurrent(admin, taskId, "links", { contactId });
   expect(linked.status).toBe(201);
@@ -191,9 +195,20 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task.links).toHaveLength(0);
   expect((await admin.api.get(`/api/tasks/${dealTaskId}`)).json.task.links).toHaveLength(0);
   expect((await admin.api.get(`/api/orgs/${orgId}`)).json.organisation.tasks.map((item: { id: string }) => item.id)).not.toContain(taskId);
+  const removedHistory = await admin.api.get(`/api/orgs/${orgId}/history`);
+  expect(removedHistory.status).toBe(200);
+  expect(removedHistory.json.items).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: undoId, action: "contact.removed", undone: false }),
+  ]));
 
   expect((await admin.api.post(`/api/actions/${undoId}/undo`, {})).status).toBe(200);
   expect((await admin.api.post(`/api/actions/${undoId}/undo`, {})).status).toBe(409);
+  const restoredHistory = await admin.api.get(`/api/orgs/${orgId}/history`);
+  expect(restoredHistory.status).toBe(200);
+  expect(restoredHistory.json.items).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: undoId, action: "contact.removed", undone: true }),
+    expect.objectContaining({ action: "undo", before: expect.objectContaining({ undoes: undoId }) }),
+  ]));
   const restored = await admin.api.get(`/api/contacts/${contactId}`);
   expect(restored.status).toBe(200);
   expect(restored.json.contact).toMatchObject({ organisationId: orgId, role: "Senior liaison" });
@@ -202,5 +217,5 @@ test("SHO-REG-CRM-02 keeps contact in its organisation across edit, link removal
   expect((await admin.api.get(`/api/tasks/${dealTaskId}`)).json.task.links).toEqual([expect.objectContaining({ contact: expect.objectContaining({ id: contactId, organisationId: orgId }) })]);
   expect(createHash("sha256").update(JSON.stringify((await admin.api.get(`/api/orgs/${sentinelId}`)).json.organisation)).digest("hex")).toBe(sentinelHash);
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, orgId, sentinelId, projectId: project.id, dealId, taskId, dealTaskId, contactId, mobileWidth: 390,
-    originalOrganisationFixed: true, nonCreatorReadOnly: true, deniedWritesPreservedContact: true, memberCreatorEdit: true, adminNoncreatorEdit: true, ordinaryAdminNoncreatorEdit: true, staleFormConflict: true, historyAdminOnly: true, linkedTaskHiddenOnRemoval: true, linkedTaskRestoredOnUndo: true, dealTaskContactLinkHiddenOnRemovalAndRestoredOnUndo: true, replayRejected: true, sentinelPreserved: true }, null, 2));
+    originalOrganisationFixed: true, nonCreatorReadOnly: true, deniedWritesPreservedContact: true, memberCreatorEdit: true, adminNoncreatorEdit: true, ordinaryAdminNoncreatorEdit: true, staleFormConflict: true, historyAdminOnly: true, ordinaryAdminHistoryUi: true, removalAndUndoHistory: true, linkedTaskHiddenOnRemoval: true, linkedTaskRestoredOnUndo: true, dealTaskContactLinkHiddenOnRemovalAndRestoredOnUndo: true, replayRejected: true, sentinelPreserved: true }, null, 2));
 });
