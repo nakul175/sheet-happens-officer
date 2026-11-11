@@ -35,6 +35,7 @@ Settings (environment variables):
 | `SUPER_ADMIN_EMAILS` | Comma-separated addresses that become Super Admin at sign-up |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email sending; without a key, mail goes to the outbox folder (never in production) |
 | `JOB_SECRET` | Bearer token for `POST /api/jobs/<name>` (at least 16 characters) |
+| `TEST_CLOCK` / `TEST_CLOCK_SECRET` | Optional local-only story-spec clock. It is honored only with `TEST_CLOCK=1`, a non-production process, a loopback `DATABASE_URL`, and a valid HMAC request signature. Remote/staging/production servers ignore it. |
 
 ## Test
 

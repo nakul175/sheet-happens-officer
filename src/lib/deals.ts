@@ -339,7 +339,7 @@ export const isStalled = (category: string | null | undefined, lastActivity: Dat
 const visibleTo = (user: Actor): Prisma.ProjectWhereInput => (isAdmin(user) ? {} : { members: { some: { userId: user.id } } });
 
 /** SHO-US-12.6 data and the Deals screen. `mine` limits to deals the person leads or holds a task in (AC6). */
-export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string } = {}) {
+export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boolean; pipelineId?: string } = {}, now = Date.now()) {
   requireCrm(user);
   // project-lookup-ok: requireCrm and visibleTo(user) scope this deal list
   const projects = await db.project.findMany({
@@ -356,7 +356,6 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
     },
   });
   const signals = await dealSignals(projects);
-  const now = Date.now();
   return projects.map((p) => {
     const sig = signals.get(p.id)!;
     return {
@@ -375,7 +374,7 @@ export async function listDeals(user: Actor, o: { archived?: boolean; mine?: boo
 }
 
 /** The deal block on the project page: details, parties, pipeline stages, next step and flags. */
-export async function dealBlock(projectId: string) {
+export async function dealBlock(projectId: string, now = Date.now()) {
   // project-lookup-ok: getProject authorizes projectAccess before loading the deal block
   const p = await db.project.findUnique({
     where: { id: projectId },
@@ -396,7 +395,7 @@ export async function dealBlock(projectId: string) {
     organisation: p.parties.find((x) => x.role === "BUYER")?.organisation ?? null,
     nextStep: sig.nextStep,
     needsNextStep: isWorking(p.stage?.category) && !p.archivedAt && !sig.nextStep,
-    stalled: !p.archivedAt && isStalled(p.stage?.category, sig.lastActivity),
+    stalled: !p.archivedAt && isStalled(p.stage?.category, sig.lastActivity, now),
   };
 }
 

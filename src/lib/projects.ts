@@ -72,7 +72,7 @@ export async function listProjects(user: Actor, archived: boolean) {
   }));
 }
 
-export async function getProject(user: Actor, projectId: string) {
+export async function getProject(user: Actor, projectId: string, now = Date.now()) {
   const a = await projectAccess(user, projectId);
   const [sections, members, open] = await Promise.all([
     db.section.findMany({ where: { projectId }, orderBy: { position: "asc" } }),
@@ -81,7 +81,7 @@ export async function getProject(user: Actor, projectId: string) {
   ]);
   const manage = a.role === "LEADER";
   const isDeal = a.project.typeId === WORKSTREAM_DEAL; // a hidden deal was already "not found" in projectAccess (CRM_VISIBLE)
-  const deal = isDeal ? await dealBlock(projectId) : null;
+  const deal = isDeal ? await dealBlock(projectId, now) : null;
   return {
     type: isDeal ? "DEAL" : "PROJECT",
     deal,
