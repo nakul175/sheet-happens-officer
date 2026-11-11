@@ -58,6 +58,18 @@ EMAIL_OUTBOX_DIR=/tmp/sho-outbox TASKBOARD_URL=http://localhost:3100 \
   npm test
 ```
 
+## Pull request intake
+
+Pull requests into `main` and `qa/story-e2e` run the `intake` job (`.github/workflows/intake.yml`) when they are opened, edited, synchronized, or reopened. Editing the description re-runs the check without a new push. The job uses the default `GITHUB_TOKEN` with read-only permissions and does not print the token.
+
+It fails, with one message per missing item, when:
+
+1. The body has no Risk line (`Risk: Low`, `Medium`, `High`, or `Critical`).
+2. The Self-check section does not contain the current head SHA (the full SHA, or a prefix of at least 7 characters).
+3. A change under `src/app/**` or `src/components/**` does not include `tests/e2e/stories/APL-xxxx.spec.ts` for an `APL-xxxx` id in the title or a `Refs APL-xxxx` line. Every `it` / `test` title in that spec needs `qa:TC-<id>` or the literal `qa:TC missing`.
+
+Rule 3 does not apply to a test-only change (every file under `tests/` or a Vitest config), an API or job change whose non-test files stay under `src/app/api/**`, `src/lib/**`, `scripts/**`, or `jobs/` and which adds or changes a Vitest test, or a body line `No story spec: <reason>`. Rules 1 and 2 still apply.
+
 ## Deploy (story 9.3)
 
 One DigitalOcean droplet (Ubuntu 24.04, BLR1) runs the app behind Caddy; DigitalOcean Managed
