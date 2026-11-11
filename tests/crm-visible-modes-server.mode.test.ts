@@ -397,6 +397,39 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
     }
   });
 
+  it("keeps contact reads and writes within the configured CRM visibility mode", async () => {
+    const on = running.get("on")!;
+    const admins = running.get("admins")!;
+    const off = running.get("off")!;
+    const memberEmail = `nakul17+zz-${runId}-contact-member@aplyd.com`;
+    const adminEmail = `nakul17+zz-${runId}-contact-admin@aplyd.com`;
+    seed.emails.push(memberEmail, adminEmail);
+    const member = await signIn(on, `ZZ-TEST contact member ${tag}`, memberEmail);
+    const ordinaryAdmin = await signIn(on, `ZZ-TEST contact admin ${tag}`, adminEmail);
+    seed.userIds.push(member.id, ordinaryAdmin.id);
+    await promoteToAdmin(on, ordinaryAdmin.id);
+    const org = await call(on.base, member.cookie, "POST", "/api/orgs", { name: `ZZ-TEST contact modes ${tag}` });
+    expect(org.status, org.text).toBe(201);
+    const orgId = (org.json?.organisation as { id: string }).id;
+    seed.orgIds.push(orgId);
+    const created = await call(on.base, member.cookie, "POST", `/api/orgs/${orgId}/contacts`, { name: `ZZ-TEST contact ${tag}` });
+    expect(created.status, created.text).toBe(201);
+    const contactId = (created.json?.contact as { id: string }).id;
+    expect((await call(on.base, member.cookie, "GET", `/api/contacts/${contactId}`)).status).toBe(200);
+    for (const [server, cookie] of [[admins, member.cookie], [off, ordinaryAdmin.cookie]] as const) {
+      expect((await call(server.base, cookie, "GET", `/api/orgs/${orgId}/contacts`)).status).toBe(404);
+      expect((await call(server.base, cookie, "GET", `/api/contacts/${contactId}`)).status).toBe(404);
+      expect((await call(server.base, cookie, "POST", `/api/orgs/${orgId}/contacts`, { name: `ZZ-TEST refused ${tag}` })).status).toBe(404);
+      expect((await call(server.base, cookie, "PATCH", `/api/contacts/${contactId}`, { role: "Refused" })).status).toBe(404);
+      expect((await call(server.base, cookie, "DELETE", `/api/contacts/${contactId}`)).status).toBe(404);
+    }
+    expect((await call(admins.base, ordinaryAdmin.cookie, "GET", `/api/contacts/${contactId}`)).status).toBe(200);
+    expect((await call(admins.base, ordinaryAdmin.cookie, "PATCH", `/api/contacts/${contactId}`, { role: "Allowed Admin" })).status).toBe(200);
+    expect((await call(on.base, member.cookie, "GET", `/api/contacts/${contactId}`)).json?.contact).toMatchObject({ role: "Allowed Admin" });
+    expect((await call(on.base, ordinaryAdmin.cookie, "DELETE", `/api/contacts/${contactId}`)).status).toBe(204);
+    expect((await call(on.base, member.cookie, "GET", `/api/contacts/${contactId}`)).status).toBe(404);
+  }, 120_000);
+
   it("Hidden deals stay hidden through every read path", async () => {
     const open = running.get("on");
     expect(open, "the on server is running").toBeTruthy();
