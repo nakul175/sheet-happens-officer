@@ -120,7 +120,7 @@ export async function createDeal(
 
 // ---- stages (SHO-US-10.3) ----
 
-/** Tasks still open on a deal, including subtasks. Won and Lost refuse while any of these remain. */
+/** Tasks still open on a deal, including subtasks. Lost refuses while any of these remain; Won retains follow-up work. */
 export function blockingTaskWhere(projectId: string) {
   return { projectId, deletedAt: null, completedAt: null };
 }
@@ -142,7 +142,7 @@ function missingFields(required: string[], d: Record<string, unknown>) {
   return required.filter((k) => d[k] === null || d[k] === undefined || d[k] === "");
 }
 
-export async function moveStage(user: Actor, projectId: string, input: { stageId: string; reason?: string | null; fields?: DealDetailsInput }) {
+export async function moveStage(user: Actor, projectId: string, input: { stageId: string; expectedStageId?: string | null; reason?: string | null; fields?: DealDetailsInput }) {
   requireCrm(user);
   const a = await projectAccess(user, projectId, { write: true });
   requireWrite(a);
@@ -150,12 +150,15 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   const stage = await db.stage.findFirst({ where: { id: input.stageId, pipelineId: a.project.pipelineId } });
   if (!stage) throw new ApiError(400, "Choose a stage from this deal's pipeline.");
   const cur = a.project.stageId ? await db.stage.findUnique({ where: { id: a.project.stageId } }) : null;
+  if (input.expectedStageId !== undefined && input.expectedStageId !== a.project.stageId) {
+    throw new ApiError(409, "This deal changed. Refresh it before changing its stage.");
+  }
   if (cur?.id === stage.id) return { stage };
   const reason = clean(input.reason);
   if (stage.needsReason && !reason) throw new ApiError(400, `Say why this deal is moving to "${stage.name}".`, { needsReason: true });
 
-  // AC6: a deal cannot be won or lost while any task is open. Nothing is closed or archived for the person.
-  if (stage.category === "DONE" || stage.category === "LOST") {
+  // SHO-3050: Won retains operational work. Lost keeps its existing open-task safeguard.
+  if (stage.category === "LOST") {
     const open = await openTasks(projectId);
     if (open.length) {
       throw new ApiError(409, `${open.length} task${open.length === 1 ? " is" : "s are"} still open. Complete or delete ${open.length === 1 ? "it" : "them"} before marking this deal ${stage.name}.`, openTaskBlock(open));
@@ -172,8 +175,14 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   }
 
   return db.$transaction(async (tx) => {
+    // Claim the snapshot before changing details or emitting history/notifications. A stale
+    // transition rolls the entire transaction back, including optional detail edits.
+    const changed = await tx.project.updateMany({
+      where: { id: projectId, stageId: a.project.stageId, updatedAt: a.project.updatedAt },
+      data: { stageId: stage.id, stageReason: reason, stageChangedAt: new Date() },
+    });
+    if (!changed.count) throw new ApiError(409, "This deal changed. Refresh it before changing its stage.");
     if (input.fields && Object.keys(stripUndefined(input.fields)).length) await applyDetails(tx, projectId, input.fields, details);
-    await tx.project.update({ where: { id: projectId }, data: { stageId: stage.id, stageReason: reason, stageChangedAt: new Date() } });
     const leader = a.project.members.find((m) => m.role === "LEADER")!.userId;
     await notify(tx, [leader], "DEAL_STAGE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, stage: stage.name } });
     await logAction(tx, {
@@ -327,7 +336,7 @@ export async function dealSignals(projects: SummaryProject[]) {
   const l = maxOf(logs, "createdAt"), tt = maxOf(taskTouch, "updatedAt"), nn = maxOf(notes, "createdAt");
   for (const p of projects) {
     const times = [p.createdAt, p.stageChangedAt, l.get(p.id), tt.get(p.id), nn.get(p.id)].filter((x): x is Date => !!x);
-    none.set(p.id, { nextStep: next.get(p.id) ?? null, lastActivity: new Date(Math.max(...times.map((x) => x.getTime()))) });
+    none.set(p.id, { nextStep: p.stage?.category === "DONE" ? null : next.get(p.id) ?? null, lastActivity: new Date(Math.max(...times.map((x) => x.getTime()))) });
   }
   return none;
 }

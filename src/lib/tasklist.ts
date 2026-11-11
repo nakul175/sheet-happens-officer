@@ -62,7 +62,7 @@ export async function listFiltered(user: Actor, projectId: string, f: ListFilter
 }
 
 /** Counts for the heading ("3 overdue"): open top-level tasks of the project.
- * `openTasks` counts every open task, including subtasks, which is the set a Won or Lost move refuses. */
+ * `openTasks` counts every open task, including subtasks, which is the set a Lost move refuses. */
 export async function projectSummary(user: Actor, projectId: string) {
   await projectAccess(user, projectId);
   const today = startOfTodayIST();
