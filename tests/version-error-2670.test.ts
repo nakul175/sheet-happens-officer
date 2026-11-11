@@ -258,6 +258,12 @@ describe("one error shape for a task version (APL-2670)", () => {
       }
       // A stale instant is compared by the service after schema validation.
       const stale = new Date(Date.parse(fx.t0) - 1000).toISOString();
+      const mixed = await raw(method, fx.id, suffix, { ...invalidSchema, expectedUpdatedAt: stale }, fx.worker.c.cookie);
+      expect(mixed.status, `${path} stale version with invalid body`).toBe(400);
+      const mixedBody = JSON.parse(mixed.text) as { error?: string; issues?: { path: unknown[] }[] };
+      expect(mixedBody.error).toBe("Validation failed");
+      expect(mixedBody.issues?.length).toBeGreaterThan(0);
+      expect(mixedBody.issues?.some((issue) => issue.path[0] !== "expectedUpdatedAt")).toBe(true);
       const result = await raw(method, fx.id, suffix, { ...validSchema, expectedUpdatedAt: stale }, fx.lead.c.cookie);
       expect(result, `${path} stale valid body`).toEqual({ status: 409, text: JSON.stringify(CONFLICT) });
     }
