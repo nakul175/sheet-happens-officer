@@ -34,7 +34,7 @@ jobs:
       DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
       DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
       EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
-      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com,nakul17+zz-sa@aplyd.com
       APP_URL: http://localhost:3100
       TASKBOARD_URL: http://localhost:3100
       JOB_SECRET: ci-only-not-a-real-secret-0123
@@ -52,6 +52,8 @@ jobs:
       - name: Node tests for scripts/ci
         run: node --test "scripts/ci/**/*.test.mjs"
       - run: npm ci
+      - name: SHO-2882 local-only selection policy
+        run: node scripts/ci/check-local-only-2882.mjs
       # APL-2761. Listing loads every story spec without a browser or a server. One file that cannot load (a vitest import)
       # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
       - name: Playwright collects the story specs
@@ -113,6 +115,21 @@ jobs:
             if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
           done
           npx playwright test "${specs[@]}"
+      - name: SHO-2882 local outbox CRM story executes all four cases
+        env:
+          SHO_QA_PASS: correct-horse-9
+          BASE_URL: http://localhost:3100
+          CRM_VISIBLE: all
+        run: |
+          npx playwright test tests/e2e/stories/APL-2609.spec.ts --reporter=json > local-only-2882.json
+          node -e 'const r=require("./local-only-2882.json"),s=r.stats;if(!s||s.expected!==4||s.unexpected||s.skipped||s.flaky||(r.errors??[]).length)throw Error("APL-2609 requires four passed, zero skipped/failed");console.log("SHO-2882: four local outbox cases passed")'
+      - name: Preserve local-only CRM story evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sho-2882-local-${{ github.sha }}
+          path: local-only-2882.json
+          if-no-files-found: warn
       # APL-2729 AC4. One production server per CRM_VISIBLE mode, after the build.
       # The file sets its own test-only job token. A short JOB_SECRET must fail this step, not skip it.
       - name: Reminder modes (one server per CRM_VISIBLE)
