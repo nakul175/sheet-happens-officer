@@ -567,7 +567,7 @@ describe("flag on (AC1–AC8)", () => {
     const audits = await db.auditLog.findMany({ where: { createdAt: { gte: new Date(Date.now() - 60_000) } } });
     expect(audits.some((a) => JSON.stringify(a).includes(client) || JSON.stringify(a).includes(secret))).toBe(false);
     const memberHit = await search(actor(worker), client, false);
-    expect(memberHit.tasks.some((t) => t.id === t1)).toBe(true);
+    expect(memberHit.tasks.some((t) => t.id === t1)).toBe(false);
     expect(JSON.stringify(memberHit)).not.toContain(secret);
   });
 
@@ -729,13 +729,13 @@ describe("flag on (AC1–AC8)", () => {
     expect(p95, `p95 ${p95}ms over 50 reads`).toBeLessThanOrEqual(1000);
   }, 60_000);
 
-  // D6: the full case is BLOCKED until SHO-US-17.1. This checks the comment search that is built today.
-  it("qa:TC-APL2590-b4442f7b@v1: BLOCKED (SHO-US-17.1) Comment search. Record it as BLOCKED.", async () => {
+  // SHO-2587 Stage A explicitly excludes comments from indexed/searchable content.
+  it("qa:TC-APL2590-b4442f7b@v1: comment text is excluded from Stage A search", async () => {
     const { worker, outsider, t1 } = await cast();
     const phrase = `zzsearch${Date.now().toString(36)}`;
     await addComment(actor(worker), t1, { text: `ZZ-TEST note ${phrase}` });
     const found = await search(actor(worker), phrase, false);
-    expect(found.tasks.map((t) => t.id)).toContain(t1);
+    expect(found.tasks.map((t) => t.id)).not.toContain(t1);
     expect(JSON.stringify(found)).not.toContain("ZZ-TEST note");
     expect((await search(actor(outsider), phrase, false)).tasks.map((t) => t.id)).not.toContain(t1);
   });

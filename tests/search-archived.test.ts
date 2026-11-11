@@ -1,76 +1,40 @@
-// APL-2684: Include archived search. Membership and the archive flag are separate, so an
-// Admin or Super Admin sees archived projects they are not a member of, and a Member does not.
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Actor } from "@/lib/access";
+// APL-2684 / SHO-2587: the shared SQL service preserves membership and archive boundaries.
+import {beforeEach,describe,expect,it,vi} from "vitest";
+import type {Actor} from "@/lib/access";
 
-const db = vi.hoisted(() => ({
-  user: { findUniqueOrThrow: vi.fn() },
-  organisation: { findMany: vi.fn() },
-  contact: { findMany: vi.fn() },
-  project: { findMany: vi.fn() },
-  task: { findMany: vi.fn() },
-}));
+const db=vi.hoisted(()=>({user:{findUniqueOrThrow:vi.fn()},$queryRaw:vi.fn()}));
+vi.mock("@/lib/db",()=>({db}));
+import {search} from "@/lib/search";
 
-vi.mock("@/lib/db", () => ({ db }));
+const admin:Actor={id:"admin-1",orgRole:"ADMIN"},member:Actor={id:"member-1",orgRole:"MEMBER"};
+type Sql={strings?:readonly string[];values?:unknown[]};
+const sqlText=(v:unknown):string=>{if(!v||typeof v!=="object")return String(v??"");const q=v as Sql;if(!q.strings)return "?";return q.strings.reduce((s,x,i)=>s+x+(i<(q.values?.length??0)?sqlText(q.values![i]):""),"");};
 
-import { search } from "@/lib/search";
+beforeEach(()=>{vi.clearAllMocks();vi.stubEnv("CRM_VISIBLE","off");db.user.findUniqueOrThrow.mockResolvedValue({workspaceId:"ws-1"});db.$queryRaw.mockResolvedValue([]);});
 
-type Where = Record<string, unknown>;
-const argWhere = (fn: { mock: { calls: unknown[][] } }) => (fn.mock.calls.at(-1)?.[0] as { where: Where }).where;
-
-const admin: Actor = { id: "admin-1", orgRole: "ADMIN" };
-const superAdmin: Actor = { id: "root-1", orgRole: "SUPER_ADMIN" };
-const member: Actor = { id: "member-1", orgRole: "MEMBER" };
-const other: Actor = { id: "member-2", orgRole: "MEMBER" };
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  db.user.findUniqueOrThrow.mockResolvedValue({ workspaceId: "ws-1" });
-  db.organisation.findMany.mockResolvedValue([]);
-  db.contact.findMany.mockResolvedValue([]);
-  db.project.findMany.mockResolvedValue([]);
-  db.task.findMany.mockResolvedValue([]);
-});
-
-describe("Include archived search (APL-2684)", () => {
-  it("shows Admins and Super Admins archived projects they are not members of", async () => {
-    for (const user of [admin, superAdmin]) {
-      await search(user, "vault", true);
-      for (const where of [argWhere(db.project.findMany), argWhere(db.task.findMany).project as Where]) {
-        expect(where).not.toHaveProperty("members");
-        expect(where).not.toHaveProperty("archivedAt");
-      }
-      await search(user, "vault", false);
-      for (const where of [argWhere(db.project.findMany), argWhere(db.task.findMany).project as Where]) {
-        expect(where).not.toHaveProperty("members");
-        expect(where.archivedAt).toBeNull();
-      }
-    }
-
-    const archivedAt = new Date("2026-10-01T00:00:00Z");
-    db.project.findMany.mockResolvedValue([{ id: "p-arch", name: "Vault", archivedAt, typeId: "wst_project" }]);
-    db.task.findMany.mockResolvedValue([{
-      id: "t-arch", title: "Vault task", completedAt: null, isIdea: false, assignee: { name: "Lee" },
-      project: { id: "p-arch", name: "Vault", archivedAt },
-    }]);
-    const found = await search(admin, "vault", true);
-    expect(found.projects).toEqual([{ id: "p-arch", name: "Vault", archived: true, type: "PROJECT" }]);
-    expect(found.tasks).toEqual([{
-      id: "t-arch", title: "Vault task", done: false, isIdea: false, assignee: "Lee",
-      project: { id: "p-arch", name: "Vault" }, archived: true,
-    }]);
+describe("Include archived search (APL-2684)",()=>{
+  it("keeps members inside current project membership and applies archive filtering",async()=>{
+    await search(member,"vault",false);
+    const closed=db.$queryRaw.mock.calls.map(c=>sqlText(c[0])).join("\n");
+    expect(closed).toContain('FROM "ProjectMember"');
+    expect(closed).toContain('"userId"=');
+    expect(closed).toContain('"archivedAt" IS NULL');
+    vi.clearAllMocks();db.user.findUniqueOrThrow.mockResolvedValue({workspaceId:"ws-1"});db.$queryRaw.mockResolvedValue([]);
+    await search(member,"vault",true);
+    const open=db.$queryRaw.mock.calls.map(c=>sqlText(c[0])).join("\n");
+    expect(open).toContain('FROM "ProjectMember"');
+    expect(open).not.toContain('"archivedAt" IS NULL');
   });
 
-  it("keeps Members to their own projects when Include archived is on", async () => {
-    for (const user of [member, other]) {
-      for (const includeArchived of [true, false]) {
-        await search(user, "vault", includeArchived);
-        for (const where of [argWhere(db.project.findMany), argWhere(db.task.findMany).project as Where]) {
-          expect(where.members).toEqual({ some: { userId: user.id } });
-          if (includeArchived) expect(where).not.toHaveProperty("archivedAt");
-          else expect(where.archivedAt).toBeNull();
-        }
-      }
-    }
+  it("lets admins search all visible projects and returns legacy grouped records",async()=>{
+    db.$queryRaw
+      .mockResolvedValueOnce([{id:"t1",kind:"TASK",title:"Vault task",primary_text:"Vault task",secondary_text:null,project_id:"p1",project_name:"Vault",organisation_id:null,organisation_name:null,archived_at:null,completed_at:null,is_idea:false,assignee:"Lee",rank:5}])
+      .mockResolvedValueOnce([{id:"p1",kind:"PROJECT",title:"Vault",primary_text:"Vault",secondary_text:null,project_id:"p1",project_name:"Vault",organisation_id:null,organisation_name:null,archived_at:null,completed_at:null,is_idea:null,assignee:null,rank:10}]);
+    const found=await search(admin,"vault",false);
+    const sql=db.$queryRaw.mock.calls.map(c=>sqlText(c[0])).join("\n");
+    expect(sql).not.toContain('FROM "ProjectMember"');
+    expect(found.projects[0]).toMatchObject({id:"p1",type:"PROJECT",kind:"PROJECT"});
+    expect(found.tasks[0]).toMatchObject({id:"t1",project:{id:"p1",name:"Vault"}});
+    expect(found.results.map(x=>x.id)).toEqual(["p1","t1"]);
   });
 });

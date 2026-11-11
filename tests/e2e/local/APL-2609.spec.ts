@@ -274,9 +274,12 @@ async function searchScreen(mode: Mode, who: Who, q: string) {
     const answered = page.waitForResponse((r) => r.url().includes("/api/search?q=") && r.status() === 200, { timeout: 30_000 });
     await box.fill(q);
     await answered;
-    // The answer is on screen once it lists a result for these words or says nothing matches them.
+    // The answer is on screen once the unified search lists best matches (the
+    // matching words can be in the excerpt, not necessarily the link title)
+    // or says nothing matches them. The leak assertion below still inspects
+    // every returned link and the complete visible text.
     const main = page.getByRole("main");
-    await expect.poll(async () => (await main.getByRole("link").allTextContents()).some((l) => l.includes(q))
+    await expect.poll(async () => (await main.getByText("Best matches", { exact: true }).count()) > 0
       || (await main.getByText(`Nothing matches \u201c${q}\u201d`, { exact: false }).count()) > 0, { timeout: 30_000 }).toBe(true);
     const links = await main.getByRole("link").allTextContents();
     return { links, text: (await main.textContent()) ?? "" };
