@@ -10,7 +10,7 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
     if (!passwordOk(PASS)) throw new Error("SHO_QA_PASS must be at least 8 characters with a letter and a number.");
   });
 
-  test("AC1: the listed address (SHO_ADMIN_EMAIL) is the Super Admin and the Team page shows it (qa:TC missing)", async ({ admin }) => {
+  test("AC1: the listed address (SHO_ADMIN_EMAIL) is the Super Admin and the Team page shows it (qa:TC-2455@v1)", async ({ admin }) => {
     const me = (await admin.api.get("/api/auth/me")).json.user;
     expect(me.orgRole).toBe("SUPER_ADMIN");
     await admin.page.goto("/team");
@@ -19,7 +19,7 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
     await expect(row).toContainText("Super Admin");
   });
 
-  test("AC1 (sign-up path): the listed address is Super Admin, and an address that is not listed signs up as a Member (qa:TC missing)", async ({ anon, admin, later }) => {
+  test("AC1 (sign-up path): the listed address is Super Admin, and an address that is not listed signs up as a Member (qa:TC-2456@v1)", async ({ anon, admin, later }) => {
     const listed = String(process.env.SHO_ADMIN_EMAIL || admin.user.email);
     const listedPerson = await personByEmail(admin.api, listed);
     expect(listedPerson?.orgRole, "the listed address").toBe("SUPER_ADMIN");
@@ -35,7 +35,7 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
   });
 
   // @static: source only. The staging workflow passes --grep-invert @static, so this stays out of that run.
-  test("AC1 (source): sign-up and sign-in assign Super Admin only from the configured list (qa:TC missing)", { tag: "@static" }, () => {
+  test("AC1 (source): sign-up and sign-in assign Super Admin only from the configured list (qa:TC-2457@v1)", { tag: "@static" }, () => {
     const signup = readFileSync("src/app/api/auth/signup/route.ts", "utf8");
     const signin = readFileSync("src/app/api/auth/signin/route.ts", "utf8");
     expect(signup).toContain('orgRole: superAdminEmails().includes(email) ? "SUPER_ADMIN" : "MEMBER"');
@@ -44,13 +44,13 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
     expect(signin).toContain('user.orgRole = "SUPER_ADMIN"');
   });
 
-  test("AC2: an address that is not on the list is a Member (qa:TC missing)", async ({ member, admin }) => {
+  test("AC2: an address that is not on the list is a Member (qa:TC-2458@v1)", async ({ member, admin }) => {
     expect((await member.api.get("/api/auth/me")).json.user.orgRole).toBe("MEMBER");
     const people = (await admin.api.get("/api/team")).json.people as { email: string; orgRole: string }[];
     expect(people.find((p) => p.email === String(member.user.email).toLowerCase())?.orgRole).toBe("MEMBER");
   });
 
-  test("AC3: nobody can demote or deactivate the Super Admin in the app (qa:TC missing)", async ({ admin, member }) => {
+  test("AC3: nobody can demote or deactivate the Super Admin in the app (qa:TC-2459@v1)", async ({ admin, member }) => {
     const id = admin.user.id as string;
     // The Super Admin themself cannot be demoted, and cannot deactivate themself.
     const demote = await admin.api.patch(`/api/team/${id}`, { orgRole: "MEMBER" });
@@ -72,7 +72,7 @@ test.describe("SHO-US-2.1 / APL-2480", () => {
   });
 
   // @static: staging cannot remove an address from SUPER_ADMIN_EMAILS. The same grep-invert keeps this out of that run.
-  test("AC4: removing an address from SUPER_ADMIN_EMAILS makes that person a Member at next sign-in (qa:TC missing)", { tag: "@static" }, () => {
+  test("AC4: removing an address from SUPER_ADMIN_EMAILS makes that person a Member at next sign-in (qa:TC-2460@v1)", { tag: "@static" }, () => {
     const signin = readFileSync("src/app/api/auth/signin/route.ts", "utf8");
     expect(signin).toContain('!listed && user.orgRole === "SUPER_ADMIN" && superAdminEmails().length > 0');
     expect(signin).toContain('data: { role: "MEMBER", source: "SUPER_ADMIN_EMAILS" }');
