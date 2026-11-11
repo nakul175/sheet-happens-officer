@@ -189,6 +189,9 @@ textarea.in.blocked-reason { display: block; margin-top: 6px; min-height: 0; lin
   .modal.sm { min-height: 0; margin: 12vh 14px 0; border-radius: 14px; padding: 22px; }
   .modal .bar { position: sticky; top: 0; z-index: 2; background: var(--card); margin: 0 -18px 10px; padding: calc(8px + env(safe-area-inset-top, 0px)) 18px 8px; border-bottom: 1px solid var(--line); min-height: 52px; }
   .modal .bar .link { min-height: 44px; min-width: 44px; padding: 0 8px; }
+  /* APL-2738: the task actions stay pinned at the bottom of the visible area, above the keyboard. */
+  .modal .sheet-foot { position: sticky; bottom: 0; z-index: 2; background: var(--card); margin: 16px -18px 0; padding: 8px 18px; border-top: 1px solid var(--line); }
+  .modal .sheet-foot:empty { display: none; }
 }
 
 /* SHO-US-22.2: 44 px tap areas on touch screens; the tick keeps its look. */
