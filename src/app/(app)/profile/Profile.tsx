@@ -4,6 +4,8 @@ import { ago, api, useGet } from "@/components/api";
 import { Field } from "@/components/ui";
 import { Page, SignOut, roleLabel, useMe } from "../Shell";
 
+import CalendarFeed from "./CalendarFeed";
+
 type Sess = { id: string; device: string; lastActive: string; current: boolean };
 
 export default function Profile() {
@@ -44,6 +46,7 @@ export default function Profile() {
           <button className="btn" disabled={!cur || !pw || !conf}>Change password</button>
         </form>
 
+        <CalendarFeed />
         <section className="card">
           <h2 style={{ margin: "0 0 12px", fontSize: 17 }}>Where you are signed in</h2>
           {ses.data?.sessions.map((s) => (

@@ -37,6 +37,7 @@ enum TaskPriority {
 enum AuthTokenType {
   VERIFY
   RESET
+  FEED
 }
 
 enum ActionChannel {
@@ -126,7 +127,7 @@ model AuthToken {
   user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   type      AuthTokenType
   tokenHash String        @unique
-  expiresAt DateTime
+  expiresAt DateTime?
   usedAt    DateTime?
   createdAt DateTime      @default(now())
 
