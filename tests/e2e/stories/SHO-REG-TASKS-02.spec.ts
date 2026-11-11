@@ -49,7 +49,7 @@ test("SHO-REG-TASKS-02 workspace person picker confirms membership before assign
   await form.getByRole("textbox", { name: "Title" }).fill(taskTitle);
   await form.getByLabel("Due date").fill("2027-01-20");
   const create = page.waitForResponse(row => row.url().endsWith(`/api/projects/${project.id}/tasks`) && row.request().method() === "POST");
-  await form.getByRole("button", { name: "Add task" }).click();
+  await form.getByRole("button", { name: "Add task", exact: true }).click();
   expect((await create).status()).toBe(201);
   await expect(form).toHaveCount(0);
   await page.reload();
