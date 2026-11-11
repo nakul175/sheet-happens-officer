@@ -9,7 +9,7 @@ test("SHO-REG-TASKS-02 workspace person picker confirms membership before assign
   if (!local2691) throw new Error("Workspace picker audit requires the guarded local test database.");
   const fixture = randomUUID();
   const evidenceDir = "test-results/workspace-assignee-picker";
-  let projectId = "", personId = "";
+  let projectId = "", personId = "", stalePersonId = "";
   later(async () => {
     if (projectId) {
       const loaded = await admin.api.get(`/api/projects/${projectId}`);
@@ -21,8 +21,13 @@ test("SHO-REG-TASKS-02 workspace person picker confirms membership before assign
       expect(loaded.status).toBe(200);
       expect(loaded.json.person.status).toBe("DEACTIVATED");
     }
+    if (stalePersonId) {
+      const loaded = await admin.api.get(`/api/team/${stalePersonId}`);
+      expect(loaded.status).toBe(200);
+      expect(loaded.json.person.status).toBe("DEACTIVATED");
+    }
     mkdirSync(evidenceDir, { recursive: true });
-    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, projectId, personId, cleanup: true }, null, 2));
+    writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ fixture, projectId, personId, stalePersonId, cleanup: true }, null, 2));
   });
   const project = await newProject(admin, later, { label: `workspace picker ${fixture}` });
   projectId = project.id;
@@ -76,7 +81,36 @@ test("SHO-REG-TASKS-02 workspace person picker confirms membership before assign
   projectState = await admin.api.get(`/api/projects/${project.id}`);
   expect((projectState.json.project.members as { userId: string; role: string }[]).filter(member => member.userId === person.id))
     .toEqual([expect.objectContaining({ userId: person.id, role: "EDITOR" })]);
+
+  const stalePerson = await account(zz(`picker stale ${fixture}`), `nakul17+zz-tasks-02-stale-${fixture}@aplyd.com`);
+  stalePersonId = stalePerson.id;
+  later(async () => {
+    const loaded = await admin.api.get(`/api/team/${stalePersonId}`);
+    expect(loaded.status).toBe(200);
+    if (loaded.json.person.status !== "DEACTIVATED")
+      expect((await admin.api.post(`/api/team/${stalePersonId}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+  });
+  await page.goto(`/projects/${project.id}`);
+  await page.getByRole("button", { name: "+ Add task", exact: true }).click();
+  const staleForm = page.getByRole("dialog", { name: "Add task", exact: true });
+  await staleForm.getByRole("textbox", { name: "Search workspace assignees" }).fill(stalePerson.name);
+  await expect(staleForm.getByText(`${stalePerson.name} · Not in this project`)).toBeVisible();
+  await staleForm.getByRole("button", { name: "Choose assignee" }).click();
+  await page.getByRole("dialog", { name: `Add ${stalePerson.name} to this project?` })
+    .getByRole("button", { name: "Add to project and assign" }).click();
+  expect((await admin.api.post(`/api/team/${stalePerson.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
+  const staleTitle = zz(`picker stale denied ${fixture}`);
+  await staleForm.getByRole("textbox", { name: "Title" }).fill(staleTitle);
+  await staleForm.getByLabel("Due date").fill("2027-01-21");
+  const staleResponse = page.waitForResponse(row => row.url().endsWith(`/api/projects/${project.id}/tasks`) && row.request().method() === "POST");
+  await staleForm.getByRole("button", { name: "Add task", exact: true }).click();
+  expect((await staleResponse).status()).toBe(400);
+  await expect(staleForm.getByRole("alert")).toBeVisible();
+  const afterStale = await admin.api.get(`/api/projects/${project.id}/tasks`);
+  expect((afterStale.json.sections as { tasks: { title: string }[] }[]).flatMap(section => section.tasks).filter(task => task.title === staleTitle)).toHaveLength(0);
+  const afterStaleProject = await admin.api.get(`/api/projects/${project.id}`);
+  expect((afterStaleProject.json.project.members as { userId: string }[]).some(member => member.userId === stalePerson.id)).toBe(false);
   mkdirSync(evidenceDir, { recursive: true });
-  await page.screenshot({ path: `${evidenceDir}/task-after-reload.png` });
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId, personId, taskId: matches[0].id, createdCount: 1, explicitEditorGrant: true, removedMembership: true, deniedRetryStatus: 400, explicitRetryStatus: 200, finalAssignee: person.id }, null, 2));
+  await staleForm.screenshot({ path: `${evidenceDir}/stale-selection-denied.png` });
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, projectId, personId, stalePersonId, taskId: matches[0].id, createdCount: 1, explicitEditorGrant: true, removedMembership: true, deniedRetryStatus: 400, explicitRetryStatus: 200, finalAssignee: person.id, staleSelectionStatus: 400, staleTaskCreated: false, staleMembershipGranted: false }, null, 2));
 });
