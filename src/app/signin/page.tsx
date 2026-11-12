@@ -7,7 +7,7 @@ import { SignInForm } from "./SignInForm";
 import { Hero } from "./Hero";
 import s from "./signin.module.css";
 
-export const metadata = { title: "Sign in · Sheet Happens Officer" };
+export const metadata = { title: "Sign in · Tasks by aplyd" };
 
 async function Form({ params }: { params: PageProps<"/signin">["searchParams"] }) {
   const sp = await params;
@@ -35,7 +35,7 @@ async function SignInScreen({ searchParams }: PageProps<"/signin">) {
       <div className={s.brandtop}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo-icon-reversed.svg" width={40} height={40} alt="" />
-        <span>Sheet Happens Officer</span>
+        <span>Tasks by aplyd</span>
       </div>
       <Hero />
       <div className={s.formside}>

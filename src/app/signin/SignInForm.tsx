@@ -51,7 +51,7 @@ export function SignInForm({ justReset, centralEnabled = false, sessionExpired =
       <h1 className={s.h2}>Sign in</h1>
       {centralEnabled && <><a className={s.sso} href={returnToEnabled() && safeReturnPath(next, 1) ? `/api/auth/aplyd/start?next=${encodeURIComponent(safeReturnPath(next, 1)!)}` : "/api/auth/aplyd/start"}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/aplyd-symbol.svg" alt="" aria-hidden="true" /><span>Continue with Aplyd</span>
+        <img src="/aplyd-symbol.svg" alt="" aria-hidden="true" /><span>Continue with Aplyd SSO</span>
       </a><div className={s.divider}>or use your email</div></>}
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
         {sessionExpired && !error && <div role="alert" className={styles.alert}>Your session has expired, please sign in again</div>}

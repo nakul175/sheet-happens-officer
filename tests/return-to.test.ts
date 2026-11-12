@@ -832,7 +832,7 @@ describe("APL-2652 signed-out redirect", () => {
     expect(missingPage.status).toBe(404);
     expect(hiddenPage.html).toContain("This task isn't available");
     expect(missingPage.html).toContain("This task isn't available");
-    expect(hiddenPage.title).toBe("Task · Sheet Happens Officer");
+    expect(hiddenPage.title).toBe("Task · Tasks by aplyd");
     expect(missingPage.title).toBe(hiddenPage.title);
     expect(hiddenPage.html).not.toContain("ZZ-TEST APL2652 hidden task");
     expect(hiddenPage.html).not.toContain("ZZ-TEST APL2652 secret body");

@@ -32,10 +32,10 @@ function mails(email: string, subject: RegExp) {
 }
 
 const emailedPassword = (email: string) =>
-  ((mails(email, /Your Sheet Happens Officer account/).at(-1)?.text ?? "") as string).match(/Password: (\S+)/)?.[1] ?? "";
+  ((mails(email, /Your Tasks by aplyd account/).at(-1)?.text ?? "") as string).match(/Password: (\S+)/)?.[1] ?? "";
 
 const resetToken = (email: string) =>
-  ((mails(email, /Reset your Sheet Happens Officer password/).at(-1)?.text ?? "") as string).match(/token=([\w-]+)/)?.[1] ?? "";
+  ((mails(email, /Reset your Tasks by aplyd password/).at(-1)?.text ?? "") as string).match(/token=([\w-]+)/)?.[1] ?? "";
 
 /** A ZZ-TEST person added by the Super Admin. Returns the emailed password. */
 async function issued() {

@@ -26,7 +26,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     later(() => deactivate(admin.api, r.json.person.id));
     expect(JSON.stringify(r.json).toLowerCase().includes("password")).toBe(false);
     expect(readFileSync("src/lib/team.ts", "utf8")).toContain("signInDetailsMail");
-    const text = (await sinkText(email, "Your Sheet Happens Officer account")) ?? "";
+    const text = (await sinkText(email, "Your Tasks by aplyd account")) ?? "";
     expect(text, "synthetic sign-in details must reach the isolated outbox").not.toBe("");
     expect(text).toContain("/signin");
     expect(text).toContain(`Username: ${email}`);
@@ -39,7 +39,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `keep ${RUN}`, email, role: "MEMBER" });
     expect(r.status).toBe(201);
     later(() => deactivate(admin.api, r.json.person.id));
-    const text = (await sinkText(email, "Your Sheet Happens Officer account")) ?? "";
+    const text = (await sinkText(email, "Your Tasks by aplyd account")) ?? "";
     const password = text.match(/^Password: (.+)$/m)?.[1];
     expect(password, "generated test credential in private outbox").toBeTruthy();
     const ctx = await browser.newContext({ baseURL: BASE_URL, httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined });
@@ -66,7 +66,7 @@ test.describe("SHO-US-23.3 / APL-2622", () => {
     const r = await admin.api.post("/api/team", { firstName: "ZZ-TEST", lastName: `bar ${RUN}`, email, role: "MEMBER" });
     expect(r.status).toBe(201);
     later(() => deactivate(admin.api, r.json.person.id));
-    const text = (await sinkText(email, "Your Sheet Happens Officer account")) ?? "";
+    const text = (await sinkText(email, "Your Tasks by aplyd account")) ?? "";
     const password = text.match(/^Password: (.+)$/m)?.[1];
     expect(password, "generated test credential in private outbox").toBeTruthy();
     const ctx = await browser.newContext({ baseURL: BASE_URL, httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined });

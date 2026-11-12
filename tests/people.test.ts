@@ -10,7 +10,7 @@ let n = 0;
 /** The newest sign-in-details mail sent to an address, with the password read out of it. */
 function signInMail(email: string) {
   const files = readdirSync(OUTBOX).sort();
-  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Your Sheet Happens Officer account/.test(m.subject));
+  const mails = files.map((f) => JSON.parse(readFileSync(path.join(OUTBOX, f), "utf8"))).filter((m) => m.to === email && /Your Tasks by aplyd account/.test(m.subject));
   const text = (mails.at(-1)?.text ?? "") as string;
   return { count: mails.length, text, password: text.match(/Password: (\S+)/)?.[1] ?? "" };
 }

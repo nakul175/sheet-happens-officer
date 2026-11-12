@@ -23,7 +23,7 @@ export const TASK_UNAVAILABLE_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="robots" content="noindex">
-<title>Task · Sheet Happens Officer</title>
+<title>Task · Tasks by aplyd</title>
 </head>
 <body>
 <main id="main">

@@ -6,7 +6,7 @@ import { deliverSinkMail } from "./mail-sink";
 export type Mail = { to: string; subject: string; text: string };
 
 // APL-2929: the sender stays on the old domain until Resend verifies sheethappensofficer.aplyd.org.
-const FROM = process.env.EMAIL_FROM ?? "Sheet Happens Officer <no-reply@sheethappensofficer.com>";
+const FROM = process.env.EMAIL_FROM ?? "Tasks by aplyd <no-reply@sheethappensofficer.com>";
 
 /** The provider refused or could not be reached. Carries only the HTTP status and Resend's error name. */
 export class MailError extends Error {
@@ -78,19 +78,19 @@ export const appUrl = () => (process.env.APP_URL ?? "http://localhost:3000").rep
 
 export const verifyMail = (to: string, token: string): Mail => ({
   to,
-  subject: "Verify your email for Sheet Happens Officer",
+  subject: "Verify your email for Tasks by aplyd",
   text: `Confirm your email to finish creating your account:\n\n${appUrl()}/verify?token=${token}\n\nThis link works once and expires in 24 hours. If you did not sign up, ignore this email.`,
 });
 
 export const resetMail = (to: string, token: string): Mail => ({
   to,
-  subject: "Reset your Sheet Happens Officer password",
+  subject: "Reset your Tasks by aplyd password",
   text: `Set a new password:\n\n${appUrl()}/reset?token=${token}\n\nThis link works once and expires in 1 hour. If you did not ask for this, ignore this email.`,
 });
 
 /** SHO-US-15.3. The one place a generated password is written into an email. Never logged or audited. */
 export const signInDetailsMail = (to: string, firstName: string, addedBy: string, password: string): Mail => ({
   to,
-  subject: "Your Sheet Happens Officer account",
-  text: `Hi ${firstName},\n\n${addedBy} added you to Sheet Happens Officer. Sign in here:\n\n${appUrl()}/signin\n\nUsername: ${to}\nPassword: ${password}\n\nThis password is temporary. When you sign in, you will be asked to set your own password before you can do anything else. After that, this one stops working.\n\n${INSTALL_GUIDANCE}\n\nIf you did not expect this email, ignore it and tell ${addedBy}. Do not forward this email, because it contains your password.`,
+  subject: "Your Tasks by aplyd account",
+  text: `Hi ${firstName},\n\n${addedBy} added you to Tasks by aplyd. Sign in here:\n\n${appUrl()}/signin\n\nUsername: ${to}\nPassword: ${password}\n\nThis password is temporary. When you sign in, you will be asked to set your own password before you can do anything else. After that, this one stops working.\n\n${INSTALL_GUIDANCE}\n\nIf you did not expect this email, ignore it and tell ${addedBy}. Do not forward this email, because it contains your password.`,
 });
