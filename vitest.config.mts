@@ -32,6 +32,7 @@ export default defineConfig({
       "tests/e2e/stories/SHO-REG-CRM-02.spec.ts", // guarded Playwright contact association and Undo journey
       "tests/e2e/stories/SHO-REG-TASKS-01.spec.ts", // guarded Playwright task-create form and Viewer boundary
       "tests/e2e/stories/SHO-REG-TASKS-02.spec.ts", // guarded Playwright workspace assignee picker
+      "tests/e2e/stories/SHO-REG-TASKS-03.spec.ts", // guarded two-client task conflict
       "tests/e2e/stories/SHO-REG-TASKS-06.spec.ts", // Playwright approver recovery audit
       "tests/e2e/stories/SHO-REG-TASKS-04.spec.ts", // Playwright stale task-sheet recovery audit
       "tests/e2e/stories/SHO-REG-TASKS-08.spec.ts", // Playwright mixed bulk and Undo audit
