@@ -150,6 +150,25 @@ it('sets an eligible approver once with a matching action', async () => {
   completed.push('eligible-control');
 });
 
+it('two valid approver changes from the same version leave one winner and one conflict', async () => {
+  const f = await fixture();
+  const attempts = await Promise.allSettled([
+    setApprover(leader, f.taskId, recipient.id, f.version),
+    setApprover(leader, f.taskId, leader.id, f.version),
+  ]);
+  const winners = attempts.filter((attempt) => attempt.status === 'fulfilled');
+  const losers = attempts.filter((attempt) => attempt.status === 'rejected');
+  expect(winners).toHaveLength(1);
+  expect(losers).toHaveLength(1);
+  expect(losers[0]).toMatchObject({ reason: { status: 409 } });
+  const row = await db.task.findUniqueOrThrow({ where: { id: f.taskId } });
+  expect([recipient.id, leader.id]).toContain(row.approverId);
+  const actions = await db.actionLog.findMany({ where: { projectId: f.projectId, targetId: f.taskId, action: 'task.approver_changed' } });
+  expect(actions).toHaveLength(1);
+  expect((actions[0].afterState as { approverId?: string }).approverId).toBe(row.approverId);
+  completed.push('same-version-two-writers');
+});
+
 it('replaces an awaiting approver and holder together', async () => {
   const f = await fixture();
   await db.task.update({ where: { id: f.taskId }, data: { approverId: recipient.id, assigneeId: recipient.id } });
