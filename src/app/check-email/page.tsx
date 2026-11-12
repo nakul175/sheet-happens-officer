@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { CheckEmail } from "./CheckEmail";
-export const metadata = { title: "Check your email · Sheet Happens Officer" };
+export const metadata = { title: "Check your email · Tasks by aplyd" };
 
 async function Screen({ params }: { params: PageProps<"/check-email">["searchParams"] }) {
   const q = await params;

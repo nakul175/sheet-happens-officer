@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AuthShell } from "@/components/AuthShell";
 import styles from "@/components/auth.module.css";
 import approvedStyles from "@/app/signin/signin.module.css";
-export const metadata = { title: "Check your email · Sheet Happens Officer" };
+export const metadata = { title: "Check your email · Tasks by aplyd" };
 export default function Page() {
   return (
     <AuthShell approved>

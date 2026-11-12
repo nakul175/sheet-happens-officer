@@ -93,7 +93,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
       const s = (await admin.api.get(`/api/team/${createdId}`)).json.person?.status;
       if (s && s !== "DEACTIVATED") await admin.api.post(`/api/team/${createdId}/deactivate`, { reassign: "leaders" });
     });
-    const text = await sinkText(email, "Your Sheet Happens Officer account");
+    const text = await sinkText(email, "Your Tasks by aplyd account");
     const mailed = text?.match(/^Password: (.+)$/m)?.[1];
 
     const ctx = await browser.newContext({
@@ -193,7 +193,7 @@ test.describe("SHO-US-2.3 / APL-2482", () => {
       const s = (await admin.api.get(`/api/team/${createdId}`)).json.person?.status;
       if (s && s !== "DEACTIVATED") await admin.api.post(`/api/team/${createdId}/deactivate`, { reassign: "leaders" });
     });
-    const text = await sinkText(email, "Your Sheet Happens Officer account");
+    const text = await sinkText(email, "Your Tasks by aplyd account");
     const mailed = text?.match(/^Password: (.+)$/m)?.[1];
     if (mailed) {
       expect((await admin.api.post(`/api/team/${createdId}/deactivate`, { reassign: "leaders" })).status).toBe(200);

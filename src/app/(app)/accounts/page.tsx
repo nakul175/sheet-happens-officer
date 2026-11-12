@@ -1,5 +1,5 @@
 import AccountsView from "./AccountsView";
-export const metadata = { title: "Accounts · Sheet Happens Officer" };
+export const metadata = { title: "Accounts · Tasks by aplyd" };
 
 function one(v: string | string[] | undefined) {
   return (Array.isArray(v) ? v[0] : v) ?? "";

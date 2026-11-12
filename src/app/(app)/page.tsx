@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { Skeleton } from "@/components/ui";
 import Dashboard from "./Dashboard";
-export const metadata = { title: "Home · Sheet Happens Officer" };
+export const metadata = { title: "Home · Tasks by aplyd" };
 async function HomeContent({ searchParams }: PageProps<"/">) {
   const query = await searchParams;
   if (query.task) {

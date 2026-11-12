@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 // SHO-US-22.10: lets people add the app to their Home Screen. No service worker, so nothing private is ever cached on the device.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Sheet Happens Officer",
-    short_name: "SHO",
+    name: "Tasks by aplyd",
+    short_name: "Tasks",
     description: "Work manager for the APLYD team",
     start_url: "/",
     scope: "/",
