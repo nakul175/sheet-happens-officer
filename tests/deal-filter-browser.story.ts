@@ -1,4 +1,4 @@
-import {mkdirSync} from 'node:fs';
+import {mkdirSync,writeFileSync} from 'node:fs';
 import {beforeAll,afterAll,it,expect} from 'vitest';
 import {chromium,type Browser} from 'playwright-core';
 import {superAdmin,cleanupZz,istDate,type Account} from './helpers';
@@ -33,13 +33,21 @@ beforeAll(async()=>{
   expect(r.status,`create fixture${i}`).toBe(201);const id=r.json.deal.id;ids.push(id);
   if(stage.id!==first.id)expect((await sa.c.post(`/api/projects/${id}/stage`,{stageId:stage.id,reason:'ZZ-TEST filter fixture'})).status).toBe(200);
  }
- mkdirSync('reports/3134-shots',{recursive:true});
+ mkdirSync('test-results/deal-filters',{recursive:true});
  browser=await chromium.launch({executablePath:process.env.PW_CHROMIUM,args:['--no-sandbox']});
 },180000);
 afterAll(async()=>{
  await browser?.close();
  if(sa&&ids.length)await cleanupZz(ids,[]);
+ for(const id of ids){
+  const read=await sa.c.get(`/api/projects/${id}`);
+  expect(read.status).toBe(200);
+  expect(read.json.project.archived).toBe(true);
+ }
  if(sa&&org)expect((await sa.c.post(`/api/orgs/${org}/archive`,{archive:true})).status).toBe(200);
+ if(sa&&org){const read=await sa.c.get(`/api/orgs/${org}`);expect(read.status).toBe(200);expect(read.json.organisation.archived).toBe(true);}
+ expect(ids).toHaveLength(6);expect(org).toBeTruthy();
+ writeFileSync('test-results/deal-filters/cleanup.json',JSON.stringify({ownedDeals:ids.length,ownedOrganisation:Boolean(org),archivedReadback:true},null,2));
 },120000);
 for(const width of [390,1280])it(`Existing opportunity/stage multi-select filters board and list at${width}px`,async()=>{
  const ctx=await browser.newContext({viewport:{width,height:844},baseURL:base});
@@ -66,9 +74,42 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   await control('Stages').locator('summary').click();
   await waitIds([ids[0],ids[1]]);
   expect(await control('Opportunity types').locator('summary').innerText()).toContain('2 selected');
-  await page.screenshot({path:`reports/3134-shots/board-${width}.png`,fullPage:true});
+  await page.screenshot({path:`test-results/deal-filters/board-${width}.png`,fullPage:true});
   await page.getByRole('button',{name:'List',exact:true}).click();await waitIds([ids[0],ids[1]]);
-  await page.screenshot({path:`reports/3134-shots/list-${width}.png`,fullPage:true});
+  await page.screenshot({path:`test-results/deal-filters/list-${width}.png`,fullPage:true});
   await page.getByRole('button',{name:'Clear filters',exact:true}).click();await waitIds(ids);
- }catch(error){await page.screenshot({path:`reports/3134-shots/failure-${width}.png`,fullPage:true});throw error;}finally{await ctx.close();}
+  const results=page.locator('.deal-results');
+  const baselineCount=Number((await results.innerText()).match(/^(\d+) deals/)?.[1]);
+  expect(baselineCount).toBeGreaterThanOrEqual(ids.length);
+  await page.getByRole('button',{name:'Date filters'}).click();
+  await page.getByLabel('No date').selectOption('exclude');
+  await waitIds([]);
+  expect(Number((await results.innerText()).match(/^(\d+) deals/)?.[1])).toBeLessThan(baselineCount);
+  await page.getByLabel('Date basis').selectOption('createdAt');
+  await page.getByLabel('From').fill('9999-01-01');
+  expect(await results.innerText()).toContain('0 deals');
+  expect(await page.getByRole('region',{name:'No matching deals'}).isVisible()).toBe(true);
+  await page.getByLabel('From').fill('');
+  await page.getByLabel('Date basis').selectOption('submissionDeadline');
+  await page.getByLabel('No date').selectOption('only');
+  await waitIds(ids);
+  await page.getByRole('button',{name:'Clear timeline filter'}).click();
+  await page.locator('.deal-filter-control select').selectOption('name-desc');
+  const rows=page.getByRole('table',{name:'RFP/RFA + OTC sales table'}).locator('tbody tr td:first-child a');
+  const descending=await rows.allTextContents();
+  expect(descending).toEqual([...descending].sort((a,b)=>b.localeCompare(a,'en',{sensitivity:'base'})));
+  await page.locator('.deal-filter-control select').selectOption('name-asc');
+  const ascending=await rows.allTextContents();
+  expect(ascending).toEqual([...ascending].sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'})));
+  await page.reload();
+  await page.getByRole('tab',{name:pipeName,exact:true}).click();
+  await waitIds(ids);
+  expect(await results.innerText()).toContain(`${baselineCount} deals`);
+  await page.goto('/search');
+  await page.goBack();
+  await page.getByRole('tab',{name:pipeName,exact:true}).click();
+  await waitIds(ids);
+  expect(await results.innerText()).toContain(`${baselineCount} deals`);
+  writeFileSync(`test-results/deal-filters/verification-${width}.json`,JSON.stringify({width,ownedDeals:ids.length,baselineCount,typeStageIntersection:true,dateEmptyAndRecovery:true,nameSortBothDirections:true,reloadAndBackRecovery:true},null,2));
+ }catch(error){await page.screenshot({path:`test-results/deal-filters/failure-${width}.png`,fullPage:true});throw error;}finally{await ctx.close();}
 });

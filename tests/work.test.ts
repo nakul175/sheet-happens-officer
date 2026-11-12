@@ -93,6 +93,21 @@ describe("projects and access (3.x)", () => {
     expect(detail.members.find((m: { userId: string }) => m.userId === lead.id).role).toBe("LEADER");
   });
 
+  it("keeps creator management rights after naming another Leader without granting them to an ordinary Editor", async () => {
+    const creator = await account("creator-manager");
+    const leader = await account("named-leader");
+    const editor = await account("ordinary-editor");
+    const newcomer = await account("new-member");
+    const p = await project(creator, leader, [{ who: editor }]);
+    expect((await creator.c.get(`/api/projects/${p.id}`)).json.project.members.find((m: { userId: string }) => m.userId === creator.id).role).toBe("EDITOR");
+    expect((await editor.c.post(`/api/projects/${p.id}/members`, { userId: newcomer.id })).status).toBe(403);
+    expect((await creator.c.post(`/api/projects/${p.id}/members`, { userId: newcomer.id })).status).toBe(201);
+    expect((await editor.c.post(`/api/projects/${p.id}/archive`)).status).toBe(403);
+    expect((await creator.c.post(`/api/projects/${p.id}/archive`)).status).toBe(200);
+    expect((await editor.c.post(`/api/projects/${p.id}/unarchive`)).status).toBe(403);
+    expect((await creator.c.post(`/api/projects/${p.id}/unarchive`)).status).toBe(200);
+  });
+
   it("shows non-members nothing: not found, empty lists, Admins see all", async () => {
     const sa = await superAdmin();
     const lead = await account("lead");

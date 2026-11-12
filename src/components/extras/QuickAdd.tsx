@@ -45,7 +45,7 @@ export function QuickAdd({ projects, lastId, onClose }: { projects: Target[]; la
           </div>
           <div>
             <label className="lbl" htmlFor="qa-date">Due date</label>
-            <input id="qa-date" className="in" required value={when} autoComplete="off" placeholder="tomorrow, fri, 2026-10-30" aria-describedby="qa-date-note" onChange={(e) => setWhen(e.target.value)} />
+            <input id="qa-date" className="in" required value={when} autoComplete="off" placeholder="tomorrow, fri, 2026-10-30" aria-describedby="qa-date-note" aria-invalid={badDate} onChange={(e) => setWhen(e.target.value)} />
           </div>
         </div>
         <p id="qa-date-note" className={`hint qa-note${badDate ? " bad" : ""}`} role="status">

@@ -1,8 +1,9 @@
 // SHO-US-11.1: organisations with a parent tree. Visible to every signed-in Member (owner decision
 // 17 Oct 2026); only the creator and Admins edit or archive. Changes are logged with no project.
 import { db } from "@/lib/db";
+import type { Organisation } from "@/generated/prisma/client";
 import { ApiError, notFound } from "@/lib/http";
-import { isAdmin, type Actor } from "@/lib/access";
+import { isActive, isAdmin, type Actor, type Tx } from "@/lib/access";
 import { requireCrm } from "@/lib/crm";
 import { logAction } from "@/lib/notify";
 
@@ -30,6 +31,29 @@ export function requireOrgEdit(user: Actor, org: { createdById: string }) {
   if (!canEdit(user, org)) throw new ApiError(403, "Only the person who added this organisation, or an Admin, can change it.");
 }
 
+async function withLockedOrgEdit<T>(user: Actor, id: string, apply: (tx: Tx, org: Organisation) => Promise<T>): Promise<T> {
+  return db.$transaction(async (tx) => {
+    let org;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      org = await tx.organisation.findUnique({ where: { id } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This organisation or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!org || !account || !isActive(account) || account.workspaceId !== org.workspaceId) throw notFound("Organisation");
+    const currentActor = { ...user, orgRole: account.orgRole };
+    requireCrm(currentActor);
+    requireOrgEdit(currentActor, org);
+    return apply(tx, org);
+  }, { isolationLevel: "ReadCommitted" });
+}
+
 /** AC3: a parent may never be the organisation itself or one of its own descendants. */
 export async function assertNoCycle(orgId: string | null, parentId: string) {
   let cur: string | null = parentId;
@@ -37,6 +61,25 @@ export async function assertNoCycle(orgId: string | null, parentId: string) {
     if (cur === orgId) throw new ApiError(400, "An organisation cannot sit under itself or under one of its own branches.");
     const row: { parentId: string | null } | null = await db.organisation.findUnique({ where: { id: cur }, select: { parentId: true } });
     cur = row?.parentId ?? null;
+  }
+}
+
+/** Hold the current ancestry steady while a parent change or its Undo commits. */
+export async function assertSafeParentTx(tx: Tx, orgId: string, parentId: string, workspaceId: string) {
+  let current: string | null = parentId;
+  for (let depth = 0; current; depth++) {
+    if (depth >= 50 || current === orgId) throw new ApiError(409, "That parent would make an organisation cycle.");
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${current} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The organisation tree is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const parent: { parentId: string | null; workspaceId: string; archivedAt: Date | null } | null = await tx.organisation.findUnique({ where: { id: current }, select: { parentId: true, workspaceId: true, archivedAt: true } });
+    if (!parent || parent.workspaceId !== workspaceId || (depth === 0 && parent.archivedAt)) throw new ApiError(409, "The parent organisation is no longer available.");
+    current = parent.parentId;
   }
 }
 
@@ -72,8 +115,36 @@ export async function createOrganisation(user: Actor, input: OrgInput) {
     throw new ApiError(409, `An organisation called "${dup.name}" already exists here.`, { needsConfirm: "duplicate", existingId: dup.id });
   }
   return db.$transaction(async (tx) => {
+    let account;
+    let parent;
+    try {
+      // Serialise creates in this workspace so two case-insensitive duplicate
+      // checks cannot both pass before either row is committed.
+      await tx.$queryRaw`SELECT "id" FROM "Workspace" WHERE "id" = ${u.workspaceId} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      if (input.parentId) await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${input.parentId} FOR SHARE NOWAIT`;
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      parent = input.parentId ? await tx.organisation.findUnique({ where: { id: input.parentId }, select: { workspaceId: true, archivedAt: true } }) : null;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The organisation or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!account || !isActive(account) || account.workspaceId !== u.workspaceId) throw notFound("Organisation");
+    requireCrm({ ...user, orgRole: account.orgRole });
+    if (input.parentId && (!parent || parent.workspaceId !== account.workspaceId || parent.archivedAt)) {
+      throw new ApiError(409, "The parent organisation is no longer available.");
+    }
+    const currentDuplicate = await tx.organisation.findFirst({
+      where: { workspaceId: account.workspaceId, parentId: input.parentId ?? null, name: { equals: name, mode: "insensitive" } },
+      select: { id: true, name: true },
+    });
+    if (currentDuplicate && !input.force) {
+      throw new ApiError(409, `An organisation called "${currentDuplicate.name}" already exists here.`, { needsConfirm: "duplicate", existingId: currentDuplicate.id });
+    }
     const org = await tx.organisation.create({
-      data: { workspaceId: u.workspaceId, name, kind: clean(input.kind), country: clean(input.country), level: input.level ?? null, parentId: input.parentId ?? null, createdById: user.id },
+      data: { workspaceId: account.workspaceId, name, kind: clean(input.kind), country: clean(input.country), level: input.level ?? null, parentId: input.parentId ?? null, createdById: user.id },
     });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: org.id, action: "organisation.created", after: { name, parentId: org.parentId } });
     return org;
@@ -106,7 +177,12 @@ export async function updateOrganisation(user: Actor, id: string, input: Partial
     set("parentId", input.parentId, org.parentId);
   }
   if (!Object.keys(data).length) return org;
-  return db.$transaction(async (tx) => {
+  return withLockedOrgEdit(user, id, async (tx, fresh) => {
+    if (fresh.archivedAt) throw new ApiError(409, "This organisation is archived. Unarchive it first.");
+    if (["name", "kind", "country", "level", "parentId"].some((key) => fresh[key as keyof typeof fresh] !== org[key as keyof typeof org]) || !!fresh.archivedAt !== !!org.archivedAt) {
+      throw new ApiError(409, "This organisation changed while you were editing. Reload and try again.");
+    }
+    if ("parentId" in data && data.parentId) await assertSafeParentTx(tx, id, data.parentId as string, fresh.workspaceId);
     const row = await tx.organisation.update({ where: { id }, data });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: id, action: "organisation.updated", before, after });
     if ("parentId" in data) {
@@ -122,11 +198,13 @@ export async function archiveOrganisation(user: Actor, id: string, archive: bool
   const org = await orgOf(user, id);
   requireOrgEdit(user, org);
   if (archive === !!org.archivedAt) throw new ApiError(409, archive ? "This organisation is already archived." : "This organisation is not archived.");
-  await db.$transaction(async (tx) => {
-    await tx.organisation.update({ where: { id }, data: { archivedAt: archive ? new Date() : null } });
+  await withLockedOrgEdit(user, id, async (tx, fresh) => {
+    if (archive === !!fresh.archivedAt) throw new ApiError(409, archive ? "This organisation is already archived." : "This organisation is not archived.");
+    const archivedAt = archive ? new Date() : null;
+    await tx.organisation.update({ where: { id }, data: { archivedAt } });
     await logAction(tx, {
       actorId: user.id, projectId: null, targetType: "organisation", targetId: id, action: archive ? "organisation.archived" : "organisation.unarchived",
-      before: { archivedAt: org.archivedAt?.toISOString() ?? null }, after: { archivedAt: archive ? new Date().toISOString() : null },
+      before: { archivedAt: fresh.archivedAt?.toISOString() ?? null }, after: { archivedAt: archivedAt?.toISOString() ?? null },
     });
   });
 }

@@ -12,6 +12,7 @@ const PASSWORD_MESSAGE = "Use at least 8 characters, with at least one letter an
 export function SignUpForm() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [invalidField, setInvalidField] = useState<"name" | "email" | "password" | null>(null);
   const [exists, setExists] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -21,6 +22,7 @@ export function SignUpForm() {
     const email = String(f.get("email")).trim().toLowerCase();
     setBusy(true);
     setError(null);
+    setInvalidField(null);
     setExists(false);
     const r = await post("/api/auth/signup", { name: f.get("name"), email, password: f.get("password") });
     setBusy(false);
@@ -32,29 +34,33 @@ export function SignUpForm() {
     }
     setExists(r.status === 409);
     setError(r.error ?? null);
+    const issue = (r.data?.issues as { path?: unknown[] }[] | undefined)?.[0]?.path?.[0];
+    setInvalidField(issue === "name" || issue === "email" || issue === "password" ? issue : null);
   }
+
+  function clearError() { setError(null); setInvalidField(null); setExists(false); }
 
   return (
     <AuthShell approved>
       <h1>Create your account</h1>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
         {error && (
-          <div role="alert" className={styles.alert}>
+          <div id="signup-error" role="alert" className={styles.alert}>
             <span>{error}</span>
             {exists && <Link href="/signin">Sign in</Link>}
           </div>
         )}
         <div className={styles.field}>
           <label htmlFor="name" className={styles.label}>Full name</label>
-          <input id="name" name="name" autoComplete="name" placeholder="Asha Rao" required className={styles.input} />
+          <input id="name" name="name" autoComplete="name" placeholder="Asha Rao" required className={styles.input} aria-invalid={invalidField === "name"} aria-describedby={invalidField === "name" ? "signup-error" : undefined} onChange={clearError} />
         </div>
         <div className={styles.field}>
           <label htmlFor="email" className={styles.label}>Work email</label>
-          <input id="email" name="email" type="email" autoComplete="email" placeholder="you@aplyd.com" required className={styles.input} />
+          <input id="email" name="email" type="email" autoComplete="email" placeholder="you@aplyd.com" required className={styles.input} aria-invalid={invalidField === "email"} aria-describedby={invalidField === "email" ? "signup-error" : undefined} onChange={clearError} />
         </div>
         <div className={styles.field}>
           <label htmlFor="password" className={styles.label}>Password</label>
-          <input id="password" name="password" type="password" autoComplete="new-password" placeholder="At least 8 characters" required className={styles.input} />
+          <input id="password" name="password" type="password" autoComplete="new-password" placeholder="At least 8 characters" required className={styles.input} aria-invalid={invalidField === "password"} aria-describedby={invalidField === "password" ? "signup-error" : undefined} onChange={clearError} />
           {error !== PASSWORD_MESSAGE && <div className={styles.hint}>{PASSWORD_MESSAGE}</div>}
         </div>
         <button type="submit" disabled={busy} className={styles.primary}>{busy ? "Creating…" : "Create account"}</button>

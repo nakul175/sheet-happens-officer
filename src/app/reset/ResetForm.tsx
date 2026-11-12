@@ -12,6 +12,7 @@ export function ResetForm() {
   const token = useSearchParams().get("token") ?? "";
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const confirmMismatch = error === "Passwords do not match.";
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -29,14 +30,14 @@ export function ResetForm() {
     <AuthShell approved>
       <h1>Set a new password</h1>
       <form onSubmit={submit} className={styles.card} style={{ border: 0, padding: 0 }} noValidate>
-        {error && <div role="alert" className={styles.alert}>{error}</div>}
+        {error && <div id="reset-password-error" role="alert" className={styles.alert}>{error}</div>}
         <div className={styles.field}>
           <label htmlFor="password" className={styles.label}>New password</label>
-          <input id="password" name="password" type="password" autoComplete="new-password" placeholder="At least 8 characters" required className={styles.input} />
+          <input id="password" name="password" type="password" autoComplete="new-password" placeholder="At least 8 characters" required className={styles.input} onChange={() => setError(null)} />
         </div>
         <div className={styles.field}>
           <label htmlFor="confirm" className={styles.label}>Confirm new password</label>
-          <input id="confirm" name="confirm" type="password" autoComplete="new-password" placeholder="Type it again" required className={styles.input} />
+          <input id="confirm" name="confirm" type="password" autoComplete="new-password" placeholder="Type it again" required className={styles.input} aria-invalid={confirmMismatch} aria-describedby={confirmMismatch ? "reset-password-error" : undefined} onChange={() => setError(null)} />
         </div>
         <p className={styles.hint}>Use at least 8 characters, with at least one letter and one number.</p>
         <button type="submit" disabled={busy} className={styles.primary}>{busy ? "Saving…" : "Save and sign in"}</button>

@@ -25,12 +25,21 @@ export async function listViews(user: Actor, projectId: string) {
 }
 
 export async function createView(user: Actor, projectId: string, input: z.infer<typeof viewCreate>) {
-  await projectAccess(user, projectId);
-  const mine = await db.savedView.findMany({ where: { userId: user.id, projectId }, select: { name: true, position: true } });
-  if (mine.length >= MAX_VIEWS) throw new ApiError(409, `You can keep up to ${MAX_VIEWS} saved views in a project. Delete one to save another.`);
-  if (mine.some((v) => v.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, "You already have a view with that name.");
-  const row = await db.savedView.create({ data: { userId: user.id, projectId, name: input.name, state: input.state, position: Math.max(-1, ...mine.map((v) => v.position)) + 1 } });
-  return present(row);
+  return db.$transaction(async (tx) => {
+    // A person's view slots are shared by concurrent requests. Lock that person's row
+    // before checking the cap so two creates cannot both reserve the tenth slot.
+    const [current] = await tx.$queryRaw<{ orgRole: Actor["orgRole"]; deactivatedAt: Date | null; emailVerifiedAt: Date | null; tempPasswordAt: Date | null }[]>`
+      SELECT "orgRole", "deactivatedAt", "emailVerifiedAt", "tempPasswordAt"
+      FROM "User" WHERE "id" = ${user.id} FOR UPDATE
+    `;
+    if (!current || current.deactivatedAt || !current.emailVerifiedAt || current.tempPasswordAt) throw notFound("Project");
+    await projectAccess({ ...user, orgRole: current.orgRole }, projectId, { tx });
+    const mine = await tx.savedView.findMany({ where: { userId: user.id, projectId }, select: { name: true, position: true } });
+    if (mine.length >= MAX_VIEWS) throw new ApiError(409, `You can keep up to ${MAX_VIEWS} saved views in a project. Delete one to save another.`);
+    if (mine.some((v) => v.name.toLowerCase() === input.name.toLowerCase())) throw new ApiError(409, "You already have a view with that name.");
+    const row = await tx.savedView.create({ data: { userId: user.id, projectId, name: input.name, state: input.state, position: Math.max(-1, ...mine.map((v) => v.position)) + 1 } });
+    return present(row);
+  }, { timeout: 10000 });
 }
 
 /** Someone else's view is reported as missing, never as forbidden. */
@@ -43,10 +52,21 @@ async function own(user: Actor, id: string) {
 export const assertOwnView = (user: Actor, id: string) => own(user, id);
 
 export async function renameView(user: Actor, id: string, name: string) {
-  const v = await own(user, id);
-  const clash = await db.savedView.findFirst({ where: { userId: user.id, projectId: v.projectId, name: { equals: name, mode: "insensitive" }, id: { not: id } } });
-  if (clash) throw new ApiError(409, "You already have a view with that name.");
-  return present(await db.savedView.update({ where: { id }, data: { name } }));
+  return db.$transaction(async (tx) => {
+    // The case-insensitive name rule is not a database constraint. Serialize
+    // renames with creates by locking the same owner's row first.
+    const [current] = await tx.$queryRaw<{ orgRole: Actor["orgRole"]; deactivatedAt: Date | null; emailVerifiedAt: Date | null; tempPasswordAt: Date | null }[]>`
+      SELECT "orgRole", "deactivatedAt", "emailVerifiedAt", "tempPasswordAt"
+      FROM "User" WHERE "id" = ${user.id} FOR UPDATE
+    `;
+    if (!current || current.deactivatedAt || !current.emailVerifiedAt || current.tempPasswordAt) throw notFound("View");
+    const v = await tx.savedView.findFirst({ where: { id, userId: user.id } });
+    if (!v) throw notFound("View");
+    await projectAccess({ ...user, orgRole: current.orgRole }, v.projectId, { tx });
+    const clash = await tx.savedView.findFirst({ where: { userId: user.id, projectId: v.projectId, name: { equals: name, mode: "insensitive" }, id: { not: id } } });
+    if (clash) throw new ApiError(409, "You already have a view with that name.");
+    return present(await tx.savedView.update({ where: { id }, data: { name } }));
+  }, { timeout: 10000 });
 }
 
 export async function deleteView(user: Actor, id: string) {

@@ -2,11 +2,11 @@
 //   locally set PW_CHROMIUM to a chrome binary; in CI run `npx playwright-core install --with-deps chromium` first.
 // It signs in as throw-away accounts it creates itself with invented names, and never touches any other database.
 // Fails with: screen, width, element, and a screenshot saved under test-results/viewport/.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
 import type { AxeResults } from "axe-core";
-import { account, BASE, istDate, PW, project, superAdmin, task } from "../helpers";
+import { account, BASE, cleanupZz, istDate, PW, project, superAdmin, task, type Account } from "../helpers";
 import { readFileSync } from "node:fs";
 import { SCREENS, TASK_TITLE, type Ids } from "./screens";
 import { openScreen, requireLocalFixtures } from "./screen-ready";
@@ -16,6 +16,8 @@ const AXE = readFileSync("node_modules/axe-core/axe.min.js", "utf8");
 let browser: Browser;
 let ids: Ids;
 let viewerEmail = "";
+const ownedProjects: string[] = [], ownedPeople: Account[] = [];
+let ownedOrganisation = "";
 
 beforeAll(async () => {
   // The suite creates accounts and data, so it only runs against a server on this machine (a test database), never a live site.
@@ -24,23 +26,96 @@ beforeAll(async () => {
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const root = await superAdmin();
   const editor = await account("vpeditor");
+  ownedPeople.push(editor);
   const viewer = await account("vpviewer");
+  ownedPeople.push(viewer);
   viewerEmail = viewer.email;
   const p = await project(root, root, [{ who: editor }, { who: viewer, role: "VIEWER" }]);
+  ownedProjects.push(p.id);
   const parent = await task(root, p.id, { title: TASK_TITLE, dueDate: istDate(2), priority: "HIGH", collaboratorIds: [editor.id] });
   await task(root, p.id, { title: "W".repeat(100), sectionId: p.doing, dueDate: istDate(-1) }); // a 100-character unbreakable title
   await root.c.post(`/api/projects/${p.id}/tasks`, { title: "Draft the summary", parentId: parent });
   const org = await root.c.post("/api/orgs", { name: `Viewport Org ${Date.now()}` });
   const orgId = org.json.organisation.id as string;
+  ownedOrganisation = orgId;
   const pipes = (await root.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const d = await root.c.post("/api/deals", {
     name: `Viewport Deal ${Date.now()}`, organisationId: orgId, pipelineId: pipes.find((x) => x.key === "DEAL_PROACTIVE")!.id, leaderId: root.id,
     whyPursue: "Test deal", nextStep: { title: "Call the buyer", dueDate: istDate(3) },
   });
   expect(d.status, JSON.stringify(d.json)).toBe(201);
-  ids = { project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId };
+  ownedProjects.push((d.json.deal?.id ?? d.json.project?.id) as string);
+  ids = { project: p.id, task: parent, deal: (d.json.deal?.id ?? d.json.project?.id) as string, org: orgId, person: editor.id, personName: editor.name };
 }, 60000);
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => {
+  await browser?.close();
+  let cleanup = false;
+  try {
+    if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects, ownedPeople);
+    if (ownedOrganisation) {
+      const root = await superAdmin();
+      expect((await root.c.post(`/api/orgs/${ownedOrganisation}/archive`, { archive: true })).status).toBe(200);
+    }
+    cleanup = true;
+  } finally {
+    mkdirSync(SHOTS, { recursive: true });
+    writeFileSync(`${SHOTS}/cleanup.json`, JSON.stringify({ projects: ownedProjects.length, people: ownedPeople.length, organisation: Boolean(ownedOrganisation), cleanup }, null, 2));
+  }
+});
+
+it("Deal date-range error names both invalid inputs and clears after correction at phone width", async () => {
+  const ctx = await ctxFor("root", 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/deals", { waitUntil: "load" });
+    await page.getByRole("button", { name: "Date filters", exact: true }).click();
+    const from = page.getByLabel("From", { exact: true });
+    const through = page.getByLabel("Through", { exact: true });
+    await from.fill("2026-11-10");
+    await through.fill("2026-11-09");
+    const error = page.locator("#deal-date-range-error[role=alert]");
+    await error.waitFor();
+    expect(await error.innerText()).toBe("From must be on or before Through.");
+    for (const input of [from, through]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("true");
+      expect(await input.getAttribute("aria-describedby")).toBe("deal-date-range-error");
+    }
+    await through.fill("2026-11-10");
+    expect(await error.count()).toBe(0);
+    for (const input of [from, through]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("false");
+      expect(await input.getAttribute("aria-describedby")).toBeNull();
+    }
+  } finally { await ctx.close(); }
+});
+
+it("BD reporting-period error names both invalid inputs and clears after correction at phone width", async () => {
+  const ctx = await ctxFor("root", 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/bd-intelligence", { waitUntil: "load" });
+    // The tablist appears only after the client has hydrated and its data requests complete.
+    // Filling server-rendered inputs earlier can lose the first change during hydration.
+    await page.getByRole("tablist", { name: "BD panels" }).waitFor();
+    const from = page.getByLabel("From", { exact: true });
+    const to = page.getByLabel("To", { exact: true });
+    await from.fill("2026-11-10");
+    await to.fill("2026-11-09");
+    const error = page.locator("#bd-date-range-error[role=alert]");
+    await error.waitFor();
+    expect(await error.innerText()).toBe("From must be on or before To.");
+    for (const input of [from, to]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("true");
+      expect(await input.getAttribute("aria-describedby")).toBe("bd-date-range-error");
+    }
+    await to.fill("2026-11-10");
+    await error.waitFor({ state: "detached" });
+    for (const input of [from, to]) {
+      expect(await input.getAttribute("aria-invalid")).toBe("false");
+      expect(await input.getAttribute("aria-describedby")).toBeNull();
+    }
+  } finally { await ctx.close(); }
+});
 
 
 async function ctxFor(who: "root" | "viewer" | null, width: number) {
@@ -51,6 +126,224 @@ async function ctxFor(who: "root" | "viewer" | null, width: number) {
   }
   return ctx;
 }
+
+it("announces a failed phone sign-in, then clears the error after a valid retry", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/signin", { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
+    await page.getByRole("textbox", { name: "Work email" }).fill(viewerEmail);
+    await page.getByLabel("Password", { exact: true }).fill("incorrect-qa-password");
+    const failed = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signin" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    expect((await failed).status()).toBe(401);
+    const alert = page.locator("form:visible").getByRole("alert");
+    await alert.waitFor();
+    expect(await alert.innerText()).toBe("Email or password is incorrect.");
+    expect(await alert.innerText()).not.toContain("incorrect-qa-password");
+    expect(await page.getByRole("textbox", { name: "Work email" }).inputValue()).toBe(viewerEmail);
+
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "sign-in page with a visible error").toEqual([]);
+
+    await page.getByLabel("Password", { exact: true }).fill(PW);
+    const accepted = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signin" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    expect((await accepted).status()).toBe(200);
+    await page.getByRole("heading", { name: "Your workspace" }).waitFor();
+    expect(await page.locator("form:visible").getByRole("alert").count()).toBe(0);
+  } finally { await ctx.close(); }
+});
+
+it("keeps email verification retryable after a phone network failure, while an invalid token still expires", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    let failOnce = true;
+    await page.route("**/api/auth/verify", route => {
+      if (failOnce) { failOnce = false; return route.abort("failed"); }
+      return route.continue();
+    });
+    await page.goto("/verify?token=synthetic-invalid-token-long-enough", { waitUntil: "load" });
+    const button = page.getByRole("button", { name: "Verify my email" });
+    await button.waitFor();
+    await button.click();
+    const alert = page.locator('main p[role="alert"]');
+    await alert.waitFor();
+    await expect.poll(async () => alert.innerText()).toMatch(/try again/i);
+    expect(new URL(page.url()).pathname).toBe("/verify");
+    expect(await button.isEnabled()).toBe(true);
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "verify page with a visible retryable network error").toEqual([]);
+    const invalid = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/verify" && r.request().method() === "POST");
+    await button.click();
+    expect((await invalid).status()).toBe(400);
+    await page.getByRole("heading", { name: "This link can't be used" }).waitFor();
+    expect(new URL(page.url()).pathname).toBe("/expired");
+  } finally { await ctx.close(); }
+});
+
+it("keeps expired-link resend retryable when its request fails at phone width", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    let failOnce = true;
+    await page.route("**/api/auth/resend-verification", route => {
+      if (failOnce) { failOnce = false; return route.abort("failed"); }
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok" }) });
+    });
+    await page.goto("/expired", { waitUntil: "load" });
+    await page.evaluate(() => sessionStorage.setItem("sho_pending_email", "synthetic@example.test"));
+    const button = page.getByRole("button", { name: "Send a new verification link" });
+    await button.waitFor();
+    await button.click();
+    const alert = page.locator('main p[role="alert"]');
+    await alert.waitFor();
+    await expect.poll(async () => alert.innerText()).toMatch(/try again/i);
+    expect(new URL(page.url()).pathname).toBe("/expired");
+    expect(await button.isEnabled()).toBe(true);
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "expired-link page with a retryable network error").toEqual([]);
+    await button.click();
+    await page.getByRole("heading", { name: "Check your email" }).waitFor();
+    expect(new URL(page.url()).pathname).toBe("/check-email");
+    expect(new URL(page.url()).search).toBe("?resent=1");
+  } finally { await ctx.close(); }
+});
+
+it("associates a reset confirmation mismatch and clears it before the invalid-link state", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/reset?token=synthetic-invalid-token-long-enough", { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Set a new password" }).waitFor();
+    await page.getByLabel("New password", { exact: true }).fill("Testing1234");
+    const confirm = page.getByLabel("Confirm new password", { exact: true });
+    await confirm.fill("Testing1235");
+    const mismatch = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/reset-password" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Save and sign in" }).click();
+    expect((await mismatch).status()).toBe(400);
+    const alert = page.locator("form:visible").getByRole("alert");
+    await alert.waitFor();
+    expect(await alert.innerText()).toBe("Passwords do not match.");
+    expect(await confirm.getAttribute("aria-invalid")).toBe("true");
+    expect(await confirm.getAttribute("aria-describedby")).toBe("reset-password-error");
+
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "reset form with a visible mismatch").toEqual([]);
+
+    await confirm.fill("Testing1234");
+    await alert.waitFor({ state: "detached" });
+    expect(await confirm.getAttribute("aria-invalid")).toBe("false");
+    expect(await confirm.getAttribute("aria-describedby")).toBeNull();
+    const expired = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/reset-password" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Save and sign in" }).click();
+    expect((await expired).status()).toBe(400);
+    await page.getByRole("heading", { name: "This link can't be used" }).waitFor();
+    expect(new URL(page.url()).pathname).toBe("/expired");
+  } finally { await ctx.close(); }
+});
+
+it("associates a rejected phone recovery email and clears the error on edit", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/forgot", { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Forgot password" }).waitFor();
+    const email = page.getByLabel("Work email", { exact: true });
+    await email.fill("not-an-email");
+    const response = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/forgot-password" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Send reset link" }).click();
+    expect((await response).status()).toBe(400);
+    const alert = page.locator("form:visible").getByRole("alert");
+    await alert.waitFor();
+    expect(await alert.innerText()).toBeTruthy();
+    expect(await email.getAttribute("aria-invalid")).toBe("true");
+    expect(await email.getAttribute("aria-describedby")).toBe("forgot-email-error");
+
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "recovery form with a visible email error").toEqual([]);
+    await email.fill("zz-audit-corrected@example.com");
+    await alert.waitFor({ state: "detached" });
+    expect(await email.getAttribute("aria-invalid")).toBe("false");
+    expect(new URL(page.url()).pathname).toBe("/forgot");
+  } finally { await ctx.close(); }
+});
+
+it("associates rejected phone sign-up fields without creating an account", async () => {
+  const ctx = await ctxFor(null, 390);
+  try {
+    const page = await ctx.newPage();
+    await page.goto("/signup", { waitUntil: "load" });
+    await page.getByRole("heading", { name: "Create your account" }).waitFor();
+    const name = page.getByLabel("Full name", { exact: true });
+    const email = page.getByLabel("Work email", { exact: true });
+    const password = page.getByLabel("Password", { exact: true });
+    const alert = page.locator("form:visible").getByRole("alert");
+    await name.fill("ZZ-TEST Audit Person");
+    await email.fill("not-an-email");
+    await password.fill("Testing1234");
+    const badEmail = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signup" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Create account" }).click();
+    expect((await badEmail).status()).toBe(400);
+    await alert.waitFor();
+    expect(await alert.innerText()).toBeTruthy();
+    expect(await email.getAttribute("aria-invalid")).toBe("true");
+    expect(await email.getAttribute("aria-describedby")).toBe("signup-error");
+    expect(await name.getAttribute("aria-invalid")).toBe("false");
+
+    await email.fill(`nakul17+zz-a11y-signup-${Date.now()}@aplyd.com`);
+    await alert.waitFor({ state: "detached" });
+    expect(await email.getAttribute("aria-invalid")).toBe("false");
+    await password.fill("short");
+    const badPassword = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signup" && r.request().method() === "POST");
+    await page.getByRole("button", { name: "Create account" }).click();
+    expect((await badPassword).status()).toBe(400);
+    await alert.waitFor();
+    expect(await alert.innerText()).toBe("Use at least 8 characters, with at least one letter and one number.");
+    expect(await password.getAttribute("aria-invalid")).toBe("true");
+    expect(await password.getAttribute("aria-describedby")).toBe("signup-error");
+    expect(await email.getAttribute("aria-invalid")).toBe("false");
+
+    await page.evaluate(AXE);
+    const violations = await page.evaluate(async () => {
+      const axe = (window as unknown as { axe: { run(node: Document, options: unknown): Promise<AxeResults> } }).axe;
+      const result = await axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"] } });
+      return result.violations.map(v => ({ id: v.id, targets: v.nodes.slice(0, 3).map(n => n.target.join(" ")) }));
+    });
+    expect(violations, "sign-up form with a visible field error").toEqual([]);
+    await password.fill("Testing1234");
+    await alert.waitFor({ state: "detached" });
+    expect(await password.getAttribute("aria-invalid")).toBe("false");
+    expect(new URL(page.url()).pathname).toBe("/signup");
+  } finally { await ctx.close(); }
+});
 
 for (const width of [1280, 390]) {
   describe(`axe at ${width} px`, () => {
@@ -121,10 +414,37 @@ describe("keyboard", () => {
       await page.keyboard.press("Tab");
       expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), `Tab ${i + 1}`).toBe(true);
     }
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press("Shift+Tab");
+      expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), `Shift+Tab ${i + 1}`).toBe(true);
+    }
     await page.keyboard.press("Escape");
     await page.waitForSelector('[role="dialog"]', { state: "detached" });
     expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("link");
     await ctx.close();
+  });
+  it("Escape and browser Back close nested task dialogs without a destructive action", async () => {
+    const ctx = await ctxFor("root", 1280);
+    try {
+      const page = await ctx.newPage();
+      let deletes = 0;
+      page.on("request", (request) => {
+        if (request.method() === "DELETE" && new URL(request.url()).pathname === `/api/tasks/${ids.task}`) deletes++;
+      });
+      await page.goto(`/projects/${ids.project}?task=${ids.task}`, { waitUntil: "load" });
+      const taskDialog = page.getByRole("dialog", { name: "Task", exact: true });
+      await taskDialog.getByRole("button", { name: "Move to Trash", exact: true }).click();
+      const confirm = page.getByRole("dialog", { name: "Move to Trash?", exact: true });
+      await confirm.waitFor();
+      await page.keyboard.press("Escape");
+      await confirm.waitFor({ state: "detached" });
+      await taskDialog.waitFor();
+      await page.evaluate(() => history.back());
+      await page.waitForURL((url) => !url.searchParams.has("task"));
+      await taskDialog.waitFor({ state: "detached" });
+      expect(deletes).toBe(0);
+      expect((await ctx.request.get(`/api/tasks/${ids.task}`)).status()).toBe(200);
+    } finally { await ctx.close(); }
   });
   it("Retry loads the screen again without a full page reload", async () => {
     const ctx = await ctxFor("root", 1280);
@@ -133,11 +453,14 @@ describe("keyboard", () => {
     // for that response here timed out. My tasks is the screen this Retry reloads.
     const firstLoad = page.waitForResponse(r => new URL(r.url()).pathname === "/api/my-tasks" && r.ok());
     await page.goto("/my-tasks", { waitUntil: "load" });
-    await firstLoad;
-    await page.getByText("Prepare the quarterly review pack with the finance team", { exact: true }).first().waitFor();
+    const firstResponse = await firstLoad;
+    const firstGroups = (await firstResponse.json()) as { groups?: { next7?: { total?: number } } };
+    expect(firstGroups.groups?.next7?.total, "fixture task must be present in the paged API").toBeGreaterThan(0);
+    await page.getByRole("heading", { name: "My tasks", exact: true }).waitFor();
+    await page.getByRole("region", { name: "Next 7 days", exact: true }).waitFor();
     await page.evaluate(() => { (window as unknown as { __kept: number }).__kept = 1; });
     let aborted = 0;
-    await page.route("**/api/my-tasks", r => { aborted++; return r.abort(); });
+    await page.route("**/api/my-tasks*", r => { aborted++; return r.abort(); });
     await page.getByRole("button", { name: "Open menu", exact: true }).click();
     await page.locator('.side.open a[href="/projects"]').click();
     // Finish leaving My tasks before returning; rapid clicks may coalesce navigation
@@ -149,12 +472,12 @@ describe("keyboard", () => {
     await page.waitForURL(new URL("/my-tasks", BASE).href);
     await page.getByText("Could not reach the server.").waitFor();
     expect(aborted, "the intended API failure must actually have been injected").toBeGreaterThan(0);
-    await page.unroute("**/api/my-tasks");
+    await page.unroute("**/api/my-tasks*");
     const recovered = page.waitForResponse(r => new URL(r.url()).pathname === "/api/my-tasks" && r.ok());
     await page.getByRole("button", { name: "Retry" }).click();
     await recovered;
     await page.getByText("Could not reach the server.").waitFor({ state: "detached" });
-    await page.getByText("Prepare the quarterly review pack with the finance team", { exact: true }).first().waitFor();
+    await page.getByRole("region", { name: "Next 7 days", exact: true }).waitFor();
     expect(await page.evaluate(() => (window as unknown as { __kept?: number }).__kept)).toBe(1);
     await ctx.close();
   });
@@ -163,7 +486,7 @@ describe("keyboard", () => {
     const page = await ctx.newPage();
     await page.goto("/projects", { waitUntil: "load" });
     await page.waitForSelector("main#main");
-    await page.route("**/api/my-tasks", async (r) => { await new Promise((x) => setTimeout(x, 1500)); await r.continue(); });
+    await page.route("**/api/my-tasks*", async (r) => { await new Promise((x) => setTimeout(x, 1500)); await r.continue(); });
     await page.getByRole("button", { name: "Open menu", exact: true }).click();
     await page.locator('.side.open a[href="/my-tasks"]').click();
     await page.waitForSelector(".skel-wrap");

@@ -62,7 +62,9 @@ function ContactDialog({ orgId, contact, onClose, onDone }: { orgId: string; con
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value });
   async function save() {
-    const body = { name: v.name, role: v.role || null, email: v.email || null, phone: v.phone || null, knownBy: known };
+    const body = { name: v.name, role: v.role || null, email: v.email || null, phone: v.phone || null, knownBy: known,
+      ...(contact ? { expected: { name: contact.name, role: contact.role, email: contact.email, phone: contact.phone,
+        knownBy: contact.knownBy.map((person) => person.id) } } : {}) };
     const r = contact ? await api("PATCH", `/api/contacts/${contact.id}`, body) : await api("POST", `/api/orgs/${orgId}/contacts`, body);
     if (r.ok) onDone(); else setErr(r.error ?? "Could not save.");
   }

@@ -9,16 +9,22 @@
 .settings-panel h2::before { content: '◇'; color: #b77b0e; margin-right: 12px; }
 .settings-members { grid-column: 1; grid-row: 1; }
 .settings-addpeople { grid-column: 1; grid-row: 2; }
-.settings-classification { grid-column: 2; grid-row: 1; }
-.settings-leadership { grid-column: 2; grid-row: 2; }
+.settings-details { grid-column: 2; grid-row: 1; }
+.settings-classification { grid-column: 2; grid-row: 2; }
+.settings-leadership { grid-column: 2; grid-row: 3; }
+.settings-deal .settings-leadership { grid-row: 2; }
 .settings-lifecycle { grid-column: 1 / -1; }
 .settings-lifecycle[hidden] { display: none; }
 .settings-panel .list { border: 0; border-radius: 0; }
 .settings-panel .item { padding: 16px 0; flex-wrap: wrap; }
 .settings-panel .item .t { min-width: min(150px, 100%); }
 .settings-panel .item .t :is(b,small) { overflow-wrap: anywhere; }
-.project-settings-view :is(button,input,select) { font-family: inherit; }
-.shell .project-settings-view :is(.in,.btn,select) { min-height: 44px; max-width: 100%; }
+.project-settings-view :is(button,input,select,textarea) { font-family: inherit; }
+.shell .project-settings-view :is(.in,.btn,select,textarea) { min-height: 44px; max-width: 100%; }
+.settings-details :is(form,.field) { display: flex; flex-direction: column; gap: 12px; }
+.settings-details textarea { width: 100%; min-height: 96px; resize: vertical; }
+.settings-description { color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+.settings-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .settings-classification { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
 .settings-classification > h2, .settings-classification > .hint { margin: 0; }
 .settings-classification > b { font-size: 16px; line-height: 1.4; }
@@ -27,7 +33,7 @@
 .settings-classification > .btn { align-self: flex-start; justify-content: flex-start; min-width: 0; max-width: 100%; white-space: normal; text-align: left; line-height: 1.4; }
 .settings-classification select { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 12px; border: 1px solid var(--field); border-radius: 8px; background: white; }
 .settings-panel .box { margin-top: 16px; background: transparent; }
-.project-settings-view :is(a,button,input,select):focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
+.project-settings-view :is(a,button,input,select,textarea):focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
 @media (max-width: 767px) {
   .settings-grid { display: flex; flex-direction: column; }
   .settings-panel { width: 100%; padding: 20px; }

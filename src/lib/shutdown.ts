@@ -236,9 +236,8 @@ function loadNative(): NativeAccept | null {
         return [];
       },
     };
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error(`graceful shutdown: signal handler not installed (${detail})`);
+  } catch {
+    console.error("graceful shutdown: signal handler not installed");
     nativeCache = null;
   }
   return nativeCache;
@@ -269,9 +268,8 @@ function loadLibc(): Libc | null {
       shutdown: (fd) => shutdown(fd, SHUT_RD) as number,
       errno: () => koffi.decode(errnoLoc(), "int"),
     };
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error(`graceful shutdown: cannot read the accept queue (${detail})`);
+  } catch {
+    console.error("graceful shutdown: cannot read the accept queue");
     libcCache = null;
   }
   return libcCache;
@@ -477,9 +475,8 @@ async function onSigterm(servers: http.Server[], options: ShutdownOptions) {
   const clean = quiet && state.dropped === 0 && inFlight() === 0 && !state.queueDrainFailed;
   try {
     await (options.disconnect ?? disconnectPrisma)();
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error(`graceful shutdown: prisma disconnect failed: ${detail}`);
+  } catch {
+    console.error("graceful shutdown: prisma disconnect failed");
   }
   report(clean ? CLEAN_LOG : TIMEOUT_LOG, clean ? 0 : 1, options);
 }

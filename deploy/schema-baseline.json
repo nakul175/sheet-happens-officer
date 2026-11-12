@@ -1,0 +1,32 @@
+{
+  "observedApplicationCommit": "7c4aa8419c7f19e781e54d0681c05d4c22d68b7b",
+  "evidence": "Retained SHO-3054 production receipt, not fresh database introspection",
+  "recordedAppliedAt": "2026-11-02T19:10:25.041Z",
+  "legacyValuesUnchanged": true,
+  "legacyRowCount": 46,
+  "aheadOfObservedApp": [
+    "20261029030000_bid_deadline_time"
+  ],
+  "migrations": {
+    "20261017000000_init": "33fe5dfa96809a16aad8c81dd3ff7009a5396008530ad42c0626148253474d6c",
+    "20261017120000_model_usage_counted": "bd1b61cbdac2b92cf14877d4d38214fd8d8cb984c65f740a40929acf60d95d9b",
+    "20261017124803_crm_workstreams_deals": "032c7d032fac007da8e7c038ec0e79d648b4682bd916f79886795d12dd09e446",
+    "20261018000000_start_guide": "07c9ff8ee100405ec599eec6502feb61c19dfd629a4b2a76a8352f114e55a3ef",
+    "20261018000000_user_compact_rows": "223c35c28b63e9451ab08c14c0e1b07a552497ebaf90fb2e7f02e2f91c0d1e17",
+    "20261018010000_user_temp_password": "12fbbfabb54a017d62bbcdfb7b55b85daee9dba1679754802450544781a70b93",
+    "20261018100000_saved_views": "29fa8200446f65b702812ad11a35e4a489d2ee901fa4268536f2de7a4f8c346c",
+    "20261018193000_task_comments": "c9f103c9192538d89aeacb28613da769ec8d9dc895586b8657947b5de9c6547a",
+    "20261018203100_pin_trigger_search_path": "428115c92f82024c00adce4dd6dab3bd0734e0814a0a3eb8a08fc39632254b96",
+    "20261019000000_negotiation_required_fields": "ec30ad17e94191df12fc783443eaa0618514ceda6f7980580d4c2cb37efb063b",
+    "20261022120000_suite_signin": "c04f049b59db8c6a4d2161193a77e084567b933121b91f0ec6ca0c02d044eb6c",
+    "20261022160000_central_accounts": "6849b9f042dca5d0b085abe8f4c46cee6e4ebecb8ca7e0c3d186cab83570b42e",
+    "20261024101000_deal_classification_revenue": "ace21742a522e760e3714408f2da859a9f6996a87e4670ca1437eda550544cc1",
+    "20261024110000_stage_delivery_category": "3d6198c68b113ed685b1637dc6dd5512737d83d15b9cfa6717d356be6fffa1f3",
+    "20261024110100_bid_stage_mapping": "366a69c9444509039f8f3ae06f0c59fcd68f9ba53bb9c1fc84f121bb2b75e670",
+    "20261026100000_recoverable_project_delete": "4deaad4d73d2f718b929b7c43b1dfb08757d51ea86075e8fcf142004be0371fd",
+    "20261026110000_project_vertical_boards": "ade3ec78987852f4b5f14c5c2419a7b91e0a04d397327ef25656fc8c94195d05",
+    "20261027120000_holy_sheet_links": "45395933bf5b56924a79d333ebf7becf55f5dc9bb9b9fd9123a16f3dccc7f5bf",
+    "20261029030000_bid_deadline_time": "0e58d00815cad1af702ef9f18d90e115026a916ffcb3849faa813f288835c568",
+    "20261031101131_sho3139_bd_fields": "bd80479dfd046fd63caf0db685379860a162a1c797abd29309ba5e5d1508807a"
+  }
+}

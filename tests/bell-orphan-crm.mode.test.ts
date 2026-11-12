@@ -37,7 +37,7 @@ beforeAll(async () => {
   expect(["127.0.0.1", "localhost", "[::1]"]).toContain(url.hostname);
   expect(url.pathname).toMatch(/^\/sho_test(?:_[\w-]+)?$/);
   expect(existsSync(".next/BUILD_ID")).toBe(true);
-  workspaceId = (await db.workspace.create({ data: { name: tag } })).id;
+  workspaceId = ((await db.workspace.findFirst()) ?? (await db.workspace.create({ data: { name: tag } }))).id;
   const passwordHash = await hashPassword(password);
   for (const role of ["MEMBER", "ADMIN", "SUPER_ADMIN"] as const) {
     const email = `nakul17+${tag.toLowerCase()}-${role.toLowerCase()}@aplyd.com`;
@@ -88,7 +88,7 @@ afterAll(async () => {
       const ids = people.map((p) => p.id);
       await db.session.updateMany({ where: { userId: { in: ids } }, data: { revokedAt: new Date() } });
       await db.user.updateMany({ where: { id: { in: ids } }, data: { deactivatedAt: new Date() } });
-      await db.project.updateMany({ where: { workspaceId }, data: { archivedAt: new Date() } });
+      await db.project.updateMany({ where: { id: { in: [plainId, dealId] } }, data: { archivedAt: new Date() } });
       expect(await db.user.count({ where: { id: { in: ids }, deactivatedAt: null } })).toBe(0);
     }
   } finally {

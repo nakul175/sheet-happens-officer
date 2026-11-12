@@ -13,8 +13,10 @@
 // qa:TC missing single run
 // qa:TC missing 40 concurrent reminder requests
 import pg from "pg";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BASE, istDate, task, type Account } from "./helpers";
+import { BASE, OUTBOX, istDate, task, type Account } from "./helpers";
 import { zzTestData, type ZzProject } from "./zz-test-data";
 
 const LOAD = 40;
@@ -79,6 +81,51 @@ async function dueTomorrow(who: Account, taskId: string, title: string) {
   return (r.json.items as BellItem[]).filter((item) => item.href === `/tasks/${taskId}` && item.text === `"${title}" is due tomorrow.`);
 }
 
+async function dueReminderRecipients(taskId: string) {
+  const client = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000 });
+  try {
+    await client.connect();
+    const { rows } = await client.query<{ recipientId: string }>(
+      'SELECT "recipientId" FROM "Notification" WHERE "taskId" = $1 AND "type" = $2',
+      [taskId, "TASK_DUE_TOMORROW"],
+    );
+    return rows.map((row) => row.recipientId);
+  } finally {
+    await client.end();
+  }
+}
+
+async function dueReminderRows(taskId: string) {
+  const client = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000 });
+  try {
+    await client.connect();
+    const { rows } = await client.query<{ recipientId: string; type: string }>(
+      'SELECT "recipientId", "type" FROM "Notification" WHERE "taskId" = $1 AND "type" IN ($2, $3, $4)',
+      [taskId, "TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"],
+    );
+    return rows;
+  } finally {
+    await client.end();
+  }
+}
+
+async function taskAndMembership(taskId: string, projectId: string, userId: string) {
+  const client = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000 });
+  try {
+    await client.connect();
+    const task = await client.query<{ assigneeId: string; deletedAt: Date | null }>(
+      'SELECT "assigneeId", "deletedAt" FROM "Task" WHERE "id" = $1', [taskId],
+    );
+    const member = await client.query<{ count: number }>(
+      'SELECT count(*)::int AS count FROM "ProjectMember" WHERE "projectId" = $1 AND "userId" = $2',
+      [projectId, userId],
+    );
+    return { task: task.rows[0], memberCount: member.rows[0].count };
+  } finally {
+    await client.end();
+  }
+}
+
 /** One task due tomorrow for each holder, so each run starts with no reminder written for them. */
 async function dueTasks(label: string) {
   const holderTitle = `ZZ-TEST ${label} ${tag}`;
@@ -89,6 +136,67 @@ async function dueTasks(label: string) {
     { who: holder, taskId: holderTaskId, title: holderTitle },
     { who: leader, taskId: leaderTaskId, title: leaderTitle },
   ];
+}
+
+type EligibilityChange = "reassign" | "archive" | "deactivate" | "delete";
+
+/** Commit a competing eligibility change while a reminder job waits on its row/insert. */
+async function raceEligibilityChange(change: EligibilityChange, taskId: string) {
+  const gate = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+  const watch = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+  let began = false;
+  let changed = false;
+  let posts: Promise<unknown> | null = null;
+  try {
+    await gate.connect();
+    await watch.connect();
+    await gate.query("BEGIN");
+    began = true;
+    const row = change === "archive" ? { table: "Project", id: proj.id }
+      : change === "deactivate" ? { table: "User", id: holder.id }
+        : { table: "Task", id: taskId };
+    // The relation name comes only from the fixed union above, never external input.
+    await gate.query(`SELECT "id" FROM "${row.table}" WHERE "id" = $1 FOR UPDATE`, [row.id]);
+    await gate.query('LOCK TABLE "Notification" IN SHARE MODE');
+    posts = postReminders(1).then(() => null, (err: unknown) => err);
+    const deadline = Date.now() + 3_000;
+    let waiting = false;
+    while (Date.now() < deadline) {
+      const { rows } = await watch.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM pg_stat_activity
+         WHERE datname = current_database() AND pid <> pg_backend_pid()
+           AND state = 'active' AND wait_event_type = 'Lock'
+           AND (query ILIKE '%"Task"%' OR query ILIKE '%"Project"%'
+             OR query ILIKE '%"User"%' OR query ILIKE '%"Notification"%')`,
+      );
+      if (rows[0].count > 0) { waiting = true; break; }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(waiting, `reminder job reached the held ${row.table} row or notification insert`).toBe(true);
+    if (change === "reassign") await gate.query('UPDATE "Task" SET "assigneeId" = $2 WHERE "id" = $1', [taskId, leader.id]);
+    if (change === "delete") await gate.query('UPDATE "Task" SET "deletedAt" = $2 WHERE "id" = $1', [taskId, new Date()]);
+    if (change === "archive") await gate.query('UPDATE "Project" SET "archivedAt" = $2 WHERE "id" = $1', [proj.id, new Date()]);
+    if (change === "deactivate") await gate.query('UPDATE "User" SET "deactivatedAt" = $2 WHERE "id" = $1', [holder.id, new Date()]);
+    await gate.query("COMMIT");
+    began = false;
+    changed = true;
+    const failed = await posts;
+    if (failed) throw failed;
+    if (change === "archive") { await gate.query('UPDATE "Project" SET "archivedAt" = NULL WHERE "id" = $1', [proj.id]); changed = false; }
+    if (change === "deactivate") { await gate.query('UPDATE "User" SET "deactivatedAt" = NULL WHERE "id" = $1', [holder.id]); changed = false; }
+    const oldHolder = await dueTomorrow(holder, taskId, `ZZ-TEST ${change} during reminder ${tag}`);
+    const newHolder = change === "reassign" ? await dueTomorrow(leader, taskId, `ZZ-TEST ${change} during reminder ${tag}`) : [];
+    return { oldHolder, newHolder };
+  } finally {
+    try {
+      if (began) await gate.query("ROLLBACK");
+      // The change is part of the disposable fixture, not a permanent deactivation or archive.
+      if (changed && change === "archive") await gate.query('UPDATE "Project" SET "archivedAt" = NULL WHERE "id" = $1', [proj.id]);
+      if (changed && change === "deactivate") await gate.query('UPDATE "User" SET "deactivatedAt" = NULL WHERE "id" = $1', [holder.id]);
+    } finally {
+      await Promise.allSettled([gate.end(), watch.end()]);
+    }
+  }
 }
 
 describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder per holder, task, type and day", () => {
@@ -156,4 +264,117 @@ describe("qa:TC missing APL-2749: overlapping reminder runs write one reminder p
     console.log(`APL-2749 overlap ${JSON.stringify(overlap)} after ${heldMs} ms held; reminder rows per (recipient, task, TASK_DUE_TOMORROW) after ${LOAD} concurrent runs: ${JSON.stringify(counts)}`);
     expect(counts).toEqual({ holder: 1, leader: 1 });
   }, 90_000);
+
+  it("does not notify a task completed while a reminder run is waiting to insert", async () => {
+    const title = `ZZ-TEST completed during reminder ${tag}`;
+    const taskId = await task(leader, proj.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
+    const gate = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+    const watch = new pg.Client({ connectionString: localDatabaseUrl(), statement_timeout: 5_000, lock_timeout: 2_000 });
+    let began = false;
+    let posts: Promise<unknown> | null = null;
+    try {
+      await gate.connect();
+      await watch.connect();
+      await gate.query("BEGIN");
+      began = true;
+      // A completed task must never acquire a stale due notice. The row lock keeps the
+      // completion before a fresh locked selection; the table lock exposes an old
+      // pre-transaction selection by pausing its later notification insert.
+      await gate.query('SELECT id FROM "Task" WHERE id = $1 FOR UPDATE', [taskId]);
+      await gate.query('LOCK TABLE "Notification" IN SHARE MODE');
+      posts = postReminders(1).then(() => null, (err: unknown) => err);
+      const deadline = Date.now() + 3_000;
+      let waiting = false;
+      while (Date.now() < deadline) {
+        const { rows } = await watch.query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM pg_stat_activity
+           WHERE datname = current_database() AND pid <> pg_backend_pid()
+             AND state = 'active' AND wait_event_type = 'Lock'
+             AND (query ILIKE '%"Task"%' OR query ILIKE '%"Notification"%')`,
+        );
+        if (rows[0].count > 0) { waiting = true; break; }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(waiting, "reminder job reached the held task row or notification insert").toBe(true);
+      await gate.query('UPDATE "Task" SET "completedAt" = $2 WHERE id = $1', [taskId, new Date()]);
+      await gate.query("COMMIT");
+      began = false;
+    } finally {
+      try { if (began) await gate.query("ROLLBACK"); }
+      finally { await Promise.allSettled([gate.end(), watch.end()]); }
+    }
+    const failed = await posts;
+    if (failed) throw failed;
+    expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
+  }, 60_000);
+
+  it.each(["reassign", "archive", "deactivate", "delete"] as const)(
+    "rechecks task eligibility after a concurrent %s",
+    async (change) => {
+      const title = `ZZ-TEST ${change} during reminder ${tag}`;
+      const taskId = await task(leader, proj.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
+      const { oldHolder, newHolder } = await raceEligibilityChange(change, taskId);
+      expect(oldHolder, "former holder must not receive a stale due notice").toEqual([]);
+      expect(newHolder.map((item) => item.text)).toEqual(change === "reassign" ? [`"${title}" is due tomorrow.`] : []);
+    },
+    60_000,
+  );
+
+  it("routes the next reminder only to the handover recipient after project membership removal", async () => {
+    const separate = await zz.project(leader);
+    const added = await leader.c.post(`/api/projects/${separate.id}/members`, { userId: holder.id, role: "EDITOR" });
+    expect(added.status, JSON.stringify(added.json)).toBe(201);
+    const title = `ZZ-TEST removed member reminder ${tag}`;
+    const taskId = await task(leader, separate.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
+    const removed = await leader.c.del(`/api/projects/${separate.id}/members/${holder.id}?handoverTo=${leader.id}`);
+    expect(removed.status, JSON.stringify(removed.json)).toBe(204);
+    expect(await taskAndMembership(taskId, separate.id, holder.id)).toMatchObject({
+      task: { assigneeId: leader.id, deletedAt: null }, memberCount: 0,
+    });
+    await postReminders(1);
+    expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
+    expect(await dueTomorrow(leader, taskId, title)).toHaveLength(1);
+    expect(await dueReminderRecipients(taskId)).toEqual([leader.id]);
+  }, 60_000);
+
+  it("leaves no due reminder for a task deleted before the job runs", async () => {
+    const title = `ZZ-TEST deleted before reminder ${tag}`;
+    const taskId = await task(leader, proj.id, { title, assigneeId: holder.id, dueDate: istDate(1) });
+    const deleted = await leader.c.del(`/api/tasks/${taskId}`);
+    expect(deleted.status, JSON.stringify(deleted.json)).toBe(204);
+    expect((await taskAndMembership(taskId, proj.id, holder.id)).task.deletedAt).not.toBeNull();
+    await postReminders(1);
+    expect(await dueTomorrow(holder, taskId, title)).toEqual([]);
+    expect(await dueReminderRecipients(taskId)).toEqual([]);
+  }, 60_000);
+
+  it("honors due-day boundaries, dedupes a second run, and sends no task email", async () => {
+    const cases = [
+      { offset: 1, type: "TASK_DUE_TOMORROW" },
+      { offset: 0, type: "TASK_DUE_TODAY" },
+      { offset: -1, type: "TASK_OVERDUE" },
+      { offset: -8, type: "TASK_OVERDUE" },
+      { offset: -29, type: null },
+    ] as const;
+    const due: { id: string; type: string | null }[] = [];
+    for (const { offset, type } of cases) {
+      due.push({ id: await task(leader, proj.id, {
+        title: `ZZ-TEST reminder boundary ${offset} ${tag}`,
+        assigneeId: holder.id,
+        dueDate: istDate(offset),
+      }), type });
+    }
+    await postReminders(1);
+    await postReminders(1);
+    for (const { id, type } of due) {
+      const rows = await dueReminderRows(id);
+      expect(rows, `due reminder for ${id}`).toEqual(type ? [{ recipientId: holder.id, type }] : []);
+    }
+    const mailFiles = (() => { try { return readdirSync(OUTBOX); } catch { return []; } })();
+    const mail = mailFiles.map((file) => readFileSync(path.join(OUTBOX, file), "utf8")).join("\n");
+    expect(mail).not.toContain(`ZZ-TEST reminder boundary 1 ${tag}`);
+    expect(mail).not.toContain(`ZZ-TEST reminder boundary 0 ${tag}`);
+    expect(mail).not.toContain(`ZZ-TEST reminder boundary -1 ${tag}`);
+    expect(mail).not.toContain(`ZZ-TEST reminder boundary -8 ${tag}`);
+  }, 60_000);
 });

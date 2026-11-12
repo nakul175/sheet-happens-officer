@@ -3,18 +3,19 @@
 // Each CRM_VISIBLE mode is its own `next start` process (as tests/crm-visible-modes-server.mode.test.ts), and
 // Chromium is driven with playwright-core at 1280x800 and 390x844. Needs `npm run build` first.
 // Run with `npm run test:modes` (CI runs it after the build). `npm test` does not start these servers.
-// Skipped without SHO_QA_PASS, the password for the nakul17+ aliases. CI does not set it, so CI skips this file;
-// QA runs set it. No workflow file may hold a SHO_QA_PASS value.
+// Uses a per-run synthetic password only on disposable localhost sho_test; no shared QA credential.
 // Seeding and clean-up go through the app's API only; this file writes nothing to the database itself.
 // Local or CI Postgres only: a DATABASE_URL on any other host is refused before anything starts.
 // People are run-unique nakul17+ aliases, data is named ZZ-TEST. afterAll archives the projects and the
 // organisation and deactivates the people; the run's Super Admin alias cannot be deactivated and stays.
 import { existsSync, mkdirSync, statSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { call, QA_PASS, signUpAlias } from "../local-alias";
+import { call, signUpAlias } from "../local-alias";
+import { assertLocalFixture } from "../local-fixture-guard";
 import { LocalServers } from "../local-servers";
 import { istDate } from "../../helpers";
 
@@ -22,6 +23,7 @@ const root = fileURLToPath(new URL("../../..", import.meta.url));
 const SHOTS = path.join(root, "test-results", "APL-2728");
 const SENTENCE = "A deal you can't view.";
 const runId = `${Date.now().toString(36)}-${process.pid}`;
+const fixturePassword = randomBytes(24).toString("hex") + "A9";
 const tag = `ZZ-TEST-${runId}`;
 const dealName = `ZZ-TEST Acme renewal ${tag}`;
 const taskTitle = `ZZ-TEST Acme kickoff ${tag}`;
@@ -53,16 +55,13 @@ let stageName = "";
 
 /** Refuses any database that is not on this machine (the CI service container is localhost). */
 function assertLocalDatabase() {
-  let host = "";
-  try { host = new URL(process.env.DATABASE_URL ?? "").hostname.toLowerCase(); } catch { /* checked below */ }
-  if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(host)) {
-    throw new Error("APL-2728 story: refusing to run, DATABASE_URL is not a local database.");
-  }
+  assertLocalFixture(process.env.DATABASE_URL);
 }
 
 function chromiumPath() {
   const candidates = [
     process.env.PW_CHROMIUM,
+    chromium.executablePath(),
     "/opt/pw-browsers/chromium",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
@@ -93,7 +92,7 @@ async function startServer(mode: Mode): Promise<Server> {
 }
 
 async function person(server: Server, label: string) {
-  const who = await signUpAlias(server.base, server.outbox, aliasEmail(label), `ZZ-TEST ${label} ${runId}`);
+  const who = await signUpAlias(server.base, server.outbox, aliasEmail(label), `ZZ-TEST ${label} ${runId}`, fixturePassword);
   seed.people.push(who);
   return who;
 }
@@ -143,7 +142,7 @@ async function surface(page: Page) {
   return { ...dom, html: await page.content() };
 }
 
-describe.skipIf(!QA_PASS)("qa:TC missing APL-2728 person page in the browser", () => {
+describe("qa:TC missing APL-2728 person page in the browser", () => {
   beforeAll(async () => {
     assertLocalDatabase();
     if (!existsSync(path.join(root, ".next", "BUILD_ID"))) {

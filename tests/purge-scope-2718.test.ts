@@ -4,12 +4,11 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { PrismaClient } from "../src/generated/prisma/client";
+import { db } from "../src/lib/db";
 import { hashPassword } from "../src/lib/auth";
 import { runJob } from "../src/lib/jobs";
 import { BASE, Client, PW } from "./helpers";
 
-const db = new PrismaClient();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DAY = 86_400_000;
 // Fixed clock for the seed and for the scheduled job. purgeTrash() reads `new Date()`
@@ -140,7 +139,7 @@ describe("purgeTrash scope (APL-2718)", () => {
     expect(userPurgeCallers(path.join(root, "src/app/(app)/projects/[id]/trash"))).toEqual([]);
   });
 
-  it("AC1 a signed-in user of workspace A does not change workspace B (APL-2718-AC1@v1)", async () => {
+  it("AC1 ambiguous multi-workspace storage refuses login and cannot change workspace B (APL-2718-AC1@v1)", async () => {
     const seed = await seedWorkspaces();
     const ids = [seed.A.expiredId, seed.A.recentId, seed.B.expiredId, seed.B.recentId];
     try {
@@ -148,22 +147,14 @@ describe("purgeTrash scope (APL-2718)", () => {
       expect(before).toHaveLength(4);
       const c = new Client();
       const signed = await c.post("/api/auth/signin", { email: seed.A.email, password: PW });
-      expect(signed.status, JSON.stringify(signed.json)).toBe(200);
-      expect(signed.json.user.orgRole).toBe("ADMIN");
-      expect(signed.json.user.id).toBe(seed.A.userId);
-
-      const mine = await c.get(`/api/projects/${seed.A.projectId}`);
-      const other = await c.get(`/api/projects/${seed.B.projectId}`);
-      expect(mine.status, JSON.stringify(mine.json)).toBe(200);
-      expect(other.status, JSON.stringify(other.json)).toBe(200);
-      expect(mine.json.project.role).toBe("LEADER");
-      expect(other.json.project.role).toBe("LEADER");
-
-      const trashA = await c.get(`/api/projects/${seed.A.projectId}/trash`);
-      const trashB = await c.get(`/api/projects/${seed.B.projectId}/trash`);
-      expect(trashA.status).toBe(200);
-      expect(trashB.status).toBe(200);
-      expect((trashB.json.items as { id: string }[]).map((item) => item.id).sort()).toEqual([seed.B.expiredId, seed.B.recentId].sort());
+      // Owner-approved single-organisation contract: ambiguous storage cannot
+      // produce an authenticated admin session or expose either workspace.
+      expect(signed.status, JSON.stringify(signed.json)).toBe(503);
+      expect(signed.json.user).toBeUndefined();
+      for (const p of [seed.A.projectId, seed.B.projectId]) {
+        expect((await c.get(`/api/projects/${p}`)).status).toBe(401);
+        expect((await c.get(`/api/projects/${p}/trash`)).status).toBe(401);
+      }
 
       const secret = process.env.JOB_SECRET ?? "";
       const wrong = (secret.startsWith("y") ? "x" : "y").repeat(Math.max(16, secret.length));
@@ -189,27 +180,31 @@ describe("purgeTrash scope (APL-2718)", () => {
   it("AC2 the scheduled purge-trash job removes 31-day trash in every workspace (APL-2718-AC2@v1)", async () => {
     const seed = await seedWorkspaces();
     const previous = await db.jobRun.findUnique({ where: { job: "purge-trash" } });
-    const prior = new Set((await db.auditLog.findMany({ where: { event: "TASK_PURGED" }, select: { id: true } })).map((row) => row.id));
     const auditIds: string[] = [];
     let out: Awaited<ReturnType<typeof runJob>> | undefined;
+    const createAudit = db.auditLog.create.bind(db.auditLog);
+    const auditSpy = vi.spyOn(db.auditLog, "create").mockImplementationOnce((async (args: Parameters<typeof db.auditLog.create>[0]) => {
+      const row = await createAudit(args);
+      auditIds.push(row.id);
+      return row;
+    }) as unknown as typeof db.auditLog.create);
     try {
       vi.useFakeTimers({ now: CLOCK, toFake: ["Date"] });
       out = await runJob("purge-trash");
     } finally {
       vi.useRealTimers();
+      auditSpy.mockRestore();
     }
     try {
       expect(out).toEqual({ job: "purge-trash", status: "OK", result: 2 });
       const started = await db.jobRun.findUniqueOrThrow({ where: { job: "purge-trash" } });
       expect(started.lastStartedAt?.toISOString()).toBe(CLOCK.toISOString());
 
-      const created = await db.auditLog.findMany({
-        where: { event: "TASK_PURGED", id: { notIn: [...prior] } },
-        orderBy: { createdAt: "asc" },
-      });
+      expect(auditIds).toHaveLength(1);
+      const created = await db.auditLog.findMany({ where: { id: { in: auditIds } } });
       expect(created).toHaveLength(1);
+      expect(created[0]?.event).toBe("TASK_PURGED");
       expect(created[0]?.data).toEqual({ count: 2 });
-      auditIds.push(...created.map((row) => row.id));
 
       expect(await db.task.findUnique({ where: { id: seed.A.expiredId } })).toBeNull();
       expect(await db.task.findUnique({ where: { id: seed.B.expiredId } })).toBeNull();

@@ -3,11 +3,12 @@
 # Uses its own throw-away Postgres and invented accounts; it never reaches the production database or any real data.
 name: Phone checks
 
-# Push only on main and qa/story-e2e. Other branches run through pull_request, so a push to a PR branch does not start a second run.
+# Main invokes this through Test and deploy. PRs and the dedicated QA branch also run it directly.
 on:
+  workflow_call:
   pull_request:
   push:
-    branches: [main, qa/story-e2e]
+    branches: [qa/story-e2e]
   workflow_dispatch:
 
 permissions:
@@ -21,7 +22,7 @@ concurrency:
 jobs:
   viewport:
     name: Phone-size layout checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     services:
       postgres:
@@ -48,6 +49,8 @@ jobs:
       SIGNIN_RETURN_TO: "on"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -65,12 +68,28 @@ jobs:
           fi
       - name: Start the app
         run: |
-          (npx next start -p 3100 > server.log 2>&1 &)
+          (NODE_ENV=production PORT=3100 node --import tsx server.js > server.log 2>&1 &)
           for i in $(seq 1 30); do curl -fsS http://localhost:3100/api/health && break; sleep 2; done
       - name: Prove a real 400px regression fails with diagnostics
         run: node scripts/ci/viewport-negative-control.mjs
       - name: Phone checks
         run: npm run test:viewport
+      - name: Fixture cleanup receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewport-fixture-cleanup
+          path: |
+            test-results/viewport/cleanup.json
+            test-results/viewport/a11y/cleanup.json
+            test-results/viewport/loading/cleanup.json
+            test-results/viewport/return-to/cleanup.json
+            test-results/viewport/comments/cleanup.json
+            test-results/viewport/shell/cleanup.json
+            test-results/viewport/won-dialog/cleanup.json
+            test-results/viewport/accounts/cleanup.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Negative-control evidence
         if: always()
         uses: actions/upload-artifact@v4

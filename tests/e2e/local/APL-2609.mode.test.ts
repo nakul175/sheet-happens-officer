@@ -26,6 +26,8 @@ const runId = `${Date.now().toString(36)}${process.pid.toString(36)}`;
 const tag = `ZZ-TEST-2609-${runId}`;
 const DEAL_NAME = `ZZ-TEST Globex renewal ${runId}`;
 const DEAL_TASK = `ZZ-TEST Globex pricing ${runId}`;
+const ORG_NAME = `ZZ-TEST buyer ${runId}`;
+const CONTACT_NAME = `ZZ-TEST buyer contact ${runId}`;
 const PLAIN_TASK = `ZZ-TEST plain workshop ${runId}`;
 const PLAIN_PROJECT = `ZZ-TEST workshop ${runId}`;
 const STAGE = "Proposal";
@@ -38,7 +40,7 @@ type Running = { mode: Mode; port: number; pid: number; outbox: string; base: st
 type Row = { id: string; title: string; project: { id: string; name: string; type: string; stage: string | null } };
 
 const running = new Map<Mode, Running>();
-const seed: { projectIds: string[]; plainId?: string; orgId?: string; dealId?: string; dealTaskId?: string; plainTaskId?: string } = { projectIds: [] };
+const seed: { projectIds: string[]; plainId?: string; orgId?: string; contactId?: string; dealId?: string; dealTaskId?: string; plainTaskId?: string } = { projectIds: [] };
 const people: { lead?: Who; editor?: Who; admin?: Who; superAdmin?: Who } = {};
 let browser: Browser | null = null;
 
@@ -231,9 +233,22 @@ const strip = (x: Awaited<ReturnType<typeof surfaces>>) => { const { plainShown,
 async function myTasksScreen(mode: Mode, who: Who, waitFor: string, project: string) {
   const page = await pageAs(mode, who);
   try {
+    const initial = page.waitForResponse(response => new URL(response.url()).pathname === "/api/my-tasks" && new URL(response.url()).searchParams.get("v") === "2");
     await page.goto(`${server(mode).base}/my-tasks`, { waitUntil: "domcontentloaded" });
+    const initialResponse = await initial;
+    expect(initialResponse.status(), await initialResponse.text()).toBe(200);
+    const initialBody = await initialResponse.json() as { groups?: { next7?: { total?: number } } };
+    expect(initialBody.groups?.next7?.total, "paged API must include the mode fixture").toBeGreaterThan(0);
     // The task's row in its own list section. The concierge panel can link the same task, so the page as a whole is not enough.
     const row = (section: string) => page.getByRole("region", { name: section, exact: true }).getByRole("link", { name: waitFor, exact: true });
+    // The fixture can fall beyond the first 25 rows in a shared test database.
+    for (let pageIndex = 0; pageIndex < 20 && await row("Next 7 days").count() === 0; pageIndex++) {
+      const more = page.getByRole("button", { name: "Load more next 7 days" });
+      if (await more.count() === 0) break;
+      const before = await page.getByRole("region", { name: "Next 7 days", exact: true }).locator(".item.click").count();
+      await more.click();
+      await expect.poll(() => page.getByRole("region", { name: "Next 7 days", exact: true }).locator(".item.click").count(), { timeout: 10_000 }).toBeGreaterThan(before);
+    }
     await row("Next 7 days").waitFor({ timeout: 30_000 });
     const grouping = (await page.getByRole("group", { name: "Group tasks" }).count()) > 0;
     if (grouping) {
@@ -314,9 +329,12 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     const pipe = (pipes.json?.pipelines as { id: string; key: string; stages: { id: string; name: string }[] }[]).find((p) => p.key === "DEAL_PROACTIVE");
     const proposal = pipe?.stages.find((s) => s.name === STAGE);
     expect(proposal?.id).toBeTruthy();
-    const org = await call(open.base, lead.cookie, "POST", "/api/orgs", { name: `ZZ-TEST buyer ${runId}` });
+    const org = await call(open.base, lead.cookie, "POST", "/api/orgs", { name: ORG_NAME });
     expect(org.status, org.text).toBe(201);
     seed.orgId = (org.json?.organisation as { id: string }).id;
+    const contact = await call(open.base, lead.cookie, "POST", `/api/orgs/${seed.orgId}/contacts`, { name: CONTACT_NAME });
+    expect(contact.status, contact.text).toBe(201);
+    seed.contactId = (contact.json?.contact as { id: string }).id;
     const made = await call(open.base, lead.cookie, "POST", "/api/deals", {
       name: DEAL_NAME, organisationId: seed.orgId, pipelineId: pipe!.id, leaderId: lead.id, whyPursue: tag,
       nextStep: { title: `ZZ-TEST first call ${runId}`, dueDate: istDate(3) },
@@ -434,4 +452,30 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals on a real server per mo
     expect((await surfaces("admins", people.admin!)).taskRoute).toBe(200);
     expect((await surfaces("admins", people.superAdmin!)).taskRoute).toBe(200);
   });
+
+  it("audit Search-01: organisation and contact results obey CRM mode in the browser and API", async () => {
+    expect(seed.orgId && seed.contactId).toBeTruthy();
+    for (const { mode, who, visible } of [
+      { mode: "all", who: people.editor!, visible: true },
+      { mode: "admins", who: people.editor!, visible: false },
+      { mode: "admins", who: people.admin!, visible: true },
+      { mode: "off", who: people.editor!, visible: false },
+      { mode: "off", who: people.admin!, visible: false },
+    ] as const) {
+      for (const [query, key, id] of [[ORG_NAME, "organisations", seed.orgId], [CONTACT_NAME, "contacts", seed.contactId]] as const) {
+        const response = await call(server(mode).base, who.cookie, "GET", `/api/search?q=${encodeURIComponent(query)}`);
+        expect(response.status, response.text).toBe(200);
+        const ids = ((response.json?.[key] ?? []) as { id: string }[]).map((row) => row.id);
+        const screen = await searchScreen(mode, who, query);
+        if (visible) {
+          expect(ids, `${mode} ${key} API`).toContain(id);
+          expect(screen.links.some((link) => link.includes(query)), `${mode} ${key} browser`).toBe(true);
+        } else {
+          expect(ids, `${mode} ${key} API`).not.toContain(id);
+          expect(screen.links.some((link) => link.includes(query)), `${mode} ${key} browser`).toBe(false);
+          expect(response.text).not.toContain(id);
+        }
+      }
+    }
+  }, 180_000);
 });

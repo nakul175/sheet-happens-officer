@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import {
-  activeMember, isActive, isAdmin, projectAccess, requireManage, type Access, type Actor, type Role,
+  activeMember, isActive, isAdmin, projectAccess, requireManage, type Access, type Actor, type Role, type Tx,
 } from "@/lib/access";
 import { logAction, notify } from "@/lib/notify";
 import { openTaskCount, releasePerson, resolveHandover, type Handover, type Released } from "@/lib/people";
@@ -33,8 +33,30 @@ export async function classifyProject(user: Actor, projectId: string, isVertical
   // project-lookup-ok: count references to the already-authorized workspace board to prevent dangling classifications.
   if (!isVertical && await db.project.count({ where: { verticalId: projectId } })) throw new ApiError(409, "Reclassify linked delivery projects before changing this vertical board.");
   await db.$transaction(async tx => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    if (!isAdmin(actor)) throw new ApiError(403, "Only Admins classify vertical boards.");
+    if (fresh.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Deals cannot become vertical boards.");
+    if (fresh.project.isVertical !== a.project.isVertical) throw new ApiError(409, "Project classification changed. Reload and try again.");
+    // project-lookup-ok: count references to the locked workspace board before removing its vertical classification.
+    if (!isVertical && await tx.project.count({ where: { verticalId: projectId } })) {
+      throw new ApiError(409, "Reclassify linked delivery projects before changing this vertical board.");
+    }
     await tx.project.update({ where: { id: projectId }, data: { isVertical, ...(isVertical ? { verticalId: null } : {}) } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.classified", before: { isVertical: a.project.isVertical, verticalId: a.project.verticalId }, after: { isVertical, ...(isVertical ? { verticalId: null } : {}) } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.classified", before: { isVertical: fresh.project.isVertical, verticalId: fresh.project.verticalId }, after: { isVertical, ...(isVertical ? { verticalId: null } : {}) } });
   });
 }
 
@@ -51,11 +73,37 @@ export async function createProject(user: Actor, input: { name: string; descript
   for (const m of input.members ?? []) if (m.userId !== leader.id && m.userId !== user.id) wanted.set(m.userId, m.role);
   if (wanted.size) {
     const found = await db.user.findMany({ where: { id: { in: [...wanted.keys()] } } });
-    if (found.length !== wanted.size || !found.every(isActive)) throw new ApiError(400, "Choose active people to add.");
+    if (found.length !== wanted.size || !found.every(person => isActive(person) && person.workspaceId === me.workspaceId)) throw new ApiError(400, "Choose active people to add.");
   }
   return db.$transaction(async (tx) => {
+    try {
+      if (input.verticalId) await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${input.verticalId} FOR SHARE NOWAIT`;
+      const peopleIds = [...new Set([user.id, leader.id, ...wanted.keys()])].sort();
+      for (const personId of peopleIds) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Person or vertical is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const freshPeople = await tx.user.findMany({ where: { id: { in: [...new Set([user.id, leader.id, ...wanted.keys()])] } }, select: { id: true, orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    const current = new Map(freshPeople.map(person => [person.id, person]));
+    const actor = current.get(user.id);
+    if (!actor || !isActive(actor) || actor.workspaceId !== me.workspaceId) throw notFound("Project");
+    if (input.isVertical && !isAdmin(actor)) throw new ApiError(403, "Only Admins manage verticals.");
+    const freshLeader = current.get(leader.id);
+    if (!freshLeader || !isActive(freshLeader) || freshLeader.workspaceId !== actor.workspaceId) throw new ApiError(400, "Choose an active person as Leader.");
+    if ([...wanted.keys()].some(id => { const person = current.get(id); return !person || !isActive(person) || person.workspaceId !== actor.workspaceId; })) {
+      throw new ApiError(400, "Choose active people to add.");
+    }
+    if (input.verticalId) {
+      // project-lookup-ok: validate classification vocabulary under a row lock in this workspace; it grants no board membership.
+      const vertical = await tx.project.findFirst({ where: { id: input.verticalId, workspaceId: actor.workspaceId, typeId: WORKSTREAM_PROJECT, isVertical: true, archivedAt: null, deletedAt: null }, select: { id: true } });
+      if (!vertical) throw new ApiError(400, "Choose an active vertical in this workspace.");
+    }
     const project = await tx.project.create({
-      data: { workspaceId: me.workspaceId, name: input.name, description: input.description ?? null, ...(input.isVertical ? { isVertical: true } : {}), ...(input.verticalId ? { verticalId: input.verticalId } : {}) },
+      data: { workspaceId: actor.workspaceId, name: input.name, description: input.description ?? null, ...(input.isVertical ? { isVertical: true } : {}), ...(input.verticalId ? { verticalId: input.verticalId } : {}) },
     });
     await tx.projectMember.create({ data: { projectId: project.id, userId: leader.id, role: "LEADER" } });
     if (leader.id !== user.id) await tx.projectMember.create({ data: { projectId: project.id, userId: user.id, role: "EDITOR" } });
@@ -155,8 +203,40 @@ export async function updateProject(user: Actor, projectId: string, input: { nam
     if (input.verticalId) await validateVertical(input.verticalId, a.project.workspaceId);
   }
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      if (input.verticalId) await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${input.verticalId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project, membership or vertical is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    if (fresh.project.isVertical && input.name !== undefined && !isAdmin(actor)) throw new ApiError(403, "Only Admins rename verticals.");
+    if (fresh.project.updatedAt.getTime() !== a.project.updatedAt.getTime()
+      || fresh.project.name !== a.project.name || fresh.project.description !== a.project.description
+      || fresh.project.verticalId !== a.project.verticalId || fresh.project.isVertical !== a.project.isVertical) {
+      throw new ApiError(409, "This project changed; reload before saving.");
+    }
+    if (input.verticalId !== undefined) {
+      if (fresh.project.isVertical || fresh.project.typeId !== WORKSTREAM_PROJECT) throw new ApiError(400, "Only delivery projects can have a vertical.");
+      if (input.verticalId) {
+        // project-lookup-ok: classification vocabulary is checked under a row lock in the actor's workspace; it grants no board access.
+        const vertical = await tx.project.findFirst({ where: { id: input.verticalId, workspaceId: fresh.project.workspaceId, typeId: WORKSTREAM_PROJECT, isVertical: true, archivedAt: null, deletedAt: null }, select: { id: true } });
+        if (!vertical) throw new ApiError(400, "Choose an active vertical in this workspace.");
+      }
+    }
     await tx.project.update({ where: { id: projectId }, data: input });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.updated", before: { name: a.project.name, description: a.project.description, verticalId: a.project.verticalId }, after: input });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.updated", before: { name: fresh.project.name, description: fresh.project.description, verticalId: fresh.project.verticalId }, after: input });
   });
 }
 
@@ -166,10 +246,29 @@ export async function archiveProject(user: Actor, projectId: string) {
   requireManage(a);
   if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins retire verticals.");
   return db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    if (fresh.project.isVertical && !isAdmin(actor)) throw new ApiError(403, "Only Admins retire verticals.");
     const open = await tx.task.findMany({ where: { projectId, deletedAt: null, completedAt: null }, select: { assigneeId: true } });
-    await tx.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
-    await notify(tx, open.map((t) => t.assigneeId), "PROJECT_ARCHIVED", { actorId: user.id, projectId, data: { project: a.project.name } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.archived", before: { archivedAt: null }, after: { archivedAt: new Date().toISOString(), openTasks: open.length } });
+    const at = new Date();
+    await tx.project.update({ where: { id: projectId }, data: { archivedAt: at } });
+    await notify(tx, open.map((t) => t.assigneeId), "PROJECT_ARCHIVED", { actorId: user.id, projectId, data: { project: fresh.project.name } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.archived", before: { archivedAt: null }, after: { archivedAt: at.toISOString(), openTasks: open.length } });
     return { openTasks: open.length };
   });
 }
@@ -179,9 +278,32 @@ export async function unarchiveProject(user: Actor, projectId: string) {
   requireManage(a);
   if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins reactivate verticals.");
   if (!a.project.archivedAt) throw new ApiError(409, "This project is not archived.");
+  const expectedArchivedAt = a.project.archivedAt;
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    if (fresh.project.isVertical && !isAdmin(actor)) throw new ApiError(403, "Only Admins reactivate verticals.");
+    if (!fresh.project.archivedAt) throw new ApiError(409, "This project is not archived.");
+    if (fresh.project.archivedAt.getTime() !== expectedArchivedAt.getTime()) {
+      throw new ApiError(409, "This project changed; reload before reactivating.");
+    }
     await tx.project.update({ where: { id: projectId }, data: { archivedAt: null } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.unarchived", before: { archivedAt: a.project.archivedAt!.toISOString() }, after: { archivedAt: null } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.unarchived", before: { archivedAt: fresh.project.archivedAt.toISOString() }, after: { archivedAt: null } });
   });
 }
 
@@ -192,12 +314,32 @@ export async function deleteProject(user: Actor, projectId: string, confirmation
   if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins delete verticals.");
   if (a.project.typeId !== WORKSTREAM_PROJECT && a.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "This work item cannot use Trash.");
   if (confirmationName !== a.project.name) throw new ApiError(400, "Enter the exact project name to confirm deletion.");
-  const now = new Date();
   return db.$transaction(async tx => {
-    const changed = await tx.project.updateMany({ where: { id: projectId, deletedAt: null, updatedAt: a.project.updatedAt }, data: { deletedAt: now, deletedPreviousArchivedAt: a.project.archivedAt, archivedAt: a.project.archivedAt ?? now } });
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    if (fresh.project.isVertical && !isAdmin(actor)) throw new ApiError(403, "Only Admins delete verticals.");
+    if (fresh.project.typeId !== WORKSTREAM_PROJECT && fresh.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "This work item cannot use Trash.");
+    if (confirmationName !== fresh.project.name) throw new ApiError(400, "Enter the exact project name to confirm deletion.");
+    const now = new Date();
+    const changed = await tx.project.updateMany({ where: { id: projectId, deletedAt: null, updatedAt: a.project.updatedAt }, data: { deletedAt: now, deletedPreviousArchivedAt: fresh.project.archivedAt, archivedAt: fresh.project.archivedAt ?? now } });
     if (changed.count !== 1) throw new ApiError(409, "This item changed; reload before deleting.");
-    await notify(tx, a.project.members.map(m => m.userId), "PROJECT_DELETED", { actorId: user.id, projectId, data: { project: a.project.name } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.deleted", before: { archivedAt: a.project.archivedAt?.toISOString() ?? null }, after: { deletedAt: now.toISOString(), recoverable: true } });
+    await notify(tx, fresh.project.members.map(m => m.userId), "PROJECT_DELETED", { actorId: user.id, projectId, data: { project: fresh.project.name } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.deleted", before: { archivedAt: fresh.project.archivedAt?.toISOString() ?? null }, after: { deletedAt: now.toISOString(), recoverable: true } });
     return { deleted: true };
   });
 }
@@ -207,11 +349,34 @@ export async function restoreProject(user: Actor, projectId: string) {
   requireManage(a);
   if (a.project.isVertical && !isAdmin(user)) throw new ApiError(403, "Only Admins restore verticals.");
   if (!a.project.deletedAt) throw new ApiError(409, "This project is not in Trash.");
+  const expectedDeletedAt = a.project.deletedAt;
   await db.$transaction(async tx => {
-    const changed = await tx.project.updateMany({ where: { id: projectId, deletedAt: a.project.deletedAt }, data: { deletedAt: null, archivedAt: a.project.deletedPreviousArchivedAt, deletedPreviousArchivedAt: null } });
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { deleted: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    if (fresh.project.isVertical && !isAdmin(actor)) throw new ApiError(403, "Only Admins restore verticals.");
+    if (!fresh.project.deletedAt) throw new ApiError(409, "This project is not in Trash.");
+    if (fresh.project.deletedAt.getTime() !== expectedDeletedAt.getTime()) {
+      throw new ApiError(409, "Project changed; reload before restoring.");
+    }
+    const changed = await tx.project.updateMany({ where: { id: projectId, deletedAt: fresh.project.deletedAt }, data: { deletedAt: null, archivedAt: fresh.project.deletedPreviousArchivedAt, deletedPreviousArchivedAt: null } });
     if (changed.count !== 1) throw new ApiError(409, "Project changed; reload before restoring.");
-    await notify(tx, a.project.members.map(m => m.userId), "PROJECT_RESTORED", { actorId: user.id, projectId, data: { project: a.project.name } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.restored", before: { deletedAt: a.project.deletedAt!.toISOString() }, after: { archivedAt: a.project.deletedPreviousArchivedAt?.toISOString() ?? null } });
+    await notify(tx, fresh.project.members.map(m => m.userId), "PROJECT_RESTORED", { actorId: user.id, projectId, data: { project: fresh.project.name } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.restored", before: { deletedAt: fresh.project.deletedAt.toISOString() }, after: { archivedAt: fresh.project.deletedPreviousArchivedAt?.toISOString() ?? null } });
   });
   return { restored: true };
 }
@@ -224,8 +389,31 @@ export async function addMember(user: Actor, projectId: string, userId: string, 
   if (!person || !isActive(person)) throw new ApiError(400, "Choose an active person.");
   if (a.project.members.some((m) => m.userId === userId)) throw new ApiError(409, "This person is already a member.");
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or person is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    const currentPerson = await tx.user.findUnique({ where: { id: userId } });
+    if (!currentPerson || !isActive(currentPerson) || currentPerson.workspaceId !== fresh.project.workspaceId) {
+      throw new ApiError(400, "Choose an active person.");
+    }
+    if (fresh.project.members.some((m) => m.userId === userId)) throw new ApiError(409, "This person is already a member.");
     await tx.projectMember.create({ data: { projectId, userId, role } });
-    await notify(tx, [userId], "ADDED_TO_PROJECT", { actorId: user.id, projectId, data: { project: a.project.name, role } });
+    await notify(tx, [userId], "ADDED_TO_PROJECT", { actorId: user.id, projectId, data: { project: fresh.project.name, role } });
     await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.added", after: { role } });
   });
 }
@@ -234,16 +422,24 @@ export async function addMember(user: Actor, projectId: string, userId: string, 
  * A single taker for the person's open tasks, or null when there are none. An explicit handover can name a taker per
  * task instead (SHO-BUG-7); then no single taker is needed, and a task that appears in between goes to the Leader.
  */
-async function requireHandoverIfNeeded(a: Access, userId: string, handoverTo: string | undefined | null, handover?: Handover[]) {
-  const open = await openTaskCount(db, a.project.id, userId);
+async function requireHandoverIfNeeded(a: Access, userId: string, handoverTo: string | undefined | null, handover?: Handover[], source: Tx = db) {
+  const open = await openTaskCount(source, a.project.id, userId);
   if (!open) return null;
-  const target = await resolveHandover(db, a.project.id, userId, handoverTo);
+  const target = await resolveHandover(source, a.project.id, userId, handoverTo);
   if (target) return target;
   if (handover?.length) {
-    const held = await db.task.findMany({ where: { projectId: a.project.id, assigneeId: userId, completedAt: null, deletedAt: null }, select: { id: true } });
+    const held = await source.task.findMany({ where: { projectId: a.project.id, assigneeId: userId, completedAt: null, deletedAt: null }, select: { id: true } });
     if (held.every((t) => handover.some((h) => h.taskId === t.id && h.assigneeId))) return null;
   }
   throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
+}
+
+/** Serialize a departure with restoring work that still names this member. */
+async function lockDepartingMember(tx: Tx, projectId: string, userId: string) {
+  const [member] = await tx.$queryRaw<{ role: Role }[]>`SELECT "role" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${userId} FOR UPDATE`;
+  if (!member) throw notFound("Member");
+  if (member.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
+  return member;
 }
 
 /** SHO-US-3.4 AC3/AC4/AC5 and SHO-US-3.3 AC5. */
@@ -254,16 +450,37 @@ export async function changeMemberRole(user: Actor, projectId: string, userId: s
   if (!m) throw notFound("Member");
   if (m.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
   if (m.role === role) return;
-  const target = role === "VIEWER" ? await requireHandoverIfNeeded(a, userId, handoverTo, handover) : null;
+  if (role === "VIEWER") await requireHandoverIfNeeded(a, userId, handoverTo, handover);
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${userId} FOR UPDATE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    const current = await lockDepartingMember(tx, projectId, userId);
+    if (current.role === role) return;
     let rel: Released | null = null;
     if (role === "VIEWER") {
-      const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
+      const target = await requireHandoverIfNeeded(fresh, userId, handoverTo, handover, tx);
+      const leader = fresh.project.members.find((x) => x.role === "LEADER")!.userId;
       rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, keepCollaborations: true, handover });
     }
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId } }, data: { role } });
-    await notify(tx, [userId], "PROJECT_ROLE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, role, ...(rel?.note ?? {}) } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.role_changed", before: { role: m.role }, after: { role, handedOver: rel?.moved ?? 0 } });
+    await notify(tx, [userId], "PROJECT_ROLE_CHANGED", { actorId: user.id, projectId, data: { project: fresh.project.name, role, ...(rel?.note ?? {}) } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.role_changed", before: { role: current.role }, after: { role, handedOver: rel?.moved ?? 0 } });
   });
 }
 
@@ -274,13 +491,32 @@ export async function removeMember(user: Actor, projectId: string, userId: strin
   const m = a.project.members.find((x) => x.userId === userId);
   if (!m) throw notFound("Member");
   if (m.role === "LEADER") throw new ApiError(409, "Use Change Leader to replace the project's Leader.");
-  const target = await requireHandoverIfNeeded(a, userId, handoverTo, handover);
+  await requireHandoverIfNeeded(a, userId, handoverTo, handover);
   await db.$transaction(async (tx) => {
-    const leader = a.project.members.find((x) => x.role === "LEADER")!.userId;
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    const current = await lockDepartingMember(tx, projectId, userId);
+    const target = await requireHandoverIfNeeded(fresh, userId, handoverTo, handover, tx);
+    const leader = fresh.project.members.find((x) => x.role === "LEADER")!.userId;
     const rel = await releasePerson(tx, { projectId, userId, newAssigneeId: target ?? leader, actorId: user.id, handover });
     await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId } } });
-    await notify(tx, [userId], "REMOVED_FROM_PROJECT", { actorId: user.id, projectId, data: { project: a.project.name, ...rel.note } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.removed", before: { role: m.role }, after: { removed: true, handedOver: rel.moved } });
+    await notify(tx, [userId], "REMOVED_FROM_PROJECT", { actorId: user.id, projectId, data: { project: fresh.project.name, ...rel.note } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "member", targetId: userId, action: "member.removed", before: { role: current.role }, after: { removed: true, handedOver: rel.moved } });
   });
 }
 
@@ -297,32 +533,55 @@ export async function changeLeader(
   const next = await activeMember(db, projectId, input.newLeaderId);
   if (!next) throw new ApiError(400, "Choose an active member of this project.");
 
-  let target: string | null = null;
-  if (input.previousRole !== "EDITOR") {
-    const open = await openTaskCount(db, projectId, old.userId);
-    if (open) {
-      // The new Leader counts as a valid taker, so the default is simply the new Leader.
-      target = input.handoverTo === input.newLeaderId ? input.newLeaderId : (await resolveHandover(db, projectId, old.userId, input.handoverTo));
-      if (!target) throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
-    }
-  }
   await db.$transaction(async (tx) => {
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      for (const personId of [...new Set([user.id, input.newLeaderId])].sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Project or person is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireManage(fresh);
+    const currentLeader = fresh.project.members.find((m) => m.role === "LEADER");
+    if (!currentLeader || currentLeader.userId !== old.userId) throw new ApiError(409, "The project Leader changed. Reload and try again.");
+    const currentNext = await activeMember(tx, projectId, input.newLeaderId);
+    if (!currentNext || currentNext.user.workspaceId !== fresh.project.workspaceId) throw new ApiError(400, "Choose an active member of this project.");
+    let target: string | null = null;
+    if (input.previousRole !== "EDITOR") {
+      const open = await openTaskCount(tx, projectId, currentLeader.userId);
+      if (open) {
+        // The new Leader counts as a valid taker, so the default is simply the new Leader.
+        target = input.handoverTo === input.newLeaderId ? input.newLeaderId : (await resolveHandover(tx, projectId, currentLeader.userId, input.handoverTo));
+        if (!target) throw new ApiError(409, `Choose a Leader or Editor to take ${open} open task${open === 1 ? "" : "s"} first.`);
+      }
+    }
     // Demote first so the one-Leader index is never violated, then promote.
-    await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: old.userId } }, data: { role: "EDITOR" } });
+    await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: currentLeader.userId } }, data: { role: "EDITOR" } });
     await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: input.newLeaderId } }, data: { role: "LEADER" } });
     let rel: Released | null = null;
     if (input.previousRole === "VIEWER") {
-      rel = await releasePerson(tx, { projectId, userId: old.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id, keepCollaborations: true });
-      await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: old.userId } }, data: { role: "VIEWER" } });
+      rel = await releasePerson(tx, { projectId, userId: currentLeader.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id, keepCollaborations: true });
+      await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: currentLeader.userId } }, data: { role: "VIEWER" } });
     } else if (input.previousRole === "REMOVE") {
-      rel = await releasePerson(tx, { projectId, userId: old.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id });
-      await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId: old.userId } } });
+      rel = await releasePerson(tx, { projectId, userId: currentLeader.userId, newAssigneeId: target ?? input.newLeaderId, actorId: user.id });
+      await tx.projectMember.delete({ where: { projectId_userId: { projectId, userId: currentLeader.userId } } });
     }
-    await notify(tx, [input.newLeaderId], "MADE_LEADER", { actorId: user.id, projectId, data: { project: a.project.name } });
-    await notify(tx, [old.userId], input.previousRole === "REMOVE" ? "REMOVED_FROM_PROJECT" : "PROJECT_ROLE_CHANGED", {
-      actorId: user.id, projectId, data: { project: a.project.name, role: input.previousRole, ...(rel?.note ?? {}) },
+    await notify(tx, [input.newLeaderId], "MADE_LEADER", { actorId: user.id, projectId, data: { project: fresh.project.name } });
+    await notify(tx, [currentLeader.userId], input.previousRole === "REMOVE" ? "REMOVED_FROM_PROJECT" : "PROJECT_ROLE_CHANGED", {
+      actorId: user.id, projectId, data: { project: fresh.project.name, role: input.previousRole, ...(rel?.note ?? {}) },
     });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.leader_changed", before: { leaderId: old.userId }, after: { leaderId: input.newLeaderId, previousRole: input.previousRole, handedOver: rel?.moved ?? 0 } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "project", targetId: projectId, action: "project.leader_changed", before: { leaderId: currentLeader.userId }, after: { leaderId: input.newLeaderId, previousRole: input.previousRole, handedOver: rel?.moved ?? 0 } });
   });
 }
 

@@ -1,3 +1,4 @@
+import { assertWorkspaceUser } from "@/lib/workspace";
 import { randomBytes, createHash } from "node:crypto";
 import { cookies } from "next/headers";
 import { centralSessionActive } from "@/lib/central-status";
@@ -12,6 +13,7 @@ export async function attachCentralSession(sourceSessionId: string, userId: stri
             !user || user.deactivatedAt || !user.emailVerifiedAt || user.tempPasswordAt ||
             (session.centralLink && session.centralLink.subject !== subject))
             throw new Error("Source session unavailable");
+        await assertWorkspaceUser(user.workspaceId, tx);
         const changed = await tx.session.updateMany({ where: { id: sourceSessionId, userId, revokedAt: null, expiresAt: { gt: new Date() } },
             data: { tokenHash: createHash("sha256").update(token).digest("hex") } });
         if (changed.count !== 1)
@@ -33,6 +35,7 @@ export async function attachQaCentralSession(userId: string, subject: string, se
         const user = await tx.user.findUnique({ where: { id: userId } });
         if (!user || user.deactivatedAt || !user.emailVerifiedAt || user.tempPasswordAt)
             throw Error('Account unavailable');
+        await assertWorkspaceUser(user.workspaceId, tx);
         await tx.session.create({ data: { userId, tokenHash: createHash('sha256').update(token).digest('hex'), expiresAt: expires, centralLink: { create: { subject, sessionUid } } } });
     });
     (await cookies()).set('sho_session', token, { httpOnly: true, sameSite: 'lax', path: '/', expires, secure: true });

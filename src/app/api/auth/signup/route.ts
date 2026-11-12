@@ -1,5 +1,6 @@
+import { getOrCreateWorkspace } from "@/lib/workspace";
 import { db } from "@/lib/db";
-import { audit, hashPassword, issueTokenAndSend, superAdminEmails } from "@/lib/auth";
+import { AuthMailLimitError, audit, hashPassword, issueTokenAndSend, superAdminEmails } from "@/lib/auth";
 import { MailError, VERIFY_SEND_FAILED, sendMail, verifyMail } from "@/lib/email";
 import { ApiError, handle, parseBody } from "@/lib/http";
 import { signUpInput } from "@/lib/schemas";
@@ -10,9 +11,7 @@ export const POST = handle(async (req: Request) => {
   if (await db.user.findUnique({ where: { email } })) {
     throw new ApiError(409, "An account with this email already exists.");
   }
-  const workspace =
-    (await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ??
-    (await db.workspace.create({ data: { name: "Workspace" } }));
+  const workspace = await getOrCreateWorkspace();
   const user = await db.user.create({
     data: {
       workspaceId: workspace.id,
@@ -28,7 +27,7 @@ export const POST = handle(async (req: Request) => {
     await issueTokenAndSend(user.id, "VERIFY", (token) => sendMail(verifyMail(email, token)));
   } catch (err) {
     // APL-2742: the account exists either way; say the email did not go so the person can resend it, instead of a 500.
-    if (!(err instanceof MailError)) throw err;
+    if (!(err instanceof MailError) && !(err instanceof AuthMailLimitError)) throw err;
     return Response.json({ status: "check_email", emailSent: false, message: VERIFY_SEND_FAILED }, { status: 201 });
   }
   return Response.json({ status: "check_email", emailSent: true }, { status: 201 });

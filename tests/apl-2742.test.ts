@@ -1,7 +1,7 @@
 // APL-2742 (prod hotfix). Two parts:
 // 1. Sign-in refuses an unverified account and says how to get a new link (live server, like auth.test.ts).
-// 2. When Resend rejects or cannot be reached, the failure is logged with the status and Resend's error name and
-//    message only (no key, no body, no link), and sign-up / resend tell the person instead of failing with a 500.
+// 2. When Resend rejects or cannot be reached, the failure is logged with a fixed label and status
+//    (no provider/network text, mail fields, key, body or link), and sign-up / resend tell the person instead of failing with a 500.
 //    The provider is faked here: sendMail is called in this process, and the routes are called through their own
 //    POST handlers with sendMail made to fail.
 import { readdirSync, readFileSync } from "node:fs";
@@ -95,7 +95,40 @@ describe("qa:TC missing AC1: unverified accounts cannot sign in", () => {
 });
 
 describe("qa:TC missing AC2: sendMail logs a Resend rejection without secrets", () => {
-  it("qa:TC missing AC2: a 403 from Resend throws MailError and logs status, error name and message only", async () => {
+  it("provider-controlled error text cannot enter application logs", async () => {
+    vi.stubEnv("RESEND_API_KEY", FAKE_KEY);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      name: "validation_error",
+      message: `Rejected ${MAIL.to} ${FAKE_KEY} ${MAIL.text}`,
+    }, { status: 403 })));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(sendMail(MAIL)).rejects.toBeInstanceOf(MailError);
+    const line = log.mock.calls.map((call) => call.join(" ")).join(" ");
+    expect(line).toContain("HTTP 403");
+    for (const secret of [MAIL.to, FAKE_KEY, "SECRET-TOKEN-123"]) expect(line).not.toContain(secret);
+  });
+
+  it("provider error category is bounded before being retained", async () => {
+    vi.stubEnv("RESEND_API_KEY", FAKE_KEY);
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ name: `validation_${"x".repeat(200)}`, message: MAIL.text }, { status: 403 })));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const err = await sendMail(MAIL).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MailError);
+    expect((err as InstanceType<typeof MailError>).providerName).toBe("unknown");
+    expect(log.mock.calls.map((call) => call.join(" ")).join(" ")).not.toContain(MAIL.text);
+  });
+
+  it("network exception text cannot enter application logs", async () => {
+    vi.stubEnv("RESEND_API_KEY", FAKE_KEY);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error(`Network failure ${MAIL.to} ${FAKE_KEY} ${MAIL.text}`); }));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(sendMail(MAIL)).rejects.toBeInstanceOf(MailError);
+    const line = log.mock.calls.map((call) => call.join(" ")).join(" ");
+    expect(line).toContain("could not reach Resend");
+    for (const secret of [MAIL.to, FAKE_KEY, "SECRET-TOKEN-123"]) expect(line).not.toContain(secret);
+  });
+
+  it("qa:TC missing AC2: a 403 from Resend throws MailError and logs only its HTTP status", async () => {
     vi.stubEnv("RESEND_API_KEY", FAKE_KEY);
     vi.stubGlobal("fetch", vi.fn(async () => Response.json(
       { statusCode: 403, name: "validation_error", message: "The sheethappensofficer.aplyd.org domain is not verified." },
@@ -109,8 +142,8 @@ describe("qa:TC missing AC2: sendMail logs a Resend rejection without secrets", 
     expect(log).toHaveBeenCalledTimes(1);
     const line = log.mock.calls[0].join(" ");
     expect(line).toContain("HTTP 403");
-    expect(line).toContain("validation_error");
-    expect(line).toContain("The sheethappensofficer.aplyd.org domain is not verified.");
+    expect(line).not.toContain("validation_error");
+    expect(line).not.toContain("The sheethappensofficer.aplyd.org domain is not verified.");
     expect(line).not.toContain(FAKE_KEY);
     expect(line).not.toContain("SECRET-TOKEN-123");
     expect(line).not.toContain(MAIL.to);
@@ -132,7 +165,8 @@ describe("qa:TC missing AC2: sendMail logs a Resend rejection without secrets", 
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(sendMail(MAIL)).rejects.toBeInstanceOf(MailError);
     const line = log.mock.calls[0].join(" ");
-    expect(line).toContain("fetch failed");
+    expect(line).toContain("could not reach Resend");
+    expect(line).not.toContain("fetch failed");
     expect(line).not.toContain(FAKE_KEY);
   });
 

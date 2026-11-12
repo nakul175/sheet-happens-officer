@@ -1,10 +1,11 @@
 // APL-2652 story: a deep link opened while signed out comes back after sign-in.
 // Runs with the phone checks (npm run test:viewport) against a local server and a test database.
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
-import { account, BASE, OUTBOX, project, PW, superAdmin, task } from "../helpers";
+import { account, BASE, cleanupZz, OUTBOX, project, PW, superAdmin, task } from "../helpers";
+import { requireLocalFixtures } from "./screen-ready";
 
 let browser: Browser;
 let memberEmail = "";
@@ -16,6 +17,9 @@ let visibleTitle = "";
 let hiddenId = "";
 let hiddenTitle = "";
 let hiddenDetail = "";
+const ownedProjects: string[] = [];
+const ownedPeople: { id: string; email: string }[] = [];
+const CLEANUP = "test-results/viewport/return-to/cleanup.json";
 
 const origin = () => new URL(BASE).origin;
 
@@ -51,14 +55,17 @@ async function landedOnTask(page: Page, id: string, title: string, search = "") 
 }
 
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the return-to story against ${BASE}: use a local server with a test database.`);
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const root = await superAdmin();
   const member = await account("returnmember");
+  ownedPeople.push(member);
   const outsider = await account("returnoutsider");
+  ownedPeople.push(outsider);
   memberEmail = member.email;
   outsiderEmail = outsider.email;
   const p = await project(root, root, [{ who: member }]);
+  ownedProjects.push(p.id);
   const stamp = Date.now();
   visibleTitle = `ZZ-TEST APL2652 visible ${stamp}`;
   hiddenTitle = `ZZ-TEST APL2652 hidden ${stamp}`;
@@ -68,12 +75,23 @@ beforeAll(async () => {
   forcedEmail = `zz-test-returnforced${stamp}@aplyd.com`;
   const added = await root.c.post("/api/team", { firstName: "Rita", lastName: `Return${stamp}`, email: forcedEmail, role: "MEMBER" });
   expect(added.status, JSON.stringify(added.json)).toBe(201);
+  ownedPeople.push({ id: added.json.person.id, email: forcedEmail });
   forcedPassword = signInMailPassword(forcedEmail);
   expect(forcedPassword).toMatch(/^[A-Za-z0-9]{12}$/);
   expect((await root.c.post(`/api/projects/${p.id}/members`, { userId: added.json.person.id, role: "EDITOR" })).status).toBe(201);
 }, 90000);
 
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => {
+  await browser?.close();
+  let cleanup = false;
+  try {
+    if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects, ownedPeople);
+    cleanup = true;
+  } finally {
+    mkdirSync("test-results/viewport/return-to", { recursive: true });
+    writeFileSync(CLEANUP, JSON.stringify({ projects: ownedProjects.length, people: ownedPeople.length, cleanup }, null, 2));
+  }
+});
 
 describe("APL-2652 sign-in returns to the deep link", () => {
   it("AC1 a signed-out deep link comes back after a successful sign-in", async () => {

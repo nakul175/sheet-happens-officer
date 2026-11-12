@@ -5,6 +5,7 @@ import { account, admin, istDate, superAdmin, task, type Account } from "./helpe
 const run = Date.now();
 let seq = 0;
 const projects: string[] = [];
+const organisations: string[] = [];
 const people: Account[] = [];
 let testAdmin: Account | null = null;
 
@@ -17,7 +18,9 @@ async function person(label: string) {
 async function organisation(who: Account, label: string) {
   const r = await who.c.post("/api/orgs", { name: `ZZ-TEST SHO-3052 ${label} ${run}-${seq++}` });
   expect(r.status, JSON.stringify(r.json)).toBe(201);
-  return { id: r.json.organisation.id as string, name: r.json.organisation.name as string };
+  const id = r.json.organisation.id as string;
+  organisations.push(id);
+  return { id, name: r.json.organisation.name as string };
 }
 
 async function deal(who: Account, buyerId: string, name = `ZZ-TEST SHO-3052 deal ${run}-${seq++}`, force = false) {
@@ -58,16 +61,53 @@ afterAll(async () => {
     if (led.status !== 200 && !(led.status === 400 && /already the Leader/.test(led.json?.error ?? ""))) problems.push(`lead ${id}: ${led.status}`);
     const archived = await sa.c.post(`/api/projects/${id}/archive`);
     if (archived.status !== 200) problems.push(`archive ${id}: ${archived.status}`);
+    const stored = await sa.c.get(`/api/projects/${id}`);
+    if (stored.status !== 200 || !stored.json.project.archived) problems.push(`project cleanup ${id}: ${stored.status}`);
+  }
+  for (const id of organisations) {
+    const stored = await sa.c.get(`/api/orgs/${id}`);
+    if (stored.status !== 200) { problems.push(`read organisation ${id}: ${stored.status}`); continue; }
+    if (!stored.json.organisation.archived) {
+      const archived = await sa.c.post(`/api/orgs/${id}/archive`, { archive: true });
+      if (archived.status !== 200) problems.push(`archive organisation ${id}: ${archived.status}`);
+    }
+    const after = await sa.c.get(`/api/orgs/${id}`);
+    if (after.status !== 200 || !after.json.organisation.archived) problems.push(`organisation cleanup ${id}: ${after.status}`);
   }
   for (const who of people) {
     if (who.id === sa.id) continue;
     const off = await sa.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
     if (off.status !== 200 && !(off.status === 409 && /already deactivated/.test(off.json?.error ?? ""))) problems.push(`deactivate ${who.email}: ${off.status}`);
+    const stored = await sa.c.get(`/api/team/${who.id}`);
+    if (stored.status !== 200 || stored.json.person.status !== "DEACTIVATED") problems.push(`person cleanup ${who.email}: ${stored.status}`);
   }
   expect(problems, problems.join("\n")).toEqual([]);
 });
 
 describe("SHO-3052 controlled Buyer replacement", () => {
+  it("lets one of two concurrent Buyer replacements win without duplicate parties or misleading actions", async () => {
+    const leader = await person("race-leader");
+    const oldBuyer = await organisation(leader, "race old");
+    const first = await organisation(leader, "race first");
+    const second = await organisation(leader, "race second");
+    const projectId = await deal(leader, oldBuyer.id);
+    const current = await buyer(leader, projectId);
+    const expected = { expectedPartyId: current.id, expectedOrganisationId: oldBuyer.id };
+    const results = await Promise.all([first, second].map(next => leader.c.patch(`/api/projects/${projectId}/parties/buyer`, {
+      ...expected, organisationId: next.id,
+    })));
+    expect(results.map(result => result.status).sort()).toEqual([200, 409]);
+    const winner = results[0].status === 200 ? first : second;
+    const stored = await buyer(leader, projectId);
+    expect(stored.id).toBe(current.id);
+    expect(stored.organisation.id).toBe(winner.id);
+    expect(await db.dealParty.count({ where: { projectId, role: "BUYER" } })).toBe(1);
+    const actions = await db.actionLog.findMany({ where: { projectId, action: "deal.buyer_replaced" } });
+    expect(actions).toHaveLength(1);
+    expect(actions[0].beforeState).toMatchObject({ organisationId: oldBuyer.id });
+    expect(actions[0].afterState).toMatchObject({ organisationId: winner.id });
+  });
+
   it("atomically replaces only the Buyer and updates every read model with an audit receipt", async () => {
     const leader = await person("leader");
     const oldBuyer = await organisation(leader, "old buyer");

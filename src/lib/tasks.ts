@@ -1,5 +1,7 @@
 import { addWorkspaceTaskMember } from "@/lib/project-task-membership";
 import type { Prisma } from "@/generated/prisma/client";
+import { taskAccess } from "@/lib/task-access";
+export { taskAccess, recordAccess } from "@/lib/task-access";
 import { assertTaskReadable } from "@/lib/task-access";
 import { ensureNextStep } from "@/lib/deals";
 import { crmProjectWhere } from "@/lib/crm";
@@ -26,7 +28,7 @@ export const taskInclude = {
 } as const;
 
 type TaskRow = NonNullable<Awaited<ReturnType<typeof loadRow>>>;
-const loadRow = (id: string) => db.task.findUnique({ where: { id }, include: taskInclude });
+const loadRow = (id: string, tx?: Tx) => (tx ?? db).task.findUnique({ where: { id }, include: taskInclude });
 
 /** SHO-US-14.1: a task waits for approval only while it is open; a closed task keeps its approver but is no longer waiting. */
 export const awaiting = (t: { approverId: string | null; assigneeId: string; completedAt?: Date | null }) =>
@@ -65,24 +67,11 @@ export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
   };
 }
 
-/**
- * The caller's access to the project a record lives in. A caller who cannot see that project (not a member, or a deal
- * hidden by CRM_VISIBLE) gets the same 404 as a missing id of that record, so no route reveals that it exists (APL-2875).
- */
-export async function recordAccess(user: Actor, projectId: string, what: string, opts: { write?: boolean } = {}) {
-  try {
-    return await projectAccess(user, projectId, opts);
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) throw notFound(what);
-    throw e;
-  }
-}
-export const taskAccess = (user: Actor, projectId: string, opts: { write?: boolean } = {}) => recordAccess(user, projectId, "Task", opts);
 
-async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean } = {}) {
-  const t = await loadRow(id);
+async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean; tx?: Tx } = {}) {
+  const t = await loadRow(id, o.tx);
   if (!t || (t.deletedAt && !o.deleted)) throw notFound("Task");
-  const a = await taskAccess(user, t.projectId, { write: o.write });
+  const a = await taskAccess(user, t.projectId, { write: o.write, ...(o.tx ? { tx: o.tx } : {}) });
   if (o.write) requireWrite(a);
   // The approver holding a task can only Close it or Send it back (SHO-US-4.6); the Leader and Admins keep full authority.
   if (o.write && !o.holderCanDo && awaiting(t) && user.id === t.approverId && a.role !== "LEADER") {
@@ -118,6 +107,25 @@ async function requireMember(tx: Tx, projectId: string, userId: string) {
   return m;
 }
 
+/** Keep project state and task participants eligible until the write commits.
+ * Membership departure may hold a member first; NOWAIT avoids waiting in the
+ * reverse order while a task writer owns another row. */
+async function lockTaskProjectAndPeople(tx: Tx, projectId: string, ids: (string | null | undefined)[]) {
+  try {
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
+    for (const personId of [...new Set(ids.filter((id): id is string => !!id))].sort()) {
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${personId} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+    }
+  } catch (error) {
+    const failure = error as { code?: string; meta?: { code?: string } } | null;
+    if (failure?.code === 'P2010' && failure.meta?.code === '55P03') {
+      throw new ApiError(409, "Project membership is changing. Reload and try again.");
+    }
+    throw error;
+  }
+}
+
 // ---------------------------------------------------------------- create (4.1)
 export async function createTask(
   user: Actor,
@@ -140,8 +148,20 @@ export async function createTask(
   return db.$transaction(async (tx) => {
     let sectionId: string;
     if (input.parentId) {
-      const parent = await tx.task.findFirst({ where: { id: input.parentId, projectId, deletedAt: null } });
-      if (!parent) throw notFound("Parent task");
+      // Hold the parent through insertion so a concurrent soft delete cannot
+      // finish before a new child exists for its child-delete sweep.
+      let parents: { projectId: string; sectionId: string; parentId: string | null; deletedAt: Date | null }[];
+      try {
+        parents = await tx.$queryRaw<typeof parents>`SELECT "projectId", "sectionId", "parentId", "deletedAt" FROM "Task" WHERE "id" = ${input.parentId} FOR SHARE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+          throw new ApiError(409, "The parent task is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      const parent = parents[0];
+      if (!parent || parent.projectId !== projectId || parent.deletedAt) throw notFound("Parent task");
       if (parent.parentId) throw new ApiError(400, "A subtask cannot have subtasks.");
       if (input.approverId) throw new ApiError(400, "Subtasks do not have an approver.");
       sectionId = parent.sectionId;
@@ -163,17 +183,24 @@ export async function createTask(
       if (!input.collaboratorIds?.includes(collaborator)) throw new ApiError(400, "Confirm only selected collaborators.");
       await addWorkspaceTaskMember(tx, user, projectId, collaborator);
     }
+    const collaboratorIds = [...new Set(input.collaboratorIds ?? [])];
+    await lockTaskProjectAndPeople(tx, projectId, [user.id, assigneeId, input.approverId, ...collaboratorIds]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (input.addAssigneeToProject || input.addCollaboratorsToProject?.length) requireManage(fresh);
     await requireWorker(tx, projectId, assigneeId, "The assignee");
     if (input.approverId) {
       if (input.approverId === assigneeId) throw new ApiError(400, "The approver cannot be the assignee.");
       await requireWorker(tx, projectId, input.approverId, "The approver");
     }
-    const collaboratorIds = [...new Set(input.collaboratorIds ?? [])];
     for (const c of collaboratorIds) await requireMember(tx, projectId, c);
 
     const created = await tx.task.create({
       data: {
-        workspaceId: a.project.workspaceId,
+        workspaceId: fresh.project.workspaceId,
         projectId,
         sectionId,
         parentId: input.parentId ?? null,
@@ -252,8 +279,8 @@ export async function listTasks(
 
 /** APL-2669: a well-formed timestamp that is not the task's current instant.
  *  extra stays on the thrown error for bulk operations. HTTP routes drop it (APL-2670). */
-async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role): Promise<never> {
-  const last = await db.actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
+async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role, tx?: Tx): Promise<never> {
+  const last = await (tx ?? db).actionLog.findFirst({ where: { targetType: "task", targetId: id }, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } } } });
   const who = last?.actor.name ?? null;
   throw new ApiError(409, versionConflictMessage(who), {
     stale: true, changedBy: who, current: present(t, { id: user.id, role }),
@@ -263,7 +290,7 @@ async function versionConflict(user: Actor, id: string, t: TaskRow, role: Role):
 /** See the task before the timestamp is read.
  *  Every 404 is the missing-task answer, 404 { error: "Task not found" }, so an outsider
  *  cannot tell a hidden task from a missing one (F8, Dwight). */
-async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean } = {}) {
+async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean; tx?: Tx } = {}) {
   try {
     return await loadTask(user, id, { write: true, ...o });
   } catch (e) {
@@ -273,10 +300,10 @@ async function loadForEdit(user: Actor, id: string, o: { holderCanDo?: boolean }
 }
 
 /** Visibility first, then the timestamp. Instants are compared with getTime, not as strings. */
-async function guardVersion(user: Actor, id: string, expected: unknown, o: { holderCanDo?: boolean } = {}) {
+async function guardVersion(user: Actor, id: string, expected: unknown, o: { holderCanDo?: boolean; tx?: Tx } = {}) {
   const loaded = await loadForEdit(user, id, o);
   const expectedMs = classifyExpectedUpdatedAt(expected);
-  if (expectedMs !== loaded.t.updatedAt.getTime()) await versionConflict(user, id, loaded.t, loaded.a.role);
+  if (expectedMs !== loaded.t.updatedAt.getTime()) await versionConflict(user, id, loaded.t, loaded.a.role, o.tx);
   return loaded;
 }
 
@@ -292,29 +319,47 @@ export async function updateTask(
   },
 ) {
   // Visibility first: a stranger gets 404 before a bad timestamp can become 400 (APL-2669 AC4).
-  const { t } = await guardVersion(user, id, input.expectedUpdatedAt);
-  const data: Record<string, unknown> = {};
-  const before: Record<string, unknown> = {};
-  const set = (k: string, v: unknown, old: unknown) => {
-    if (JSON.stringify(v) !== JSON.stringify(old)) { data[k] = v; before[k] = old; }
-  };
-  if (input.title !== undefined) set("title", input.title, t.title);
-  if (input.description !== undefined) set("description", input.description ?? null, t.description);
-  if (input.dueDate !== undefined) set("dueDate", input.dueDate ? parseDueDate(input.dueDate) : null, t.dueDate);
-  if (input.priority !== undefined) set("priority", input.priority, t.priority);
-  let newlyBlocked = false;
-  if (input.blocked === false) {
-    set("blocked", false, t.blocked);
-    if (t.blockedReason !== null) set("blockedReason", null, t.blockedReason);
-  } else if (input.blocked === true || (t.blocked && input.blockedReason !== undefined)) {
-    set("blocked", true, t.blocked);
-    if (input.blockedReason !== undefined) set("blockedReason", input.blockedReason ?? null, t.blockedReason);
-    newlyBlocked = !t.blocked;
-  }
-  if (!Object.keys(data).length) return;
-  // The updatedAt this write stored. A later operation in the same request follows this, not a re-read.
+  await guardVersion(user, id, input.expectedUpdatedAt);
   return db.$transaction(async (tx) => {
-    const row = await tx.task.update({ where: { id }, data });
+    // Serialize edits to this task before taking its actor's membership lock.
+    // Removal hands over tasks before deleting the membership, in this same order.
+    const [locked] = await tx.$queryRaw<{ id: string; projectId: string }[]>`SELECT "id", "projectId" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    try {
+      // Leader replacement can hold membership before touching tasks. Never wait
+      // on that reverse order while owning the task lock: roll back and retry.
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${locked.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === 'P2010' && failure.meta?.code === '55P03') {
+        throw new ApiError(409, "Project membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    // ReadCommitted makes a completed removal/downgrade visible. Access is
+    // checked before version metadata; a missing seat is the ordinary task404.
+    const { t } = await guardVersion(user, id, input.expectedUpdatedAt, { tx });
+    const data: Record<string, unknown> = {};
+    const before: Record<string, unknown> = {};
+    const set = (k: string, v: unknown, old: unknown) => {
+      if (JSON.stringify(v) !== JSON.stringify(old)) { data[k] = v; before[k] = old; }
+    };
+    if (input.title !== undefined) set("title", input.title, t.title);
+    if (input.description !== undefined) set("description", input.description ?? null, t.description);
+    if (input.dueDate !== undefined) set("dueDate", input.dueDate ? parseDueDate(input.dueDate) : null, t.dueDate);
+    if (input.priority !== undefined) set("priority", input.priority, t.priority);
+    let newlyBlocked = false;
+    if (input.blocked === false) {
+      set("blocked", false, t.blocked);
+      if (t.blockedReason !== null) set("blockedReason", null, t.blockedReason);
+    } else if (input.blocked === true || (t.blocked && input.blockedReason !== undefined)) {
+      set("blocked", true, t.blocked);
+      if (input.blockedReason !== undefined) set("blockedReason", input.blockedReason ?? null, t.blockedReason);
+      newlyBlocked = !t.blocked;
+    }
+    if (!Object.keys(data).length) return;
+
+    const row = await tx.task.update({ where: { id }, data: { ...data, updatedAt: new Date(Math.max(Date.now(), t.updatedAt.getTime() + 1)) } });
     if (newlyBlocked) {
       await notify(tx, [await leaderId(tx, t.projectId)], "TASK_BLOCKED", {
         actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, reason: input.blockedReason ?? null },
@@ -323,7 +368,7 @@ export async function updateTask(
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.updated", before, after: data });
     if ("dueDate" in data) await ensureNextStep(tx, t.projectId, user.id);
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- assign, collaborators, approver (4.3, 4.6)
@@ -337,21 +382,32 @@ export async function assignTask(user: Actor, id: string, assigneeId: string, ex
   return db.$transaction(async (tx) => {
     if (addToProject) {
       await addWorkspaceTaskMember(tx, user, t.projectId, assigneeId);
-      await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
-      const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
-      if (!current || current.deletedAt) throw notFound("Task");
-      if (current.updatedAt.getTime() !== classifyExpectedUpdatedAt(expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
     }
-    await requireWorker(tx, t.projectId, assigneeId, "The assignee");
-    if (t.assigneeId === assigneeId) return t.updatedAt;
-    const toApprover = t.approverId === assigneeId && t.assigneeId !== assigneeId;
-    const row = await tx.task.update({ where: { id }, data: { assigneeId, ...(toApprover ? { previousAssigneeId: t.assigneeId } : {}) } });
-    await notify(tx, [assigneeId], toApprover ? "SENT_FOR_APPROVAL" : "TASK_ASSIGNED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
+    // Membership departure takes its member lock before touching tasks. Take
+    // the task first, then use NOWAIT on project/person/member rows so neither
+    // order can deadlock and every decision observes the current committed state.
+    const [locked] = await tx.$queryRaw<{ projectId: string }[]>`SELECT "projectId" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, locked.projectId, [user.id, assigneeId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const currentUser = { ...user, orgRole: actor.orgRole };
+    const { t: current, a: access } = await guardVersion(currentUser, id, expectedUpdatedAt, { holderCanDo: true, tx });
+    if (actor.workspaceId !== access.project.workspaceId) throw notFound("Task");
+    if (current.approverId && user.id === current.assigneeId && assigneeId !== current.approverId && access.role !== "LEADER") {
+      throw new ApiError(403, "With an approver, this task can only be handed to the approver.");
+    }
+    if (addToProject) requireManage(access);
+    await requireWorker(tx, current.projectId, assigneeId, "The assignee");
+    if (current.assigneeId === assigneeId) return current.updatedAt;
+    const toApprover = current.approverId === assigneeId;
+    const row = await tx.task.update({ where: { id }, data: { assigneeId, ...(toApprover ? { previousAssigneeId: current.assigneeId } : {}), updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await notify(tx, [assigneeId], toApprover ? "SENT_FOR_APPROVAL" : "TASK_ASSIGNED", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
     // SHO-US-7.2 AC3: the person who held it is told it moved on.
-    if (t.assigneeId !== assigneeId) await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.assigned", before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId }, after: { assigneeId, previousAssigneeId: toApprover ? t.assigneeId : t.previousAssigneeId } });
+    await notify(tx, [current.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.assigned", before: { assigneeId: current.assigneeId, previousAssigneeId: current.previousAssigneeId }, after: { assigneeId, previousAssigneeId: toApprover ? current.assigneeId : current.previousAssigneeId } });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function addCollaborator(user: Actor, id: string, userId: string, options: { addToProject?: boolean; addMemberRole?: "EDITOR" | "VIEWER"; expectedUpdatedAt?: unknown } = {}) {
@@ -359,35 +415,48 @@ export async function addCollaborator(user: Actor, id: string, userId: string, o
   const grantMembership = options.addToProject || options.addMemberRole;
   if (grantMembership) { requireManage(a); if (options.addToProject || options.expectedUpdatedAt !== undefined) classifyExpectedUpdatedAt(options.expectedUpdatedAt); }
   await db.$transaction(async (tx) => {
-    let collaborators = t.collaborators;
-    if (grantMembership) {
-      await addWorkspaceTaskMember(tx, user, t.projectId, userId, options.addMemberRole);
-      await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
-      const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
-      if (!current || current.deletedAt) throw notFound("Task");
-      if (options.expectedUpdatedAt !== undefined && current.updatedAt.getTime() !== classifyExpectedUpdatedAt(options.expectedUpdatedAt)) await versionConflict(user, id, current, a.role);
-      collaborators = current.collaborators;
+    if (grantMembership) await addWorkspaceTaskMember(tx, user, t.projectId, userId, options.addMemberRole);
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, t.projectId, [user.id, userId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (grantMembership) requireManage(fresh);
+    if (grantMembership && options.expectedUpdatedAt !== undefined && current.updatedAt.getTime() !== classifyExpectedUpdatedAt(options.expectedUpdatedAt)) {
+      await versionConflict(user, id, current, fresh.role, tx);
     }
     await requireMember(tx, t.projectId, userId);
-    if (collaborators.some((c) => c.user.id === userId)) throw new ApiError(409, "Already a collaborator.");
+    if (current.collaborators.some((c) => c.user.id === userId)) throw new ApiError(409, "Already a collaborator.");
     try { await tx.taskCollaborator.create({ data: { taskId: id, userId } }); }
     catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "P2002") throw new ApiError(409, "Already a collaborator.");
       throw error;
     }
-    await notify(tx, [userId], "COLLABORATOR_ADDED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.collaborator_added", after: { userId } });
-  });
+    await notify(tx, [userId], "COLLABORATOR_ADDED", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.collaborator_added", after: { userId } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function removeCollaborator(user: Actor, id: string, userId: string) {
   const { t } = await loadTask(user, id, { write: true });
   if (!t.collaborators.some((c) => c.user.id === userId)) throw notFound("Collaborator");
   await db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, userId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!current.collaborators.some((c) => c.user.id === userId)) throw notFound("Collaborator");
     await tx.taskCollaborator.delete({ where: { taskId_userId: { taskId: id, userId } } });
-    await notify(tx, [userId], "COLLABORATOR_REMOVED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.collaborator_removed", before: { userId } });
-  });
+    await notify(tx, [userId], "COLLABORATOR_REMOVED", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.collaborator_removed", before: { userId } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function setApprover(user: Actor, id: string, approverId: string | null, expectedUpdatedAt: unknown) {
@@ -400,18 +469,34 @@ export async function setApprover(user: Actor, id: string, approverId: string | 
     throw new ApiError(403, "Only the Leader, an Admin or the task's creator can set the approver.");
   }
   return db.$transaction(async (tx) => {
-    if (approverId) {
-      if (approverId === t.assigneeId && !isAwaiting) throw new ApiError(400, "The approver cannot be the assignee.");
-      if (approverId === t.approverId) throw new ApiError(409, "That person is already the approver.");
-      await requireWorker(tx, t.projectId, approverId, "The approver");
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, approverId, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await guardVersion({ ...user, orgRole: actor.orgRole }, id, expectedUpdatedAt, { tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (current.parentId) throw new ApiError(400, "Subtasks do not have an approver.");
+    if (user.id === current.assigneeId) throw new ApiError(403, "The assignee cannot change their own task's approver.");
+    const currentlyAwaiting = awaiting(current);
+    if (currentlyAwaiting && fresh.role !== "LEADER") throw new ApiError(403, "Only the Leader or an Admin can change the approver while a task awaits approval.");
+    if (!currentlyAwaiting && fresh.role !== "LEADER" && current.createdById !== user.id) {
+      throw new ApiError(403, "Only the Leader, an Admin or the task's creator can set the approver.");
     }
-    const data = isAwaiting && approverId ? { approverId, assigneeId: approverId } : { approverId };
-    const row = await tx.task.update({ where: { id }, data });
-    await notify(tx, [approverId], isAwaiting ? "SENT_FOR_APPROVAL" : "APPROVER_NAMED", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    if (isAwaiting && approverId) await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.approver_changed", before: { approverId: t.approverId, assigneeId: t.assigneeId }, after: data });
+    if (approverId) {
+      if (approverId === current.assigneeId && !currentlyAwaiting) throw new ApiError(400, "The approver cannot be the assignee.");
+      if (approverId === current.approverId) throw new ApiError(409, "That person is already the approver.");
+      await requireWorker(tx, current.projectId, approverId, "The approver");
+    }
+    const data = currentlyAwaiting && approverId ? { approverId, assigneeId: approverId } : { approverId };
+    const row = await tx.task.update({ where: { id }, data: { ...data, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await notify(tx, [approverId], currentlyAwaiting ? "SENT_FOR_APPROVAL" : "APPROVER_NAMED", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    if (currentlyAwaiting && approverId) await notify(tx, [current.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.approver_changed", before: { approverId: current.approverId, assigneeId: current.assigneeId }, after: data });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function sendForApproval(user: Actor, id: string) {
@@ -420,11 +505,25 @@ export async function sendForApproval(user: Actor, id: string) {
   if (awaiting(t)) throw new ApiError(409, "This task is already awaiting approval.");
   if (user.id !== t.assigneeId) throw new ApiError(403, "Only the assignee can send a task for approval.");
   return db.$transaction(async (tx) => {
-    const row = await tx.task.update({ where: { id }, data: { assigneeId: t.approverId!, previousAssigneeId: t.assigneeId } });
-    await notify(tx, [t.approverId], "SENT_FOR_APPROVAL", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_for_approval", before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId }, after: { assigneeId: t.approverId, previousAssigneeId: t.assigneeId } });
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!current.approverId) throw new ApiError(409, "This task has no approver.");
+    if (awaiting(current)) throw new ApiError(409, "This task is already awaiting approval.");
+    if (user.id !== current.assigneeId) throw new ApiError(403, "Only the assignee can send a task for approval.");
+    if (current.approverId !== t.approverId) throw new ApiError(409, "The approver changed. Reload and try again.");
+    await requireWorker(tx, current.projectId, current.approverId, "The approver");
+    const row = await tx.task.update({ where: { id }, data: { assigneeId: current.approverId, previousAssigneeId: current.assigneeId, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await notify(tx, [current.approverId], "SENT_FOR_APPROVAL", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.sent_for_approval", before: { assigneeId: current.assigneeId, previousAssigneeId: current.previousAssigneeId }, after: { assigneeId: current.approverId, previousAssigneeId: current.assigneeId } });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function sendBack(user: Actor, id: string) {
@@ -432,23 +531,40 @@ export async function sendBack(user: Actor, id: string) {
   if (!awaiting(t)) throw new ApiError(409, "This task is not awaiting approval.");
   if (user.id !== t.approverId && a.role !== "LEADER") throw new ApiError(403, "Only the approver, the Leader or an Admin can send this back.");
   return db.$transaction(async (tx) => {
-    const prev = t.previousAssigneeId ? await activeMember(tx, t.projectId, t.previousAssigneeId, WORKERS) : null;
-    const target = prev ? prev.userId : await leaderId(tx, t.projectId);
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true, previousAssigneeId: true } });
+    if (!snapshot) throw notFound("Task");
+    const fallbackLeader = await leaderId(tx, snapshot.projectId);
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId, snapshot.previousAssigneeId, fallbackLeader]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, holderCanDo: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!awaiting(current)) throw new ApiError(409, "This task is not awaiting approval.");
+    if (user.id !== current.approverId && fresh.role !== "LEADER") throw new ApiError(403, "Only the approver, the Leader or an Admin can send this back.");
+    if (current.projectId !== t.projectId || current.assigneeId !== t.assigneeId || current.approverId !== t.approverId || current.previousAssigneeId !== t.previousAssigneeId) {
+      throw new ApiError(409, "The task changed. Reload and try again.");
+    }
+    if (await leaderId(tx, current.projectId) !== fallbackLeader) throw new ApiError(409, "The project Leader changed. Reload and try again.");
+    const prev = current.previousAssigneeId ? await activeMember(tx, current.projectId, current.previousAssigneeId, WORKERS) : null;
+    const target = prev ? prev.userId : fallbackLeader;
+    if (!prev) await requireWorker(tx, current.projectId, fallbackLeader, "The Leader");
     // With nobody to send back to, the task goes to the Leader. When the Leader is the approver it would still be
     // "awaiting approval" in their own hands, and neither Reassign nor Change approver is open to them from there, so the
     // approver is cleared in the same write; Undo puts it back (SHO-BUG-6).
-    const clearApprover = target === t.approverId;
+    const clearApprover = target === current.approverId;
     const approver = clearApprover ? { approverId: null } : {};
-    const row = await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null, ...approver } });
-    await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title, toLeader: !prev, ...(clearApprover ? { approverCleared: true } : {}) } });
-    await notify(tx, [t.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title } });
+    const row = await tx.task.update({ where: { id }, data: { assigneeId: target, previousAssigneeId: null, ...approver, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await notify(tx, [target], "SENT_BACK", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title, toLeader: !prev, ...(clearApprover ? { approverCleared: true } : {}) } });
+    await notify(tx, [current.assigneeId], "REMOVED_AS_ASSIGNEE", { actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title } });
     await logAction(tx, {
-      actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.sent_back",
-      before: { assigneeId: t.assigneeId, previousAssigneeId: t.previousAssigneeId, ...(clearApprover ? { approverId: t.approverId } : {}) },
+      actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.sent_back",
+      before: { assigneeId: current.assigneeId, previousAssigneeId: current.previousAssigneeId, ...(clearApprover ? { approverId: current.approverId } : {}) },
       after: { assigneeId: target, previousAssigneeId: null, ...approver },
     });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- complete, reopen, move (4.5)
@@ -463,24 +579,50 @@ export async function completeTask(user: Actor, id: string, expectedUpdatedAt: u
     throw new ApiError(409, `This task has ${openSubs.length} open subtask${openSubs.length === 1 ? "" : "s"}.`, { needsConfirm: "open_subtasks", openSubtasks: openSubs.length });
   }
   return db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await guardVersion({ ...user, orgRole: actor.orgRole }, id, expectedUpdatedAt, { holderCanDo: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!canClose(user.id, fresh.role, current)) {
+      throw new ApiError(403, current.approverId ? "Only the approver, the Leader or an Admin can close this task." : "You cannot complete this task.");
+    }
+    if (current.completedAt) throw new ApiError(409, "This task is already complete.");
+    let currentOpenSubs: { id: string }[];
+    try {
+      // The parent FOR UPDATE lock also prevents a new child's FK insertion
+      // until this decision commits; NOWAIT refuses an in-flight child edit.
+      currentOpenSubs = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "parentId" = ${id} AND "deletedAt" IS NULL AND "completedAt" IS NULL ORDER BY "id" FOR UPDATE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") throw new ApiError(409, "Subtasks are changing. Reload and try again.");
+      throw error;
+    }
+    if (currentOpenSubs.length && !completeAll) {
+      throw new ApiError(409, `This task has ${currentOpenSubs.length} open subtask${currentOpenSubs.length === 1 ? "" : "s"}.`, { needsConfirm: "open_subtasks", openSubtasks: currentOpenSubs.length });
+    }
     const now = new Date();
     let row: { updatedAt: Date };
-    if (t.parentId) {
-      row = await tx.task.update({ where: { id }, data: { completedAt: now } });
+    if (current.parentId) {
+      row = await tx.task.update({ where: { id }, data: { completedAt: now, updatedAt: new Date(Math.max(now.getTime(), current.updatedAt.getTime() + 1)) } });
     } else {
-      const done = await tx.section.findFirstOrThrow({ where: { projectId: t.projectId, isDone: true } });
-      row = await tx.task.update({ where: { id }, data: { completedAt: now, sectionId: done.id, previousSectionId: t.sectionId === done.id ? t.previousSectionId : t.sectionId } });
-      if (openSubs.length) {
-        await tx.task.updateMany({ where: { id: { in: openSubs.map((s) => s.id) } }, data: { completedAt: now } });
-        for (const sub of openSubs) {
-          await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: sub.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: now.toISOString(), withParent: id }, primary: false });
+      const done = await tx.section.findFirstOrThrow({ where: { projectId: current.projectId, isDone: true } });
+      row = await tx.task.update({ where: { id }, data: { completedAt: now, sectionId: done.id, previousSectionId: current.sectionId === done.id ? current.previousSectionId : current.sectionId, updatedAt: new Date(Math.max(now.getTime(), current.updatedAt.getTime() + 1)) } });
+      if (currentOpenSubs.length) {
+        await tx.task.updateMany({ where: { id: { in: currentOpenSubs.map((s) => s.id) } }, data: { completedAt: now } });
+        for (const sub of currentOpenSubs) {
+          await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: sub.id, action: "task.completed", before: { completedAt: null }, after: { completedAt: now.toISOString(), withParent: id }, primary: false });
         }
       }
     }
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.completed", before: { sectionId: t.sectionId, completedAt: null, previousSectionId: t.previousSectionId }, after: { completedAt: now.toISOString(), subtasksCompleted: openSubs.length, subtaskIds: openSubs.map((s) => s.id) } });
-    if (!t.parentId) await ensureNextStep(tx, t.projectId, user.id);
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.completed", before: { sectionId: current.sectionId, completedAt: null, previousSectionId: current.previousSectionId }, after: { completedAt: now.toISOString(), subtasksCompleted: currentOpenSubs.length, subtaskIds: currentOpenSubs.map((s) => s.id) } });
+    if (!current.parentId) await ensureNextStep(tx, current.projectId, user.id);
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 /**
@@ -516,39 +658,70 @@ export async function cascadedSubtaskIds(tx: Tx, projectId: string, parents: { i
   }).map((s) => s.id);
 }
 
-export async function reopenTask(user: Actor, id: string, sectionId?: string) {
+export async function reopenTask(user: Actor, id: string, sectionId?: string, expectedUpdatedAt?: unknown) {
   const { t } = await loadTask(user, id, { write: true });
-  if (!t.completedAt) throw new ApiError(409, "This task is not complete.");
+  const completedAt = t.completedAt;
+  if (!completedAt) throw new ApiError(409, "This task is not complete.");
   return db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (!current.completedAt) throw new ApiError(409, "This task is not complete.");
+    const seenAt = expectedUpdatedAt === undefined ? t.updatedAt.getTime() : classifyExpectedUpdatedAt(expectedUpdatedAt);
+    if (current.updatedAt.getTime() !== seenAt || current.completedAt.getTime() !== completedAt.getTime()) {
+      throw new ApiError(409, "The task changed. Reload and try again.");
+    }
     let row: { updatedAt: Date };
     let cascaded: string[] = [];
-    if (t.parentId) {
-      const parent = await tx.task.findUniqueOrThrow({ where: { id: t.parentId } });
+    if (current.parentId) {
+      let parent: { completedAt: Date | null } | undefined;
+      try {
+        [parent] = await tx.$queryRaw<{ completedAt: Date | null }[]>`SELECT "completedAt" FROM "Task" WHERE "id" = ${current.parentId} FOR SHARE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") throw new ApiError(409, "The parent task is changing. Reload and try again.");
+        throw error;
+      }
+      if (!parent) throw notFound("Parent task");
       if (parent.completedAt) throw new ApiError(409, "Reopen the parent task first.");
-      row = await tx.task.update({ where: { id }, data: { completedAt: null } });
+      row = await tx.task.update({ where: { id }, data: { completedAt: null, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
     } else {
       let dest: string | null = null;
       if (sectionId) {
-        const s = await tx.section.findFirst({ where: { id: sectionId, projectId: t.projectId } });
+        const s = await tx.section.findFirst({ where: { id: sectionId, projectId: current.projectId } });
         if (!s) throw notFound("Section");
         if (s.isDone) throw new ApiError(400, "Choose a section that is not the done section.");
         dest = s.id;
       } else {
-        const prev = t.previousSectionId ? await tx.section.findFirst({ where: { id: t.previousSectionId, projectId: t.projectId, isDone: false } }) : null;
-        dest = (prev ?? (await tx.section.findFirst({ where: { projectId: t.projectId, isDone: false }, orderBy: { position: "asc" } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: t.projectId }, orderBy: { position: "asc" } }))).id;
+        const prev = current.previousSectionId ? await tx.section.findFirst({ where: { id: current.previousSectionId, projectId: current.projectId, isDone: false } }) : null;
+        dest = (prev ?? (await tx.section.findFirst({ where: { projectId: current.projectId, isDone: false }, orderBy: { position: "asc" } })) ?? (await tx.section.findFirstOrThrow({ where: { projectId: current.projectId }, orderBy: { position: "asc" } }))).id;
       }
       // Subtasks closed with the parent reopen with it. One ticked on its own stays done (APL-2721).
-      cascaded = await cascadedSubtaskIds(tx, t.projectId, [{ id, completedAt: t.completedAt }]);
-      row = await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest, previousSectionId: null } });
+      try {
+        // Freeze the child cohort before deciding which completions were cascaded.
+        await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "parentId" = ${id} AND "deletedAt" IS NULL ORDER BY "id" FOR UPDATE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") throw new ApiError(409, "Subtasks are changing. Reload and try again.");
+        throw error;
+      }
+      cascaded = await cascadedSubtaskIds(tx, current.projectId, [{ id, completedAt: current.completedAt }]);
+      row = await tx.task.update({ where: { id }, data: { completedAt: null, sectionId: dest, previousSectionId: null, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
       if (cascaded.length) await tx.task.updateMany({ where: { id: { in: cascaded } }, data: { completedAt: null } });
     }
     await logAction(tx, {
-      actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.reopened",
-      before: { completedAt: t.completedAt, sectionId: t.sectionId },
+      actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.reopened",
+      before: { completedAt: current.completedAt, sectionId: current.sectionId },
       after: { completedAt: null, ...(cascaded.length ? { subtaskIds: cascaded } : {}) },
     });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 /** Dragging a card. Into the done Section completes, out of it reopens, otherwise only the Section changes. */
@@ -557,75 +730,151 @@ export async function moveTask(user: Actor, id: string, sectionId: string, expec
   if (t.parentId) throw new ApiError(409, "Subtasks move with their parent task.");
   const dest = await db.section.findFirst({ where: { id: sectionId, projectId: t.projectId } });
   if (!dest) throw notFound("Section");
-  if (dest.id === t.sectionId) return;
+  if (dest.id === t.sectionId && t.completedAt) return;
   if (dest.isDone) return completeTask(user, id, expectedUpdatedAt, completeAll);
-  if (t.completedAt) return reopenTask(user, id, dest.id);
+  if (t.completedAt) return reopenTask(user, id, dest.id, expectedUpdatedAt);
   return db.$transaction(async (tx) => {
-    const row = await tx.task.update({ where: { id }, data: { sectionId: dest.id } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.moved", before: { sectionId: t.sectionId }, after: { sectionId: dest.id } });
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, select: { projectId: true, assigneeId: true, approverId: true } });
+    if (!snapshot) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, snapshot.assigneeId, snapshot.approverId]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await guardVersion({ ...user, orgRole: actor.orgRole }, id, expectedUpdatedAt, { holderCanDo: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    if (current.parentId) throw new ApiError(409, "Subtasks move with their parent task.");
+    if (current.completedAt) throw new ApiError(409, "The task changed. Reload and try again.");
+    let destination: { id: string; projectId: string; isDone: boolean } | undefined;
+    try {
+      [destination] = await tx.$queryRaw<{ id: string; projectId: string; isDone: boolean }[]>`SELECT "id", "projectId", "isDone" FROM "Section" WHERE "id" = ${sectionId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") throw new ApiError(409, "The destination section is changing. Reload and try again.");
+      throw error;
+    }
+    if (!destination || destination.projectId !== current.projectId) throw notFound("Section");
+    if (destination.isDone) throw new ApiError(409, "The destination section changed. Reload and try again.");
+    if (destination.id === current.sectionId) return;
+    const row = await tx.task.update({ where: { id }, data: { sectionId: destination.id, updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)) } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.moved", before: { sectionId: current.sectionId }, after: { sectionId: destination.id } });
     return row.updatedAt;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- delete, restore, trash (6.1, 6.2)
-export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean } = {}) {
-  const { t, a } = await loadTask(user, id, { write: true });
-  return db.$transaction(async (tx) => {
+export async function deleteTask(user: Actor, id: string, o: { byUndo?: boolean; tx?: Tx } = {}) {
+  await loadTask(user, id, { write: true, tx: o.tx });
+  const apply = async (tx: Tx) => {
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const snapshot = await tx.task.findUnique({ where: { id }, include: taskInclude });
+    if (!snapshot) throw notFound("Task");
+    const initialLeader = await leaderId(tx, snapshot.projectId);
+    await lockTaskProjectAndPeople(tx, snapshot.projectId, [user.id, initialLeader, snapshot.assigneeId, snapshot.approverId, ...snapshot.collaborators.map((c) => c.user.id)]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t: current, a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    const leader = await leaderId(tx, current.projectId);
+    if (leader !== initialLeader) throw new ApiError(409, "Project membership is changing. Reload and try again.");
     const now = new Date();
-    await tx.task.updateMany({ where: { OR: [{ id }, { parentId: id }], deletedAt: null }, data: { deletedAt: now, deletedById: user.id } });
+    const row = await tx.task.update({ where: { id }, data: { deletedAt: now, deletedById: user.id, updatedAt: new Date(Math.max(now.getTime(), current.updatedAt.getTime() + 1)) } });
+    await tx.task.updateMany({ where: { parentId: id, deletedAt: null }, data: { deletedAt: now, deletedById: user.id } });
     // Still inside this transaction, so the updatedAt is the one this write stored, not a later save.
-    const row = await tx.task.findUniqueOrThrow({ where: { id }, select: { updatedAt: true } });
     if (o.byUndo) return row.updatedAt; // Undo logs its own row and sends no notice
-    const leader = await leaderId(tx, t.projectId);
-    await notify(tx, [leader, t.assigneeId, t.approverId, ...t.collaborators.map((c) => c.user.id)], "TASK_DELETED", {
-      actorId: user.id, taskId: id, projectId: t.projectId, data: { title: t.title },
+    await notify(tx, [leader, current.assigneeId, current.approverId, ...current.collaborators.map((c) => c.user.id)], "TASK_DELETED", {
+      actorId: user.id, taskId: id, projectId: current.projectId, data: { title: current.title },
     });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.deleted", before: { title: t.title, sectionId: t.sectionId, deletedAt: null }, after: { deletedAt: now.toISOString() }, at: now });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.deleted", before: { title: current.title, sectionId: current.sectionId, deletedAt: null }, after: { deletedAt: now.toISOString() }, at: now });
     // Undoing a delete is a restore from Trash, so only those who may restore get the Undo toast (APL-2649).
     const ctx = reqCtx.getStore();
-    if (ctx && !canManage(a)) { ctx.undoId = undefined; ctx.undoLabel = undefined; }
-    await ensureNextStep(tx, t.projectId, user.id);
+    if (ctx && !canManage(fresh)) { ctx.undoId = undefined; ctx.undoLabel = undefined; }
+    await ensureNextStep(tx, current.projectId, user.id);
     return row.updatedAt;
-  });
+  };
+  return o.tx ? apply(o.tx) : db.$transaction(apply, { isolationLevel: "ReadCommitted" });
 }
 
-export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { skipRestoredLog?: boolean } = {}) {
-  const { t, a } = await loadTask(user, id, { write: true, deleted: true });
+export async function restoreTask(user: Actor, id: string, confirmParent = false, o: { skipRestoredLog?: boolean; tx?: Tx } = {}) {
+  const { t, a } = await loadTask(user, id, { write: true, deleted: true, tx: o.tx });
   requireManage(a); // SHO-US-3.3 AC1: only the Leader or an Admin restores from Trash
   if (!t.deletedAt) throw new ApiError(409, "This task is not in Trash.");
-  const parent = t.parentId ? await db.task.findUnique({ where: { id: t.parentId } }) : null;
-  const parentDeleted = !!parent?.deletedAt;
-  if (parentDeleted && !confirmParent) {
-    throw new ApiError(409, `This will also restore its parent task, "${parent!.title}".`, { needsConfirm: "parent", parentTitle: parent!.title });
-  }
-  await db.$transaction(async (tx) => {
-    const leader = await leaderId(tx, t.projectId);
-    const targets = parentDeleted ? [parent!, t] : [t];
+  const apply = async (tx: Tx) => {
+    // Parent first matches the delete path's lock order. Re-read both rows
+    // after locking; preflight authority and state can change before this write.
+    const lock = async (taskId: string) => {
+      try {
+        return await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE NOWAIT`;
+      } catch (error) {
+        const failure = error as { code?: string; meta?: { code?: string } } | null;
+        if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+          throw new ApiError(409, "Task is changing. Reload and try again.");
+        }
+        throw error;
+      }
+    };
+    if (t.parentId && !(await lock(t.parentId)).length) throw notFound("Parent task");
+    if (!(await lock(id)).length) throw notFound("Task");
+    const current = await tx.task.findUnique({ where: { id }, include: taskInclude });
+    if (!current || current.parentId !== t.parentId || current.projectId !== t.projectId) throw notFound("Task");
+    if (!current.deletedAt) throw new ApiError(409, "This task is not in Trash.");
+    const freshParent = current.parentId ? await tx.task.findUnique({ where: { id: current.parentId }, include: taskInclude }) : null;
+    if (current.parentId && (!freshParent || freshParent.projectId !== current.projectId)) throw notFound("Parent task");
+    const restoreParent = !!freshParent?.deletedAt;
+    if (restoreParent && !confirmParent) {
+      throw new ApiError(409, `This will also restore its parent task, "${freshParent!.title}".`, { needsConfirm: "parent", parentTitle: freshParent!.title });
+    }
+    const targets = restoreParent ? [freshParent!, current] : [current];
+    const initialLeader = await leaderId(tx, current.projectId);
+    const cohorts = new Map<string, { id: string; assigneeId: string; approverId: string | null }[]>();
+    const candidateIds = new Set<string>([user.id, initialLeader]);
     for (const x of targets) {
-      const assigneeOk = await activeMember(tx, t.projectId, x.assigneeId, WORKERS);
-      const approverOk = x.approverId ? await activeMember(tx, t.projectId, x.approverId, WORKERS) : null;
-      const subs = await tx.task.findMany({ where: { parentId: x.id, deletedAt: x.deletedAt }, select: { id: true, assigneeId: true } });
+      candidateIds.add(x.assigneeId);
+      if (x.approverId) candidateIds.add(x.approverId);
+      const subs = await tx.task.findMany({ where: { parentId: x.id, deletedAt: x.deletedAt }, select: { id: true, assigneeId: true, approverId: true } });
+      cohorts.set(x.id, subs);
+      for (const sub of subs) {
+        candidateIds.add(sub.assigneeId);
+        if (sub.approverId) candidateIds.add(sub.approverId);
+      }
+    }
+    // Departure locks members first. NOWAIT prevents the reverse task/member
+    // order from deadlocking and holds project, account and members to commit.
+    await lockTaskProjectAndPeople(tx, current.projectId, [...candidateIds]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { a: fresh } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, deleted: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Task");
+    requireManage(fresh);
+    const leader = await leaderId(tx, current.projectId);
+    if (leader !== initialLeader) throw new ApiError(409, "Project membership is changing. Reload and try again.");
+    for (const x of targets) {
+      const assigneeOk = await activeMember(tx, current.projectId, x.assigneeId, WORKERS);
+      const approverOk = x.approverId ? await activeMember(tx, current.projectId, x.approverId, WORKERS) : null;
+      const subs = cohorts.get(x.id) ?? [];
       await tx.task.updateMany({
         where: { OR: [{ id: x.id }, { parentId: x.id, deletedAt: x.deletedAt }] },
         data: { deletedAt: null, deletedById: null },
       });
       // A subtask whose assignee left while it sat in Trash also goes to the Leader (SHO-US-6.2 AC3).
       for (const s of subs) {
-        if (!(await activeMember(tx, t.projectId, s.assigneeId, WORKERS))) {
+        if (!(await activeMember(tx, current.projectId, s.assigneeId, WORKERS))) {
           await tx.task.update({ where: { id: s.id }, data: { assigneeId: leader } });
         }
       }
       if (!assigneeOk) {
         await tx.task.update({ where: { id: x.id }, data: { assigneeId: leader } });
-        await notify(tx, [leader], "RESTORED_TO_LEADER", { actorId: user.id, taskId: x.id, projectId: t.projectId, data: { title: x.title } });
+        await notify(tx, [leader], "RESTORED_TO_LEADER", { actorId: user.id, taskId: x.id, projectId: current.projectId, data: { title: x.title } });
       }
       if (x.approverId && !approverOk) {
         await tx.task.update({ where: { id: x.id }, data: { approverId: null } });
-        await notify(tx, [leader, assigneeOk ? x.assigneeId : null], "APPROVER_CLEARED", { actorId: user.id, taskId: x.id, projectId: t.projectId, data: { title: x.title } });
+        await notify(tx, [leader, assigneeOk ? x.assigneeId : null], "APPROVER_CLEARED", { actorId: user.id, taskId: x.id, projectId: current.projectId, data: { title: x.title } });
       }
     }
-    if (!o.skipRestoredLog) await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: t.deletedAt!.toISOString(), title: t.title }, after: { deletedAt: null, restoredParent: parentDeleted } });
-  });
+    if (!o.skipRestoredLog) await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: id, action: "task.restored", before: { deletedAt: current.deletedAt.toISOString(), title: current.title }, after: { deletedAt: null, restoredParent: restoreParent } });
+  };
+  return o.tx ? apply(o.tx) : db.$transaction(apply);
 }
 
 export async function listTrash(user: Actor, projectId: string) {
@@ -657,8 +906,14 @@ export async function listTrash(user: Actor, projectId: string) {
  * The unscoped job also purges soft-deleted comments past 30×24h (APL-2590).
  */
 export async function purgeTrash(now = new Date(), only?: Prisma.TaskWhereInput) {
-  const expired: Prisma.TaskWhereInput = { deletedAt: { lt: trashPurgeBefore(now) } };
-  const where: Prisma.TaskWhereInput = only ? { AND: [expired, only] } : expired;
+  const cutoff = trashPurgeBefore(now);
+  const expired: Prisma.TaskWhereInput = { deletedAt: { lt: cutoff } };
+  // The self-relation uses ON DELETE CASCADE. Keep an expired parent until
+  // every child has had its own full Trash period, including the exact edge.
+  const childrenRetained: Prisma.TaskWhereInput = {
+    subtasks: { none: { OR: [{ deletedAt: null }, { deletedAt: { gte: cutoff } }] } },
+  };
+  const where: Prisma.TaskWhereInput = { AND: [expired, childrenRetained, ...(only ? [only] : [])] };
   const r = await db.task.deleteMany({ where });
   if (!only) await purgeExpiredComments(now); // APL-2590: soft-deleted comments past 30×24h; a scoped call never widens to them
   if (r.count) {
@@ -744,11 +999,20 @@ async function waitingSince(ids: string[]) {
 
 /** SHO-US-13.2: Editors flag or unflag an idea; logged with before and after, undoable. */
 export async function setIdea(user: Actor, id: string, isIdea: boolean) {
-  const { t } = await loadTask(user, id, { write: true });
-  if (t.parentId) throw new ApiError(400, "Only a top-level task can be an idea.");
-  if (t.isIdea === isIdea) return;
+  // Keep the ordinary early access answer, then repeat it under locks. A role
+  // change or removal may commit between this read and the idea write.
+  await loadTask(user, id, { write: true });
   await db.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<{ projectId: string }[]>`SELECT "projectId" FROM "Task" WHERE "id" = ${id} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    await lockTaskProjectAndPeople(tx, locked.projectId, [user.id]);
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+    const { t, a } = await loadTask({ ...user, orgRole: actor.orgRole }, id, { write: true, tx });
+    if (actor.workspaceId !== a.project.workspaceId) throw notFound("Task");
+    if (t.parentId) throw new ApiError(400, "Only a top-level task can be an idea.");
+    if (t.isIdea === isIdea) return;
     await tx.task.update({ where: { id }, data: { isIdea } });
     await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: id, action: "task.idea_changed", before: { isIdea: t.isIdea }, after: { isIdea } });
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }

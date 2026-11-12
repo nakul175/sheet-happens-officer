@@ -18,7 +18,13 @@ describe("SHO-3058 add workspace people during task assignment", () => {
     const seed = await db.user.findUniqueOrThrow({ where: { id: lead.id }, select: { workspaceId: true, passwordHash: true } });
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const otherWorkspace = await db.workspace.create({ data: { name: `ZZ 3058 other ${stamp}` } });
-    const cross = await db.user.create({ data: { workspaceId: otherWorkspace.id, name: "ZZ 3058 Duplicate Name", email: `zz-3058-cross-${stamp}@aplyd.com`, passwordHash: seed.passwordHash, emailVerifiedAt: new Date() } });
+    // A second workspace is an invalid deployment, not a second tenant. No read
+    // is permitted while it exists; restore the fixture before normal picker checks.
+    try {
+      const blocked = await lead.c.get(`/api/projects/${p.id}/people?q=ZZ`);
+      expect(blocked.status).toBe(503);
+      expect(blocked.json.people).toBeUndefined();
+    } finally { await db.workspace.delete({ where: { id: otherWorkspace.id } }); }
     const unverified = await db.user.create({ data: { workspaceId: seed.workspaceId, name: "ZZ 3058 Duplicate Name", email: `zz-3058-unverified-${stamp}@aplyd.com`, passwordHash: seed.passwordHash } });
     const deactivated = await db.user.create({ data: { workspaceId: seed.workspaceId, name: "ZZ 3058 Duplicate Name", email: `zz-3058-deactivated-${stamp}@aplyd.com`, passwordHash: seed.passwordHash, emailVerifiedAt: new Date(), deactivatedAt: new Date() } });
 
@@ -29,7 +35,7 @@ describe("SHO-3058 add workspace people during task assignment", () => {
       expect.objectContaining({ id: outsider.id, email: outsider.email, memberRole: null }),
       expect.objectContaining({ id: member.id, email: member.email, memberRole: "VIEWER" }),
     ]));
-    expect(byName.json.people.map((x: { id: string }) => x.id).sort()).not.toEqual(expect.arrayContaining([cross.id, unverified.id, deactivated.id]));
+    expect(byName.json.people.map((x: { id: string }) => x.id).sort()).not.toEqual(expect.arrayContaining([unverified.id, deactivated.id]));
     const byEmail = await lead.c.get(`/api/projects/${p.id}/people?q=${encodeURIComponent(outsider.email.slice(0, 18))}`);
     expect(byEmail.json.people.map((x: { id: string }) => x.id)).toContain(outsider.id);
     expect((await member.c.get(`/api/projects/${p.id}/people?q=ZZ`)).status).toBe(403);

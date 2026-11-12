@@ -47,7 +47,7 @@ it("SHO-2915 restores an actual deactivated Admin alias to an active Member", as
 it("SHO-2915 logs a real missing-person 404 without attempting a restore write", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const post = vi.spyOn(root!.c, "post"), patch = vi.spyOn(root!.c, "patch");
-  await restorePoolPerson(root!.c, `zz-missing-2915-${Date.now()}`);
+  await expect(restorePoolPerson(root!.c, `zz-missing-2915-${Date.now()}`)).rejects.toThrow("Pool person restoration could not verify the person");
   expect(warn).toHaveBeenCalledExactlyOnceWith("[qa-alias] Cannot restore pool person: Team read failed", 404);
   expect(post).not.toHaveBeenCalled();
   expect(patch).not.toHaveBeenCalled();
