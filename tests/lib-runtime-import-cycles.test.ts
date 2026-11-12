@@ -30,22 +30,24 @@ function localTarget(from: string, specifier: string): string | null {
   const base = specifier.startsWith("@/lib/") ? join(lib, specifier.slice(6))
     : specifier.startsWith(".") ? resolve(dirname(from), specifier) : null;
   if (!base) return null;
-  return [base + ".ts", base + ".tsx", join(base, "index.ts"), join(base, "index.tsx")]
+  return [base, base + ".ts", base + ".tsx", join(base, "index.ts"), join(base, "index.tsx")]
     .find((candidate) => known.has(candidate)) ?? null;
 }
 
-it("src/lib has no static runtime import cycles", () => {
-  const graph = new Map<string, string[]>();
-  for (const file of files) {
-    const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
-    graph.set(file, source.statements.flatMap((node) => {
-      const specifier = runtimeSpecifier(node);
-      const target = specifier && localTarget(file, specifier);
-      return target ? [target] : [];
-    }));
+function dynamicSpecifiers(source: ts.SourceFile): string[] {
+  const found: string[] = [];
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
+      found.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
   }
-  expect(graph.size).toBeGreaterThan(50); // fail if the scan path silently changes
-  expect([...graph.values()].reduce((count, edges) => count + edges.length, 0)).toBeGreaterThan(100);
+  visit(source);
+  return found;
+}
+
+function findCycle(graph: Map<string, string[]>): string[] | null {
   const active = new Set<string>();
   const visited = new Set<string>();
   const path: string[] = [];
@@ -60,6 +62,34 @@ it("src/lib has no static runtime import cycles", () => {
     path.pop(); active.delete(file); visited.add(file);
     return null;
   }
-  const cycle = files.map(visit).find(Boolean);
+  return [...graph.keys()].map(visit).find(Boolean) ?? null;
+}
+
+it("recognizes nested literal dynamic imports while excluding computed imports", () => {
+  const source = ts.createSourceFile("sample.ts", 'async function load() { await import("./db.ts"); await import(variable); }', ts.ScriptTarget.Latest, true);
+  expect(dynamicSpecifiers(source)).toEqual(["./db.ts"]);
+  expect(localTarget(join(lib, "shutdown.ts"), "./db.ts")).toBe(join(lib, "db.ts"));
+  const synthetic = new Map([["shutdown.ts", ["db.ts"]], ["db.ts", ["shutdown.ts"]]]);
+  expect(findCycle(synthetic)).toEqual(["shutdown.ts", "db.ts", "shutdown.ts"]);
+});
+
+it("src/lib has no static or literal dynamic runtime import cycles", () => {
+  const graph = new Map<string, string[]>();
+  for (const file of files) {
+    const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+    const staticTargets = source.statements.flatMap((node) => {
+      const specifier = runtimeSpecifier(node);
+      const target = specifier && localTarget(file, specifier);
+      return target ? [target] : [];
+    });
+    const dynamicTargets = dynamicSpecifiers(source).flatMap((specifier) => {
+      const target = localTarget(file, specifier);
+      return target ? [target] : [];
+    });
+    graph.set(file, [...staticTargets, ...dynamicTargets]);
+  }
+  expect(graph.size).toBeGreaterThan(50); // fail if the scan path silently changes
+  expect([...graph.values()].reduce((count, edges) => count + edges.length, 0)).toBeGreaterThan(100);
+  const cycle = findCycle(graph);
   expect(cycle?.map((file) => file.slice(lib.length + 1))).toBeUndefined();
 });
