@@ -26,6 +26,7 @@ for(const dir of fs.readdirSync('prisma/migrations',{withFileTypes:true}).filter
  if(statements.length)text+=`### ${dir.name}\n\n\`\`\`sql\n${statements.join('\n')}\n\`\`\`\n\n`;
 }
 const file='docs/data/MODEL-REFERENCE.md';
+text=text.trimEnd()+'\n';
 if(process.argv.includes('--check')){if(fs.readFileSync(file,'utf8')!==text)throw Error('DATA_REFERENCE_STALE');}
 else fs.writeFileSync(file,text);
 console.log(`Data reference: ${models.length} models; ${process.argv.includes('--check')?'consistent':'generated'}`);

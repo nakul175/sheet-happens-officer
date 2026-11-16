@@ -15,6 +15,7 @@ Generated from `prisma/schema.prisma`; do not edit field tables by hand. See CON
 | organisations | Organisation[] | — |
 | contacts | Contact[] | — |
 | notes | Note[] | — |
+| additionalMembers | WorkspaceMembership[] | — |
 
 ## User
 
@@ -35,6 +36,8 @@ Generated from `prisma/schema.prisma`; do not edit field tables by hand. See CON
 | compactRows | Boolean | @default(false) |
 | startGuideDismissedAt | DateTime? | — |
 | createdAt | DateTime | @default(now()) |
+| additionalWorkspaces | WorkspaceMembership[] | — |
+| workspaceSelections | SessionWorkspace[] | — |
 | memberships | ProjectMember[] | — |
 | assignedTasks | Task[] | @relation("TaskAssignee") |
 | approvingTasks | Task[] | @relation("TaskApprover") |
@@ -70,8 +73,9 @@ Model constraints: `@@index([workspaceId])`.
 | lastSeenAt | DateTime | @default(now()) |
 | createdAt | DateTime | @default(now()) |
 | centralLink | CentralSessionLink? | — |
+| workspaceSelection | SessionWorkspace? | — |
 
-Model constraints: `@@index([userId])`; `@@index([expiresAt])`.
+Model constraints: `@@unique([id, userId])`; `@@index([userId])`; `@@index([expiresAt])`.
 
 ## AuthToken
 
@@ -593,6 +597,60 @@ Model constraints: `@@index([expiresAt])`.
 | sessionUid | String | — |
 | createdAt | DateTime | @default(now()) |
 
+## PortalOrgRoleReceipt
+
+| Field | Prisma type | Attributes / relation deletion rule |
+| --- | --- | --- |
+| id | String | @id @db.Uuid |
+| actorId | String | — |
+| targetId | String | — |
+| workspaceId | String | — |
+| result | Json | — |
+| createdAt | DateTime | @default(now()) |
+
+## WorkspaceMembership
+
+| Field | Prisma type | Attributes / relation deletion rule |
+| --- | --- | --- |
+| userId | String | — |
+| workspaceId | String | — |
+| user | User | @relation(fields: [userId], references: [id], onDelete: Restrict) |
+| workspace | Workspace | @relation(fields: [workspaceId], references: [id], onDelete: Restrict) |
+| role | OrgRole | @default(MEMBER) |
+| generation | Int | @default(1) |
+| revokedAt | DateTime? | — |
+| createdAt | DateTime | @default(now()) |
+| updatedAt | DateTime | @default(now()) |
+| selections | SessionWorkspace[] | — |
+
+Model constraints: `@@id([userId, workspaceId])`; `@@index([workspaceId, revokedAt])`.
+
+## SessionWorkspace
+
+| Field | Prisma type | Attributes / relation deletion rule |
+| --- | --- | --- |
+| sessionId | String | @id |
+| userId | String | — |
+| workspaceId | String | — |
+| generation | Int | — |
+| selectedAt | DateTime | @default(now()) |
+| session | Session | @relation(fields: [sessionId, userId], references: [id, userId], onDelete: Cascade) |
+| user | User | @relation(fields: [userId], references: [id], onDelete: Restrict) |
+| membership | WorkspaceMembership | @relation(fields: [userId, workspaceId], references: [userId, workspaceId], onDelete: Restrict) |
+
+Model constraints: `@@unique([sessionId, userId])`.
+
+## PortalWorkspaceReceipt
+
+| Field | Prisma type | Attributes / relation deletion rule |
+| --- | --- | --- |
+| id | String | @id |
+| actorId | String | — |
+| targetId | String | — |
+| workspaceId | String | — |
+| result | Json | — |
+| createdAt | DateTime | @default(now()) |
+
 ## Custom SQL inventory
 
 Read definitions in migration order; later ALTER/replacements take precedence. This inventory includes checks, partial indexes, triggers and functions.
@@ -701,4 +759,18 @@ END $$;
 ALTER FUNCTION holy_sheet_task_move() SET search_path FROM CURRENT;
 CREATE TRIGGER holy_sheet_task_move AFTER UPDATE OF "projectId" ON "Task"
 FOR EACH ROW WHEN (OLD."projectId" IS DISTINCT FROM NEW."projectId") EXECUTE FUNCTION holy_sheet_task_move();
+```
+
+### 20261109120000_additional_workspace_memberships
+
+```sql
+CREATE FUNCTION sho_additional_workspace_only() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF EXISTS (SELECT 1 FROM "User" WHERE id=NEW."userId" AND "workspaceId"=NEW."workspaceId") THEN
+  RAISE EXCEPTION 'Original workspace authority must remain on User' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER sho_additional_workspace_only BEFORE INSERT OR UPDATE ON "WorkspaceMembership"
+ FOR EACH ROW EXECUTE FUNCTION sho_additional_workspace_only();
 ```
