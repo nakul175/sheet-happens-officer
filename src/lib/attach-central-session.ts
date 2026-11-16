@@ -1,11 +1,15 @@
 import { invitedNativeId, invitedSessionsEnabled } from "@/lib/invited-central-identity";
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, createHmac } from "node:crypto";
 import { cookies } from "next/headers";
 import { centralSessionActive } from "@/lib/central-status";
-import { holyQaIdentity } from "@/lib/holy-qa-identity";
+import { centralIdentitySecret, holyQaIdentity } from "@/lib/holy-qa-identity";
 import { db } from "@/lib/db";
 export async function attachCentralSession(sourceSessionId: string, userId: string, subject: string, sessionUid: string) {
-    const token = randomBytes(32).toString("base64url");
+    // Both Tasks hosts attach the same Accounts session to the same native session.
+    // Keep the token stable across those attachments so each host's cookie remains valid.
+    const token = createHmac("sha256", centralIdentitySecret())
+        .update(JSON.stringify(["tasks-source-session-v1", sourceSessionId, userId, subject, sessionUid]))
+        .digest("base64url");
     const expires = await db.$transaction(async (tx) => {
         const session = await tx.session.findUnique({ where: { id: sourceSessionId }, include: { user: true, centralLink: true } });
         const user = session?.user;
