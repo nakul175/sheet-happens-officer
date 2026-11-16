@@ -37,6 +37,8 @@ test("SHO-REG-TASKS-09 rapid Enter creates one dated task", async ({ admin, late
   await page.locator("#qa-date").fill("tomorrow");
   await expect(page.locator("#qa-date-note")).toContainText(/^Due /);
   await expect(page.locator("#qa-date")).toHaveAttribute("aria-invalid", "false");
+  await expect(page.locator("#qa-title")).toHaveValue(title);
+  await expect(page.getByRole("dialog", { name: "New task" }).getByRole("button", { name: "Add task" })).toBeEnabled();
 
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -48,14 +50,16 @@ test("SHO-REG-TASKS-09 rapid Enter creates one dated task", async ({ admin, late
     }
     await route.continue();
   });
-  const completed = page.waitForResponse(response => response.url().endsWith(`/api/projects/${project.id}/tasks`) && response.request().method() === "POST");
+  const completed = page.waitForResponse(response => response.url().endsWith(`/api/projects/${project.id}/tasks`) && response.request().method() === "POST", { timeout: 15_000 });
+  void completed.catch(() => {}); // A prior assertion failure must not leave an unhandled waiter.
   try {
     await page.locator("#qa-date").press("Enter");
-    await expect.poll(() => requests).toBe(1);
+    await expect.poll(() => requests, { timeout: 5_000 }).toBe(1);
     await page.keyboard.press("Enter");
     expect(requests).toBe(1);
     await expect(page.getByRole("dialog", { name: "New task" }).getByRole("button", { name: "Add task" })).toBeDisabled();
-  } finally { release(); await completed; }
+  } finally { release(); }
+  await completed;
   await expect(page.getByRole("dialog", { name: "New task" })).toHaveCount(0);
   const tasks = await admin.api.get(`/api/projects/${project.id}/tasks`);
   expect(tasks.status).toBe(200);
