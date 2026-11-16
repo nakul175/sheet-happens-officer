@@ -254,10 +254,10 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     await page.reload();
     await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('3');
     await expect(priorities.locator(`a[href="/tasks/${sharedTask}"]`)).toHaveCount(0);
-    const emptyUser = await data.person('Empty Member');
-    const emptyContext = await browser.newContext({ baseURL: BASE });
+    const emptyUser = await test.step('create isolated empty member', () => data.person('Empty Member'), { timeout: 20_000 });
+    const emptyContext = await test.step('open isolated empty-member browser', () => browser.newContext({ baseURL: BASE }), { timeout: 20_000 });
     try {
-      const emptySignin = await emptyContext.request.post('/api/auth/signin', { data: { email: emptyUser.email, password: PW } });
+      const emptySignin = await test.step('sign in empty member', () => emptyContext.request.post('/api/auth/signin', { data: { email: emptyUser.email, password: PW } }), { timeout: 20_000 });
       expect(emptySignin.status()).toBe(200);
       const emptyPage = await emptyContext.newPage();
       const tasksRoute = (url: URL) => url.pathname === '/api/dashboard' && url.searchParams.get('panel') === 'tasks';
@@ -265,22 +265,22 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
         await new Promise(resolve => setTimeout(resolve, 1_500));
         await route.continue();
       });
-      await emptyPage.goto('/', { waitUntil: 'domcontentloaded' });
+      await test.step('load empty-member Home with delayed tasks', () => emptyPage.goto('/', { waitUntil: 'domcontentloaded' }), { timeout: 20_000 });
       const emptyPriorities = emptyPage.getByRole('region', { name: 'Your priorities' });
       await expect(emptyPriorities.locator('.skel-row').first()).toBeVisible();
       await expect(emptyPage.getByLabel('Your work summary').getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('0');
       await emptyPage.unroute(tasksRoute);
       await emptyPage.route(tasksRoute, async route =>
         route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) }));
-      await emptyPage.reload();
+      await test.step('reload empty-member Home with tasks error', () => emptyPage.reload(), { timeout: 20_000 });
       await expect(emptyPriorities.getByRole('alert').getByText('Could not reach the server.')).toBeVisible();
       await emptyPage.unroute(tasksRoute);
-      await emptyPriorities.getByRole('button', { name: 'Retry' }).click();
+      await test.step('retry empty-member tasks', () => emptyPriorities.getByRole('button', { name: 'Retry' }).click(), { timeout: 20_000 });
       await expect(emptyPage.getByLabel('Your work summary').getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('0');
       await expect(emptyPriorities.getByText('No open work assigned to you or shared with you.')).toBeVisible();
       await expect(emptyPage.getByRole('region', { name: 'Your projects' }).getByText('You have no active membership projects.')).toBeVisible();
       await expect(emptyPage.getByText(hiddenTitle, { exact: true })).toHaveCount(0);
-    } finally { await emptyContext.close(); }
+    } finally { await emptyContext.close().catch(() => undefined); }
     writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, unrelatedHiddenTask: hiddenTask, unrelatedSentinelUnchanged: true, archivedProject: archivedProject.id, archivedTask, archivedWorkExcluded: true, sharedTask, collaboratorAddRemoveReconciled: true, emptyUserLoadingErrorRetryAndZeroState: true, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
-  } finally { await context.close(); }
+  } finally { await context.close().catch(() => undefined); }
 });
