@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const DEAL = { projectId: "zz-deal-2995", role: "EDITOR", project: { name: "ZZ-TEST Northwind deal 2995", typeId: "wst_deal" } };
 const PLAIN = { projectId: "zz-plain-2995", role: "EDITOR", project: { name: "ZZ-TEST Plain project 2995", typeId: "wst_project" } };
-const TARGET = { id: "zz-target-2995", orgRole: "MEMBER", email: "nakul17+zz-2995-target@aplyd.com", deactivatedAt: null, emailVerifiedAt: new Date() };
-const NAMED = { id: "zz-named-2995", orgRole: "MEMBER", email: "nakul17+zz-2995-named@aplyd.com", deactivatedAt: null, emailVerifiedAt: new Date() };
+const TARGET = { id: "zz-target-2995", workspaceId: "ws", orgRole: "MEMBER", email: "nakul17+zz-2995-target@aplyd.com", deactivatedAt: null, emailVerifiedAt: new Date() };
+const NAMED = { id: "zz-named-2995", workspaceId: "ws", orgRole: "MEMBER", email: "nakul17+zz-2995-named@aplyd.com", deactivatedAt: null, emailVerifiedAt: new Date() };
 
 const fake = vi.hoisted(() => {
   const tx = {
-    user: { update: async () => ({}) },
+    $queryRaw: async () => [],
+    user: { findUnique: async ({ where }: { where: { id: string } }) => fake.users[where.id] ?? null, update: async () => ({}) },
+    projectMember: { findMany: async ({ where }: { where?: { project?: { typeId?: { not?: string } } } }) => where?.project?.typeId?.not ? fake.memberships.filter((m) => (m as { project: { typeId: string } }).project.typeId !== where.project!.typeId!.not) : fake.memberships },
     session: { updateMany: async () => ({ count: 0 }) },
   };
   return {
@@ -45,6 +47,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 async function run(mode: string, orgRole: "ADMIN" | "SUPER_ADMIN") {
   vi.stubEnv("CRM_VISIBLE", mode);
+  fake.users["zz-actor-2995"] = { id: "zz-actor-2995", workspaceId: "ws", orgRole, email: "actor@example.invalid", deactivatedAt: null, emailVerifiedAt: new Date() };
   return deactivate({ id: "zz-actor-2995", orgRole }, TARGET.id, NAMED.id);
 }
 

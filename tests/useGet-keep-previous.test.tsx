@@ -16,7 +16,7 @@ vi.mock("@/app/(app)/Shell", async () => {
   };
 });
 
-type Pending = { url: string; resolve: (r: Response) => void };
+type Pending = { url: string; resolve: (r: Response) => void; reject: (reason: Error) => void };
 
 let pending: Pending[] = [];
 let root: Root | null = null;
@@ -30,7 +30,7 @@ function installFetch() {
   pending = [];
   vi.stubGlobal("fetch", (input: RequestInfo | URL) => {
     const url = String(input);
-    return new Promise<Response>((resolve) => { pending.push({ url, resolve }); });
+    return new Promise<Response>((resolve, reject) => { pending.push({ url, resolve, reject }); });
   });
 }
 
@@ -88,7 +88,54 @@ function Switcher({ keep }: { keep: boolean }) {
   return createElement(Rows, { path, keep });
 }
 
+function RetryRows() {
+  const g = useGet<{ items: string[] }>("/api/search?q=beta");
+  return createElement("main", { "data-failed": String(g.failed), "data-loading": String(g.loading) },
+    g.error ? createElement("p", { role: "alert" }, g.error) : null,
+    createElement("button", { onClick: g.reload }, "Retry"),
+    createElement("ul", null, (g.data?.items ?? []).map((item) => createElement("li", { key: item }, item))));
+}
+
 describe("stale-while-loading is opt-in", () => {
+  it("keeps the current record visible after a dropped connection and clears the error on retry", async () => {
+    await render(createElement(RetryRows));
+    await settle(() => { take("/api/search?q=beta").resolve(json({ items: ["ZZ-TEST-current"] })); });
+    expect(document.body.textContent).toContain("ZZ-TEST-current");
+    await act(async () => { (document.querySelector("button") as HTMLButtonElement).click(); });
+    expect(document.querySelector("main")?.getAttribute("data-loading")).toBe("false");
+    await settle(() => { take("/api/search?q=beta").reject(new Error("synthetic offline")); });
+    expect(document.body.textContent).toContain("ZZ-TEST-current");
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe("Could not reach the server.");
+    expect(document.querySelector("main")?.getAttribute("data-failed")).toBe("true");
+    await act(async () => { (document.querySelector("button") as HTMLButtonElement).click(); });
+    await settle(() => { take("/api/search?q=beta").resolve(json({ items: ["ZZ-TEST-recovered"] })); });
+    expect(document.body.textContent).toContain("ZZ-TEST-recovered");
+    expect(document.body.textContent).not.toContain("ZZ-TEST-current");
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(document.querySelector("main")?.getAttribute("data-failed")).toBe("false");
+  });
+
+  it("shows a server failure and replaces it with a successful retry", async () => {
+    await render(createElement(RetryRows));
+    await settle(() => { take("/api/search?q=beta").resolve(json({ error: "temporary" }, 503)); });
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe("Could not reach the server.");
+    await act(async () => { (document.querySelector("button") as HTMLButtonElement).click(); });
+    await settle(() => { take("/api/search?q=beta").resolve(json({ items: ["ZZ-TEST-B-result"] })); });
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    expect(document.body.textContent).toContain("ZZ-TEST-B-result");
+  });
+
+  it("does not let a late response from A replace the current B result", async () => {
+    await render(createElement(Switcher, { keep: false }));
+    const old = take("/api/search?q=alpha");
+    await act(async () => { (globalThis as unknown as { go: (p: string) => void }).go("/api/search?q=beta"); });
+    await settle(() => { take("/api/search?q=beta").resolve(json({ items: ["ZZ-TEST-B-result"] })); });
+    expect(document.body.textContent).toContain("ZZ-TEST-B-result");
+    await settle(() => { old.resolve(json({ items: ["ZZ-TEST-A-result"] })); });
+    expect(document.body.textContent).toContain("ZZ-TEST-B-result");
+    expect(document.body.textContent).not.toContain("ZZ-TEST-A-result");
+  });
+
   it("a new path clears the previous page unless keepPrevious is set", async () => {
     await render(createElement(Switcher, { keep: false }));
     await settle(() => { take("/api/search?q=alpha").resolve(json({ items: ["ZZ-TEST-A-result"] })); });

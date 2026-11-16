@@ -28,9 +28,9 @@
 # max_parallel: the staging database is shared with production and allows 25 connections. Do not raise it above 5 until NJ approves
 # a connection pool (PgBouncer) or a bigger database.
 #
-# Traces are OFF unless the "trace" input asks for them. A trace cannot be redacted: it holds the sign-in request body (the password),
+# Traces are OFF and cannot be enabled through this workflow. A trace cannot be redacted: it holds the sign-in request body (the password),
 # the basic-auth header (STAGING_USER:STAGING_PASS in base64, which GitHub's log masking does not catch) and any password typed into a
-# field (APL-2476). With traces on, the uploaded reports carry those secrets to anyone who can download the run's artifacts.
+# field (APL-2476). Do not upload traces: reports containing them would expose those secrets to artifact readers.
 name: Staging e2e
 
 on:
@@ -41,12 +41,6 @@ on:
         required: false
         default: ""
         type: string
-      trace:
-        description: "Playwright traces. They contain passwords (see the comment at the top of this file)."
-        required: false
-        default: "off"
-        type: choice
-        options: ["off", "retain-on-failure"]
       target:
         description: "Host to test: staging.sheethappensofficer.com or pr1-pr8.staging.sheethappensofficer.com. Production is refused."
         required: false
@@ -355,7 +349,7 @@ jobs:
           PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.parallel }}
-          TRACE: ${{ inputs.trace }}
+          TRACE: "off"
         run: |
           read -ra files <<< "$FILES"
           # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.
@@ -441,7 +435,7 @@ jobs:
           QA_SLOT: serial
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
           FILES: ${{ needs.plan.outputs.serial }}
-          TRACE: ${{ inputs.trace }}
+          TRACE: "off"
         run: |
           read -ra files <<< "$FILES"
           # @static is a file-contains check. @manual cannot force a job failure on staging. Neither is a live pass.

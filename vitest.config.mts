@@ -23,6 +23,32 @@ export default defineConfig({
       "tests/e2e/stories/APL-2533.spec.ts", // Playwright contact semantic-locator qualification (SHO-2758)
       "tests/e2e/stories/SHO-3136.spec.ts", // Playwright branding acceptance
       "tests/e2e/stories/SHO-3137.spec.ts", // Playwright removal acceptance, run by staging-e2e
+      "tests/e2e/stories/SHO-REG-PROJECTS-01.spec.ts", // Playwright project create/edit/reload acceptance
+      "tests/e2e/stories/SHO-REG-PROJECTS-02.spec.ts", // Playwright project leader transfer acceptance
+      "tests/e2e/stories/SHO-REG-PROJECTS-03.spec.ts", // Playwright project sections acceptance
+      "tests/e2e/stories/SHO-REG-PROJECTS-04.spec.ts", // Playwright task Trash route and controls acceptance
+      "tests/e2e/stories/SHO-REG-PROJECTS-05.spec.ts", // Playwright project notes and activity acceptance
+      "tests/e2e/stories/SHO-REG-CRM-01.spec.ts", // Playwright organisation CRUD/Undo acceptance
+      "tests/e2e/stories/SHO-REG-CRM-02.spec.ts", // guarded Playwright contact association and Undo journey
+      "tests/e2e/stories/SHO-REG-TASKS-01.spec.ts", // guarded Playwright task-create form and Viewer boundary
+      "tests/e2e/stories/SHO-REG-TASKS-02.spec.ts", // guarded Playwright workspace assignee picker
+      "tests/e2e/stories/SHO-REG-TASKS-03.spec.ts", // guarded two-client task conflict
+      "tests/e2e/stories/SHO-REG-TASKS-06.spec.ts", // Playwright approver recovery audit
+      "tests/e2e/stories/SHO-REG-TASKS-04.spec.ts", // Playwright stale task-sheet recovery audit
+      "tests/e2e/stories/SHO-REG-TASKS-08.spec.ts", // Playwright mixed bulk and Undo audit
+      "tests/e2e/stories/SHO-REG-TASKS-09.spec.ts", // Playwright quick-add double submit audit
+      "tests/e2e/stories/SHO-REG-TASKS-12.spec.ts", // Playwright conversion cancellation audit
+      "tests/e2e/stories/SHO-AUDIT-UNDO-CONFLICT.spec.ts", // Playwright Undo override browser audit
+      "tests/e2e/stories/SHO-REG-PROJECTS-06.spec.ts", // Playwright saved-view ownership journey
+      "tests/e2e/stories/SHO-REG-AUTH-01.spec.ts", // Playwright production-mode cookie journey
+      "tests/e2e/stories/SHO-REG-AUTH-05.spec.ts", // Playwright verification scanner and replay journey
+      "tests/e2e/stories/SHO-REG-SEARCH-01.spec.ts", // Playwright search archived-contact acceptance
+      "tests/e2e/stories/SHO-REG-SEARCH-02.spec.ts", // Playwright search input-bound acceptance
+      "tests/e2e/stories/SHO-REG-SEARCH-04.spec.ts", // Playwright Search page and palette parity
+      "tests/e2e/stories/SHO-REG-HOME-01.spec.ts", // Playwright Home reconciliation acceptance
+      "tests/e2e/stories/SHO-AUDIT-MY-TASKS-PAGING.spec.ts", // guarded Playwright My Tasks paging and capacity audit
+      "tests/e2e/stories/SHO-REG-UI-05.spec.ts", // Playwright deep-link and history acceptance
+      "tests/e2e/stories/SHO-REG-UI-06.spec.ts", // Playwright phone density audit journey
       "tests/e2e/stories/APL-2467.spec.ts",
       "tests/e2e/stories/APL-2468.spec.ts",
       "tests/e2e/stories/APL-2469.spec.ts",
@@ -64,6 +90,8 @@ export default defineConfig({
       ...configDefaults.exclude,
       "tests/e2e/stories/APL-2470.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2502.spec.ts", // SHO-2913: Playwright story
+      "tests/e2e/stories/SHO-REG-TASKS-13.spec.ts", // guarded Playwright deletion and Undo journey
+      "tests/e2e/stories/SHO-REG-TASKS-07.spec.ts", // guarded Playwright section-move contract journey
       "tests/e2e/stories/APL-2504.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2505.spec.ts", // SHO-2913: Playwright story
       "tests/e2e/stories/APL-2521.spec.ts", // SHO-2913: Playwright story

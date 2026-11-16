@@ -1,29 +1,84 @@
 #!/usr/bin/env bash
+# App-only release: never applies migrations, provisions secrets or installs schedules.
 # Builds one release on the droplet and switches the app to it. If the health check fails
 # after the restart, the previous release is put back (SHO-US-9.3 AC2).
 # GitHub Actions runs it as the deploy user: bash /opt/sho/releases/<sha>/deploy/release.sh <sha>
-set -euo pipefail
+set -Eeuo pipefail
 
 SHA="${1:?release sha}"
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Expected full lowercase commit SHA"; exit 1; }
 ROOT=/opt/sho
 REL="$ROOT/releases/$SHA"
 CUR="$ROOT/current"
 PORT=3000
 KEEP=3
+PREV=""
+PREV_VERIFIER=""
+# Serialize the entire build/switch/recovery path; never race another app cut.
+exec 9>"$ROOT/.release.lock"
+flock -n 9 || { echo "Another app release holds the deployment lock"; exit 1; }
 
 log() { printf '[release %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 healthy() {
-  local _
+  local release_root="$1" expected="$2" verifier="$3" _ pid
   for _ in $(seq 1 45); do
-    if curl -fsS -m 5 "http://127.0.0.1:$PORT/api/health" >/dev/null 2>&1; then return 0; fi
+    pid="$(systemctl show sho -p MainPID --value)"
+    if node "$verifier" "$release_root" "$expected" "http://127.0.0.1:$PORT" "$pid"; then return 0; fi
     sleep 2
   done
   return 1
 }
 switch() { ln -sfn "$1" "$CUR.new" && mv -T "$CUR.new" "$CUR"; }
 
-[ -d "$REL" ] || { echo "No release folder at $REL"; exit 1; }
+recover() {
+  local status="$?"
+  trap - ERR
+  set +e
+  if [ "$(readlink -f "$CUR" 2>/dev/null)" = "$REL" ] && [ -n "$PREV" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
+    log "release failed; restoring previous release"
+    if switch "$PREV" && sudo -n systemctl restart sho && healthy "$PREV" "$PREV_SHA" "$PREV_VERIFIER"; then
+      log "rollback verified: $(basename "$PREV")"
+    else
+      log "RECOVERY_FAILED: operator attention required"
+    fi
+  else
+    log "release failed before switch, or current is no longer this candidate"
+  fi
+  exit "$status"
+}
+trap recover ERR
+
+[ -d "$ROOT/releases" ] && [ ! -L "$ROOT/releases" ] || { echo "Release parent is missing or symlinked"; exit 1; }
+[ -d "$REL" ] && [ ! -L "$REL" ] && [ "$(readlink -f "$REL")" = "$REL" ] || { echo "Release folder is missing or resolves outside its reserved path"; exit 1; }
+[ -f "$REL/deploy/verify-release.mjs" ] && [ ! -L "$REL/deploy/verify-release.mjs" ] &&
+  [ "$(readlink -f "$REL/deploy/verify-release.mjs")" = "$REL/deploy/verify-release.mjs" ] || { echo "Candidate release verifier is missing or outside its release"; exit 1; }
 [ -f /etc/sho/app.env ] || { echo "/etc/sho/app.env is missing"; exit 1; }
+PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
+[ "$PREV" != "$REL" ] || { echo "Refusing to rebuild the active release"; exit 1; }
+[ -n "$PREV" ] && [ -d "$PREV" ] || { echo "Verified previous release required"; exit 1; }
+[ "$(dirname "$PREV")" = "$ROOT/releases" ] || { echo "Previous release is outside the release directory"; exit 1; }
+PREV_NAME="$(basename "$PREV")"
+if [[ "$PREV_NAME" =~ ^[0-9a-f]{40}$ ]]; then
+  PREV_EXPECTED_SHA="$PREV_NAME"
+elif [[ "$PREV_NAME" =~ ^e1-[a-z0-9][a-z0-9-]*-([0-9a-f]{40})$ ]]; then
+  PREV_EXPECTED_SHA="${BASH_REMATCH[1]}" # Existing story-specific release layout.
+else
+  echo "Previous release directory has an unknown identity"; exit 1
+fi
+[ -f "$PREV/COMMIT" ] && [ ! -L "$PREV/COMMIT" ] || { echo "Previous release identity missing"; exit 1; }
+PREV_SHA="$(cat "$PREV/COMMIT")"
+[ "$PREV_SHA" = "$PREV_EXPECTED_SHA" ] || { echo "Previous release identity does not match its directory"; exit 1; }
+if [ -e "$PREV/deploy/verify-release.mjs" ] || [ -L "$PREV/deploy/verify-release.mjs" ]; then
+  [ -f "$PREV/deploy/verify-release.mjs" ] && [ ! -L "$PREV/deploy/verify-release.mjs" ] &&
+    [ "$(readlink -f "$PREV/deploy/verify-release.mjs")" = "$PREV/deploy/verify-release.mjs" ] || { echo "Previous release verifier is invalid"; exit 1; }
+  PREV_VERIFIER="$PREV/deploy/verify-release.mjs"
+else
+  [ -f "$REL/deploy/verify-previous-release.mjs" ] && [ ! -L "$REL/deploy/verify-previous-release.mjs" ] &&
+    [ "$(readlink -f "$REL/deploy/verify-previous-release.mjs")" = "$REL/deploy/verify-previous-release.mjs" ] || { echo "Legacy rollback verifier is missing or symlinked"; exit 1; }
+  PREV_VERIFIER="$REL/deploy/verify-previous-release.mjs"
+fi
+pid="$(systemctl show sho -p MainPID --value)"
+node "$PREV_VERIFIER" "$PREV" "$PREV_SHA" "http://127.0.0.1:$PORT" "$pid" || { echo "Previous release failed pre-cut verification"; exit 1; }
 cd "$REL"
 set -a
 # shellcheck disable=SC1091
@@ -37,47 +92,25 @@ export NODE_ENV=production NODE_OPTIONS=--max-old-space-size=3072
 
 log "installing packages"
 npm ci --include=dev --no-audit --no-fund --loglevel=error
-log "applying migrations"
-npx prisma migrate deploy
+log "checking migration prerequisites (read-only)"
+npx --no-install prisma migrate status
 log "building"
 npx next build
+printf '%s\n' "$SHA" > COMMIT
 printf 'RELEASE=%s\n' "$SHA" > release.env
-install -m 755 deploy/job.sh "$ROOT/bin/job.sh"
-# The droplet's /etc/cron.d/sho is root-owned and was written by cloud-init. A server built before a job existed
-# gets that job from the deploy user's own crontab, once and without root (SHO-US-7.4, 8.8, 9.2).
-install_cron() {
-  local name="$1" when="$2"
-  if grep -qs "job.sh $name" /etc/cron.d/sho; then return 0; fi
-  if crontab -l 2>/dev/null | grep -qs "job.sh $name # sho-managed"; then return 0; fi
-  { crontab -l 2>/dev/null || true; echo "$when /opt/sho/bin/job.sh $name # sho-managed"; } | crontab - \
-    && log "$name cron installed for $(id -un)" || log "WARNING: could not install the $name cron"
-}
-install_cron reminders '0 8 * * *'
+# Job installation and schedules belong to separately approved operations.
 
-# Same for the stalled-deals job (SHO-US-12.7): servers built before it get it from the deploy user's crontab.
-if ! grep -qs 'job.sh stalled-deals' /etc/cron.d/sho && ! crontab -l 2>/dev/null | grep -q 'job.sh stalled-deals'; then
-  { crontab -l 2>/dev/null || true; echo '50 7 * * * /opt/sho/bin/job.sh stalled-deals # crm-stalled'; } | crontab - \
-    && log "stalled-deals cron installed for $(id -un)" || log "WARNING: could not install the stalled-deals cron"
-fi
-
-PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 switch "$REL"
 log "restarting the app"
-sudo systemctl restart sho
-if healthy; then
-  log "healthy: $SHA is live"
-  # Keep the newest releases only; never the one just released.
-  find "$ROOT/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | tail -n +$((KEEP + 1)) | cut -d' ' -f2- | { grep -vx "$REL" || true; } | xargs -r rm -rf
-  exit 0
-fi
-
-log "health check failed; rolling back"
-sudo journalctl -u sho -n 80 --no-pager || true
-if [ -n "$PREV" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
-  switch "$PREV"
-  sudo systemctl restart sho
-  if healthy; then log "rolled back to $(basename "$PREV")"; else log "the previous release did not come up either"; fi
+sudo -n systemctl restart sho
+healthy "$REL" "$SHA" "$REL/deploy/verify-release.mjs" || { log "health check failed"; false; }
+log "healthy: $SHA is live"
+# Retention is best effort after a verified cut. A cleanup failure must not
+# roll back a healthy release; incomplete or unknown directories are preserved.
+if [ -f "$REL/deploy/prune-releases.mjs" ] && [ ! -L "$REL/deploy/prune-releases.mjs" ] &&
+  [ "$(readlink -f "$REL/deploy/prune-releases.mjs")" = "$REL/deploy/prune-releases.mjs" ] &&
+  node "$REL/deploy/prune-releases.mjs" "$ROOT/releases" "$REL" "$PREV" "$KEEP"; then
+  log "release retention checked"
 else
-  log "no previous release to roll back to"
+  log "release retention deferred for operator review"
 fi
-exit 1

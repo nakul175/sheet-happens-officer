@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { api, todayIST, useGet } from "@/components/api";
 import { ATHENA_ENTITIES, OPPORTUNITY_TYPES } from "@/lib/deal-classification";
 import { Field } from "@/components/ui";
@@ -20,6 +20,8 @@ function Form() {
   const initialOrgId = sp.get("org") ?? "";
   const [v, setV] = useState({ name: "", organisationId: initialOrgId, buyerName: "", pipelineId: "", leaderId: me.id, whyPursue: "", step: "", due: todayIST(), submissionDeadline: "", value: "", currency: "INR", opportunityType: "", netFeeRevenueUsd: "", athenaEntity: "", probability: "", partner: "", athenaRole: "", budgetUsd: "", pwinAdjustedNfrUsd: "" });
   const [err, setErr] = useState<string | null>(null);
+  const [buyerError, setBuyerError] = useState(false);
+  const buyerRevision = useRef(0);
   const [dup, setDup] = useState(false);
   const [busy, setBusy] = useState(false);
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
@@ -28,26 +30,32 @@ function Form() {
   const selectedBuyer = organisations.find((o) => o.id === v.organisationId);
   const buyerName = (v.buyerName || selectedBuyer?.name || "").trim();
   function setBuyer(e: React.ChangeEvent<HTMLInputElement>) {
+    buyerRevision.current += 1;
     const name = e.target.value;
     const match = organisations.find((o) => o.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0);
     setV({ ...v, buyerName: name, organisationId: match?.id ?? "" });
     setDup(false);
+    if (buyerError) setErr(null);
+    setBuyerError(false);
   }
   async function submit(e: React.FormEvent, force = false, createBuyer = false) {
     if (createBuyer && !(e.currentTarget as HTMLButtonElement).form?.reportValidity()) return;
-    e.preventDefault(); setBusy(true); setErr(null);
+    e.preventDefault(); setBusy(true); setErr(null); setBuyerError(false);
+    const submittedBuyerRevision = buyerRevision.current;
     let organisationId = v.organisationId;
     if (!organisationId) {
-      if (!buyerName) { setBusy(false); setErr("Type or choose a buyer."); return; }
+      if (!buyerName) { setBusy(false); setBuyerError(true); setErr("Type or choose a buyer."); return; }
       // Typing may beat the initial Account fetch (and that list is capped).
       // Resolve the current name before claiming it does not exist.
       const found = await api("GET", `/api/orgs?q=${encodeURIComponent(buyerName)}`);
+      if (buyerRevision.current !== submittedBuyerRevision) { setBusy(false); return; }
       if (!found.ok) { setBusy(false); setErr(found.error ?? "Could not check existing buyer Accounts. Try again."); return; }
       organisationId = found.data.organisations.find((o: { id: string; name: string }) => o.name.localeCompare(buyerName, undefined, { sensitivity: "accent" }) === 0)?.id ?? "";
     }
     if (!organisationId) {
       if (!createBuyer) {
         setBusy(false); setDup(true);
+        setBuyerError(true);
         setErr(`No existing organisation exactly matches "${buyerName}". Create it as a new Account and use it as the buyer?`);
         return;
       }
@@ -82,7 +90,7 @@ function Form() {
       <fieldset><legend>Opportunity</legend>
       <Field label="Deal name">{(id) => <input id={id} className="in" required maxLength={200} value={v.name} onChange={set("name")} />}</Field>
       <Field label="Client / Buyer" hint="Start typing to reuse an Account. If there is no exact match, you can create a linked Account here.">
-        {(id) => <><input id={id} className="in" required maxLength={200} list={`${id}-buyers`} autoComplete="off" value={v.buyerName || selectedBuyer?.name || ""} onChange={setBuyer} /><datalist id={`${id}-buyers`}>{organisations.map((o) => <option key={o.id} value={o.name} />)}</datalist></>}
+        {(id) => <><input id={id} className="in" required maxLength={200} list={`${id}-buyers`} autoComplete="off" value={v.buyerName || selectedBuyer?.name || ""} onChange={setBuyer} aria-invalid={buyerError} aria-describedby={buyerError ? "new-deal-buyer-error" : undefined} /><datalist id={`${id}-buyers`}>{organisations.map((o) => <option key={o.id} value={o.name} />)}</datalist></>}
       </Field>
       <Field label="Pipeline">{(id) => <select id={id} className="in" value={pipeline?.id ?? ""} onChange={set("pipelineId")}>{pipes.data?.pipelines.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}</Field>
       {pipeline?.key === "DEAL_BID" && <Field label="Submission deadline">{(id) => <input id={id} className="in" type="date" required value={v.submissionDeadline} onChange={set("submissionDeadline")} />}</Field>}
@@ -104,7 +112,7 @@ function Form() {
       <Field label="Next step due">{(id) => <input id={id} className="in" type="date" required value={v.due} onChange={set("due")} />}</Field>
 
       </fieldset>
-      {err && <div className="err" role="alert">{err}</div>}
+      {err && <div id={buyerError ? "new-deal-buyer-error" : undefined} className="err" role="alert">{err}</div>}
       <div className="actions"><Link className="btn ghost" href="/deals">Cancel</Link>
         <button className="btn" disabled={busy}>Create deal</button>
         {dup && !v.organisationId && <button type="button" className="btn ghost" disabled={busy} onClick={(e) => submit(e, false, true)}>Create buyer and deal</button>}

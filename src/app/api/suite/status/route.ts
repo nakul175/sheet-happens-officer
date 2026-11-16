@@ -1,5 +1,4 @@
-import { db } from "@/lib/db";
-import { sameSecret, suiteConfig, oauthJson, readSuiteBody } from "@/lib/suite-oauth";
+import { activeSuiteIdentity, sameSecret, suiteConfig, oauthJson, readSuiteBody, SuiteBodyTooLargeError } from "@/lib/suite-oauth";
 
 export async function POST(req: Request) {
   try {
@@ -9,10 +8,10 @@ export async function POST(req: Request) {
     const cfg = suiteConfig("accounts");
     if (p.client_id !== cfg.id || typeof p.client_secret !== "string" || !sameSecret(p.client_secret, cfg.secret)) return oauthJson({ error: "invalid_client" }, 401);
     if (typeof p.user_id !== "string" || p.user_id.length > 200 || typeof p.source_session_id !== "string" || p.source_session_id.length > 200) return oauthJson({ error: "invalid_request" }, 400);
-    const user = await db.user.findUnique({ where: { id: p.user_id }, select: { id: true, deactivatedAt: true, emailVerifiedAt: true, tempPasswordAt: true } });
-    const session = await db.session.findUnique({ where: { id: p.source_session_id }, select: { userId: true, revokedAt: true, expiresAt: true } });
-    const active = !!user && !user.deactivatedAt && !!user.emailVerifiedAt && !user.tempPasswordAt &&
-      !!session && session.userId === user.id && !session.revokedAt && session.expiresAt > new Date();
-    return oauthJson({ active, ...(active ? { sub: user.id } : {}) });
-  } catch { return oauthJson({ error: "server_error" }, 503); }
+    const identity = await activeSuiteIdentity(p.user_id, p.source_session_id);
+    return oauthJson({ active: !!identity, ...(identity ? { sub: identity.sub } : {}) });
+  } catch (error) {
+    if (error instanceof SuiteBodyTooLargeError) return oauthJson({ error: "invalid_request" }, 413);
+    return oauthJson({ error: "server_error" }, 503);
+  }
 }

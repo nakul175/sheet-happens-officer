@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { MAX_EMAILS_PER_HOUR, audit, clientAgent, clientIp, emailLimitReached, issueTokenAndSend } from "@/lib/auth";
+import { AuthMailLimitError, MAX_EMAILS_PER_HOUR, audit, clientAgent, clientIp, emailLimitReached, issueTokenAndSend } from "@/lib/auth";
 import { RESEND_NOTICE } from "@/lib/auth-messages";
 import { MailError, sendMail, verifyMail } from "@/lib/email";
 import { handle, parseBody } from "@/lib/http";
@@ -20,8 +20,15 @@ export const POST = handle(async (req: Request) => {
   const user = await db.user.findUnique({ where: { email } });
   if (user && !user.emailVerifiedAt && !user.deactivatedAt) {
     const ua = clientAgent(req);
-    const record = (result: "SENT" | "LIMITED" | "FAILED") =>
-      audit(EVENT, { actorId: user.id, ip: clientIp(req), data: { result, ...(ua ? { userAgent: ua } : {}) } });
+    const record = async (result: "SENT" | "LIMITED" | "FAILED") => {
+      const data = { result, ...(ua ? { userAgent: ua } : {}) };
+      if (result !== "LIMITED") return audit(EVENT, { actorId: user.id, ip: clientIp(req), data });
+      await db.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR UPDATE`;
+        const count = await tx.auditLog.count({ where: { actorId: user.id, event: EVENT, createdAt: { gt: new Date(Date.now() - HOUR) }, data: { path: ["result"], equals: "LIMITED" } } });
+        if (!count) await tx.auditLog.create({ data: { event: EVENT, actorId: user.id, ip: clientIp(req), channel: "SCREEN", data } });
+      }, { isolationLevel: "ReadCommitted" });
+    };
     const lastHour = (result: string) =>
       db.auditLog.count({ where: { actorId: user.id, event: EVENT, createdAt: { gt: new Date(Date.now() - HOUR) }, data: { path: ["result"], equals: result } } });
     if ((await emailLimitReached(user.id, "VERIFY")) || (await lastHour("FAILED")) >= MAX_EMAILS_PER_HOUR) {
@@ -31,8 +38,8 @@ export const POST = handle(async (req: Request) => {
         await issueTokenAndSend(user.id, "VERIFY", (token) => sendMail(verifyMail(email, token)));
         await record("SENT");
       } catch (err) {
-        if (!(err instanceof MailError)) throw err;
-        await record("FAILED"); // logged by sendMail; the person gets the same neutral answer
+        if (err instanceof AuthMailLimitError) await record("LIMITED");
+        else { if (!(err instanceof MailError)) throw err; await record("FAILED"); } // logged by sendMail; the person gets the same neutral answer
       }
     }
   }

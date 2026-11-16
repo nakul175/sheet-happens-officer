@@ -1,18 +1,19 @@
 // APL-2655 Playwright spec. Pam has not assigned TC ids. Titles keep the literal marker until then.
 // Signs in with the throwaway session cookie and clicks Undo on Activity. Local or CI server and database only.
-// Gated on SHO_QA_PASS like the other story specs (staging-e2e.yml): without it the suite is skipped.
+// Uses the local helper's synthetic accounts; no shared QA password is needed.
 // assertStoryTargetAllowed() gets BASE explicitly, so it never falls back to reading the process image.
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { assertStoryTargetAllowed } from "../base-url";
+import { assertLocalFixture } from "../local-fixture-guard";
 import { BASE, type Account } from "../../helpers";
 import { cleanupZz, editorDeletedT1, snapshot } from "../../apl-2655-zz";
 
 function chromePath() {
   const fromEnv = process.env.PW_CHROMIUM;
   if (fromEnv && existsSync(fromEnv)) return fromEnv;
-  for (const p of ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
+  for (const p of [chromium.executablePath(), "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]) {
     if (existsSync(p)) return p;
   }
   throw new Error("No Chrome/Chromium binary. Set PW_CHROMIUM.");
@@ -21,8 +22,7 @@ function chromePath() {
 assertStoryTargetAllowed(process.env, BASE);
 
 let browser: Browser;
-
-const LOCAL = /^(localhost|127\.0\.0\.1)$/;
+let localFixtureReady = false;
 
 async function editorSession(ed: Account) {
   const ctx = await browser.newContext({ baseURL: BASE });
@@ -44,21 +44,16 @@ async function expectNoDeleteUndo(page: Page, title: string) {
   expect(await page.getByRole("button", { name: "Undo", exact: true }).count()).toBe(0);
 }
 
-describe.skipIf(!process.env.SHO_QA_PASS)("qa:TC missing APL-2655 editor Undo of a delete", () => {
+describe("qa:TC missing APL-2655 editor Undo of a delete", () => {
   beforeAll(async () => {
-    if (!LOCAL.test(new URL(BASE).hostname)) {
-      throw new Error("Refusing to run: TASKBOARD_URL is not a local server.");
-    }
-    // The spec reads rows with Prisma, so the database must be local too. The URL itself is never printed.
-    if (!LOCAL.test(new URL(process.env.DATABASE_URL ?? "postgresql://unset").hostname)) {
-      throw new Error("Refusing to run: DATABASE_URL is not a local database.");
-    }
+    assertLocalFixture(process.env.DATABASE_URL, BASE);
+    localFixtureReady = true;
     browser = await chromium.launch({ executablePath: chromePath(), args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   });
 
   afterAll(async () => {
     await browser?.close();
-    await cleanupZz();
+    if (localFixtureReady) await cleanupZz();
   });
 
   it("qa:TC missing AC1 already undone wins: Activity Undo returns 409 This was already undone and nothing changes", async () => {

@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
 
-const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+const wrapper = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+const shared = readFileSync(new URL("../.github/workflows/qualification.yml", import.meta.url), "utf8");
+// Expand the referenced job for the existing behavioral assertions; the wrapper is checked below.
+const workflow = wrapper.slice(0, wrapper.indexOf("jobs:\n")) + shared.slice(shared.indexOf("jobs:\n"));
+it("PR wrapper uses the exact shared qualification workflow", () => expect(wrapper).toContain("uses: ./.github/workflows/qualification.yml"));
 
 function between(start: string, end: string) {
   const from = workflow.indexOf(start);
@@ -27,8 +31,8 @@ function startScript() {
 function runStart(curlOk: boolean) {
   const bin = mkdtempSync(path.join(tmpdir(), "ci-health-"));
   try {
-    writeFileSync(path.join(bin, "npx"), "#!/bin/sh\nexit 0\n");
-    chmodSync(path.join(bin, "npx"), 0o755);
+    writeFileSync(path.join(bin, "node"), "#!/bin/sh\nexit 0\n");
+    chmodSync(path.join(bin, "node"), 0o755);
     if (curlOk) {
       writeFileSync(path.join(bin, "curl"), "#!/bin/sh\nexit 0\n");
       chmodSync(path.join(bin, "curl"), 0o755);

@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { randomUUID } from "node:crypto";
 import { ZodError, type ZodType } from "zod";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
 import { isVersionCode, versionErrorBody } from "@/lib/version-error";
@@ -82,9 +83,11 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
       }
       if (code === "P2025") return Response.json({ error: "Resource not found" }, { status: 404 });
       if (code === "P2003") return Response.json({ error: "Referenced record does not exist" }, { status: 400 });
-      // Name and database code only: an error's message or fields can carry chat or task text.
-      console.error("unexpected error", (err as Error)?.name ?? typeof err, code ?? "");
-      return Response.json({ error: "Internal server error" }, { status: 500 });
+      // Error names and codes are also caller-controlled fields; only fixed Prisma codes are safe diagnostics.
+      const safeCode = typeof code === "string" && /^P\d{4}$/.test(code) ? code : "";
+      const errorId = randomUUID();
+      console.error("unexpected error", safeCode || "UNKNOWN", errorId);
+      return Response.json({ error: "Internal server error" }, { status: 500, headers: { "x-error-id": errorId } });
     }
   };
 }
