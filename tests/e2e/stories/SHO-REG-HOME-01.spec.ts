@@ -199,6 +199,37 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     const archivedAfter = await actor.c.get(`/api/projects/${archivedProject.id}`);
     expect(archivedAfter.status).toBe(200);
     expect(archivedAfter.json.project.archived).toBe(true);
+    const sharedTask = await task(worker, project.id, {
+      title: `ZZ-TEST shared ${fixture}`, assigneeId: worker.id, dueDate: day(4),
+    });
+    ownedTasks.push(sharedTask);
+    const shared = await worker.c.post(`/api/tasks/${sharedTask}/collaborators`, { userId: actor.id });
+    expect(shared.status, JSON.stringify(shared.json)).toBe(201);
+    const withShared = await actor.c.get('/api/dashboard?panel=tasks');
+    expect(withShared.status).toBe(200);
+    expect(withShared.json).toMatchObject({ open: 4, overdue: 1, awaiting: 1 });
+    expect(withShared.json.priorities.map((row: { id: string }) => row.id)).toContain(sharedTask);
+    const sharedMyTasks = await actor.c.get('/api/my-tasks');
+    expect(sharedMyTasks.status).toBe(200);
+    expect([...sharedMyTasks.json.waitingOnMe, ...sharedMyTasks.json.overdue,
+      ...sharedMyTasks.json.next7, ...sharedMyTasks.json.later]
+      .map((row: { id: string }) => row.id)).toContain(sharedTask);
+    await page.reload();
+    await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('4');
+    await expect(priorities.locator(`a[href="/tasks/${sharedTask}"]`)).toBeVisible();
+    const unshared = await worker.c.del(`/api/tasks/${sharedTask}/collaborators/${actor.id}`);
+    expect(unshared.status, JSON.stringify(unshared.json)).toBe(204);
+    const afterUnshare = await actor.c.get('/api/dashboard?panel=tasks');
+    expect(afterUnshare.status).toBe(200);
+    expect(afterUnshare.json).toMatchObject({ open: 3, overdue: 1, awaiting: 1 });
+    const afterUnshareMyTasks = await actor.c.get('/api/my-tasks');
+    expect(afterUnshareMyTasks.status).toBe(200);
+    expect([...afterUnshareMyTasks.json.waitingOnMe, ...afterUnshareMyTasks.json.overdue,
+      ...afterUnshareMyTasks.json.next7, ...afterUnshareMyTasks.json.later]
+      .map((row: { id: string }) => row.id)).not.toContain(sharedTask);
+    await page.reload();
+    await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('3');
+    await expect(priorities.locator(`a[href="/tasks/${sharedTask}"]`)).toHaveCount(0);
     const emptyUser = await data.person('Empty Member');
     const emptyContext = await browser.newContext({ baseURL: BASE });
     try {
@@ -226,6 +257,6 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       await expect(emptyPage.getByRole('region', { name: 'Your projects' }).getByText('You have no active membership projects.')).toBeVisible();
       await expect(emptyPage.getByText(hiddenTitle, { exact: true })).toHaveCount(0);
     } finally { await emptyContext.close(); }
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, unrelatedHiddenTask: hiddenTask, unrelatedSentinelUnchanged: true, archivedProject: archivedProject.id, archivedTask, archivedWorkExcluded: true, emptyUserLoadingErrorRetryAndZeroState: true, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, unrelatedHiddenTask: hiddenTask, unrelatedSentinelUnchanged: true, archivedProject: archivedProject.id, archivedTask, archivedWorkExcluded: true, sharedTask, collaboratorAddRemoveReconciled: true, emptyUserLoadingErrorRetryAndZeroState: true, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
   } finally { await context.close(); }
 });
