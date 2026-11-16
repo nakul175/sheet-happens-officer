@@ -108,6 +108,23 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     await expect(page).toHaveURL(/\/my-tasks\?filter=overdue$/);
     await expect(myTasksView.getByText(`ZZ-TEST overdue ${fixture}`, { exact: true })).toBeVisible();
     await expect(myTasksView.getByText(`ZZ-TEST today ${fixture}`, { exact: true })).toHaveCount(0);
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, open: 3, overdue: 1, awaiting: 0, projects: 1, topLevel: 4, completed: 1, myTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
+    const closeToday = await actor.c.post(`/api/tasks/${today}/complete`, await withVersion(actor, today));
+    expect(closeToday.status, JSON.stringify(closeToday.json)).toBe(200);
+    const refreshedCards = await actor.c.get('/api/dashboard?panel=tasks');
+    expect(refreshedCards.status).toBe(200);
+    expect(refreshedCards.json).toMatchObject({ open: 2, overdue: 1, awaiting: 0 });
+    expect(refreshedCards.json.priorities.map((row: { id: string }) => row.id)).toEqual([overdue, laterTask]);
+    const refreshedProjects = await actor.c.get('/api/dashboard?panel=projects');
+    expect(refreshedProjects.status).toBe(200);
+    expect(refreshedProjects.json).toMatchObject({ items: [{ id: project.id, total: 4, completed: 2, percent: 50 }] });
+    await page.goto('/');
+    await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('2');
+    await expect(priorities.locator(`a[href="/tasks/${today}"]`)).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Your projects' }).getByText('2 of 4 tasks done')).toBeVisible();
+    await summary.getByRole('link', { name: /Open tasks/ }).click();
+    await expect(myTasksView.getByText(`ZZ-TEST today ${fixture}`, { exact: true })).toHaveCount(0);
+    for (const label of ['overdue', 'later'])
+      await expect(myTasksView.getByText(`ZZ-TEST ${label} ${fixture}`, { exact: true })).toBeVisible();
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, projects: 1, topLevel: 4, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
   } finally { await context.close(); }
 });
