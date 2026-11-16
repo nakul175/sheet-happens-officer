@@ -26,7 +26,7 @@ beforeAll(async()=>{
  if(!first||!paused||!active)throw new Error('The isolated fixture requires distinct first/paused/active stages.');
  firstName=first.name;pausedName=paused.name;
  const o=await sa.c.post('/api/orgs',{name:tag+' Buyer'});expect(o.status).toBe(201);org=o.json.organisation.id;
- const fixtures=[['RFP_RFA',first],['OTC',paused],['EOI',first],['RFP_RFA',active],['OTC',active],['EOI',paused]] as const;
+ const fixtures=[['RFP_RFA',first],['OTC',paused],['RFP_RFA',first],['RFP_RFA',active],['OTC',active],['EOI',paused]] as const;
  for(const [i,[type,stage]] of fixtures.entries()){
   const name=tag+' '+String.fromCharCode(65+i);names.push(name);
   const r=await sa.c.post('/api/deals',{name,organisationId:org,pipelineId:p.id,leaderId:sa.id,whyPursue:'ZZ-TEST filter acceptance',opportunityType:type,nextStep:{title:'ZZ-TEST follow up',dueDate:istDate(3)}});
@@ -66,7 +66,7 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
  try{
   await page.goto('/deals');await page.getByRole('tab',{name:pipeName,exact:true}).click();await waitIds(ids);
   const sortControl=page.locator('.deal-filter-control select');
-  const firstStage=page.locator('.dcol').filter({has:page.locator('header b').getByText(firstName,{exact:true})});
+  const firstStage=page.locator('section[aria-label="RFP/RFA + OTC sales"] .dcol').filter({has:page.locator('header b').getByText(firstName,{exact:true})});
   const visibleOwnedCards=async()=>firstStage.locator('a[href^="/projects/"]').evaluateAll((links,owned)=>
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
   await sortControl.selectOption('name-desc');
@@ -80,10 +80,10 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   const stages=page.getByRole('group',{name:'Stages',exact:true});
   await stages.getByRole('checkbox',{name:firstName,exact:true}).check();await stages.getByRole('checkbox',{name:pausedName,exact:true}).check();
   await control('Stages').locator('summary').click();
-  await waitIds([ids[0],ids[1]]);
+  await waitIds([ids[0],ids[1],ids[2]]);
   expect(await control('Opportunity types').locator('summary').innerText()).toContain('2 selected');
   await page.screenshot({path:`test-results/deal-filters/board-${width}.png`,fullPage:true});
-  await page.getByRole('button',{name:'List',exact:true}).click();await waitIds([ids[0],ids[1]]);
+  await page.getByRole('button',{name:'List',exact:true}).click();await waitIds([ids[0],ids[1],ids[2]]);
   await page.screenshot({path:`test-results/deal-filters/list-${width}.png`,fullPage:true});
   await page.getByRole('button',{name:'Clear filters',exact:true}).click();await waitIds(ids);
   const results=page.locator('.deal-results');
