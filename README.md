@@ -1,6 +1,6 @@
-# Sheet Happens Officer
+# Tasks by aplyd
 
-Internal project/task and CRM application for APLYD. Tracking is **BTF**, project SHO. Concierge is outside this application. The four `/api/suite/*` routes and Holy Sheet links are active integrations and must be preserved.
+Internal project/task and CRM application for APLYD. The product name is **Tasks by aplyd**; `SHO`, `/opt/sho` and `SHO-` remain historical technical identifiers. Tracking is **BTF**, project SHO. Concierge is outside this application. The four `/api/suite/*` routes and Holy Sheet links are active integrations and must be preserved.
 
 Stack: Next.js App Router, TypeScript, React, Prisma 6, PostgreSQL 16. Use **Node 22**. Production runs Ubuntu 24.04 / Linux x86-64 with a native shutdown helper and the `server.js` entry point; macOS builds do not qualify that native behavior.
 
