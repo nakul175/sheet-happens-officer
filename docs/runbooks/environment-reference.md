@@ -16,6 +16,7 @@ Never copy live values into chat, test fixtures, evidence or repository files. R
 | FF_HOLY_SHEET / HOLY_SHEET_ORIGIN | Optional document integration | Flag exactly 1, origin must be an approved Holy Sheet origin; a link is not permission |
 | FF_TASK_COMMENTS / FEATURE_COMMENTS | Optional aliases for comments | Off; accepts true/1/on/yes; first alias takes precedence |
 | CRM_VISIBLE | Optional CRM audience | all by default; admins/off supported |
+| SHO_MULTI_WORKSPACE_ENABLED | Later selected-workspace feature path | Keep unset/off for the owner-approved one-organisation deployment; enabling requires a separate product contract and isolation acceptance |
 | SIGNIN_RETURN_TO | Optional return-path flag | Off; accepts 1/on |
 | SEARCH_STAGE_A_ENABLED | Held search capability | Leave unset/off; true requires separately approved DB extension and qualification |
 | NODE_ENV / NEXT_RUNTIME | Framework runtime | production for deployed server; do not spoof NEXT_RUNTIME |
