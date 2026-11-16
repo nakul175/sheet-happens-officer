@@ -125,6 +125,24 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     await expect(myTasksView.getByText(`ZZ-TEST today ${fixture}`, { exact: true })).toHaveCount(0);
     for (const label of ['overdue', 'later'])
       await expect(myTasksView.getByText(`ZZ-TEST ${label} ${fixture}`, { exact: true })).toBeVisible();
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, projects: 1, topLevel: 4, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
+    const worker = await data.person('Home Worker');
+    const joined = await actor.c.post(`/api/projects/${project.id}/members`, { userId: worker.id, role: 'EDITOR' });
+    expect(joined.status, JSON.stringify(joined.json)).toBe(201);
+    const awaitingTask = await task(worker, project.id, {
+      title: `ZZ-TEST awaiting ${fixture}`, assigneeId: worker.id, approverId: actor.id, dueDate: day(2),
+    });
+    ownedTasks.push(awaitingTask);
+    const sent = await worker.c.post(`/api/tasks/${awaitingTask}/send-for-approval`);
+    expect(sent.status, JSON.stringify(sent.json)).toBe(200);
+    const approvalCards = await actor.c.get('/api/dashboard?panel=tasks');
+    expect(approvalCards.status).toBe(200);
+    expect(approvalCards.json).toMatchObject({ open: 3, overdue: 1, awaiting: 1 });
+    const approvalMyTasks = await actor.c.get('/api/my-tasks');
+    expect(approvalMyTasks.status).toBe(200);
+    expect(approvalMyTasks.json.waitingOnMe.map((row: { id: string }) => row.id)).toContain(awaitingTask);
+    await page.goto('/');
+    await expect(summary.getByRole('link', { name: /Awaiting your approval/ }).locator('strong')).toHaveText('1');
+    await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('3');
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
   } finally { await context.close(); }
 });
