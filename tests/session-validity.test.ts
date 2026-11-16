@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-const m = vi.hoisted(() => ({ session: vi.fn(), workspace: vi.fn(), link: vi.fn(), active: vi.fn(), touch: vi.fn() }));
-vi.mock('@/lib/db', () => ({ db: { session: { findUnique: m.session, update: m.touch }, workspace: { findMany: m.workspace }, centralSessionLink: { findUnique: m.link } } }));
+const m = vi.hoisted(() => ({ session: vi.fn(), workspace: vi.fn(), selection: vi.fn(), link: vi.fn(), active: vi.fn(), touch: vi.fn() }));
+vi.mock('@/lib/db', () => ({ db: { session: { findUnique: m.session, update: m.touch }, workspace: { findMany: m.workspace }, sessionWorkspace: { findUnique: m.selection }, centralSessionLink: { findUnique: m.link } } }));
 vi.mock('@/lib/central-status', () => ({ centralSessionActive: m.active }));
 import { sessionUser } from '@/lib/auth';
 
@@ -9,7 +9,7 @@ const user = () => ({ id: 'synthetic-user', workspaceId: 'one', emailVerifiedAt:
 const session = () => ({ id: 'synthetic-session', expiresAt: new Date(now.getTime() + 1), revokedAt: null, lastSeenAt: now, user: user() });
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(now);
-  m.session.mockResolvedValue(session()); m.workspace.mockResolvedValue([{ id: 'one' }]); m.link.mockResolvedValue(null); m.active.mockResolvedValue(true);
+  m.session.mockResolvedValue(session()); m.workspace.mockResolvedValue([{ id: 'one' }]); m.selection.mockResolvedValue(null); m.link.mockResolvedValue(null); m.active.mockResolvedValue(true);
 });
 afterEach(() => vi.useRealTimers());
 

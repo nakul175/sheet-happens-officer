@@ -94,7 +94,7 @@ export async function changeDocument(actor: Actor, origin: DocumentOrigin, input
         const currentActor = await tx.user.findUnique({ where: { id: actor.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
         if (!currentActor || currentActor.deactivatedAt || !currentActor.emailVerifiedAt || (!multiWorkspaceEnabled() && currentActor.workspaceId !== project?.workspaceId))
             throw notFound();
-        const scopedActor = multiWorkspaceEnabled() ? await scopedUser(actor, tx) : { ...actor, orgRole: currentActor.orgRole };
+        const scopedActor = multiWorkspaceEnabled() ? await scopedUser(actor, tx) : { ...actor, ...currentActor };
         if (scopedActor.workspaceId !== project?.workspaceId) throw notFound();
         const role = scopedActor.orgRole !== 'MEMBER' ? 'LEADER' : project?.members.find(m => m.userId === actor.id)?.role;
         if (!project || project.deletedAt || !role)
