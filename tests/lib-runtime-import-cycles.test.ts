@@ -34,17 +34,23 @@ function localTarget(from: string, specifier: string): string | null {
     .find((candidate) => known.has(candidate)) ?? null;
 }
 
-function dynamicSpecifiers(source: ts.SourceFile): string[] {
-  const found: string[] = [];
+function runtimeCalls(source: ts.SourceFile): { literals: string[]; computed: string[] } {
+  const literals: string[] = [];
+  const computed: string[] = [];
   function visit(node: ts.Node) {
-    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
-      && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
-      found.push(node.arguments[0].text);
+    if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+      || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
+      if (node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0])) {
+        literals.push(node.arguments[0].text);
+      } else {
+        const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+        computed.push(`${source.fileName}:${line}`);
+      }
     }
     ts.forEachChild(node, visit);
   }
   visit(source);
-  return found;
+  return { literals, computed };
 }
 
 function findCycle(graph: Map<string, string[]>): string[] | null {
@@ -65,16 +71,18 @@ function findCycle(graph: Map<string, string[]>): string[] | null {
   return [...graph.keys()].map(visit).find(Boolean) ?? null;
 }
 
-it("recognizes nested literal dynamic imports while excluding computed imports", () => {
-  const source = ts.createSourceFile("sample.ts", 'async function load() { await import("./db.ts"); await import(variable); }', ts.ScriptTarget.Latest, true);
-  expect(dynamicSpecifiers(source)).toEqual(["./db.ts"]);
+it("recognizes literal imports and rejects computed import or require calls", () => {
+  const source = ts.createSourceFile("sample.ts", 'async function load() { await import("./db.ts"); await import(variable); require("koffi"); require(name); }', ts.ScriptTarget.Latest, true);
+  expect(runtimeCalls(source).literals).toEqual(["./db.ts", "koffi"]);
+  expect(runtimeCalls(source).computed).toEqual(["sample.ts:1", "sample.ts:1"]);
   expect(localTarget(join(lib, "shutdown.ts"), "./db.ts")).toBe(join(lib, "db.ts"));
   const synthetic = new Map([["shutdown.ts", ["db.ts"]], ["db.ts", ["shutdown.ts"]]]);
   expect(findCycle(synthetic)).toEqual(["shutdown.ts", "db.ts", "shutdown.ts"]);
 });
 
-it("src/lib has no static or literal dynamic runtime import cycles", () => {
+it("src/lib has no unresolvable runtime import calls or import cycles", () => {
   const graph = new Map<string, string[]>();
+  const computed: string[] = [];
   for (const file of files) {
     const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
     const staticTargets = source.statements.flatMap((node) => {
@@ -82,13 +90,16 @@ it("src/lib has no static or literal dynamic runtime import cycles", () => {
       const target = specifier && localTarget(file, specifier);
       return target ? [target] : [];
     });
-    const dynamicTargets = dynamicSpecifiers(source).flatMap((specifier) => {
+    const calls = runtimeCalls(source);
+    computed.push(...calls.computed);
+    const dynamicTargets = calls.literals.flatMap((specifier) => {
       const target = localTarget(file, specifier);
       return target ? [target] : [];
     });
     graph.set(file, [...staticTargets, ...dynamicTargets]);
   }
   expect(graph.size).toBeGreaterThan(50); // fail if the scan path silently changes
+  expect(computed).toEqual([]); // a computed path could hide a local import cycle
   expect([...graph.values()].reduce((count, edges) => count + edges.length, 0)).toBeGreaterThan(100);
   const cycle = findCycle(graph);
   expect(cycle?.map((file) => file.slice(lib.length + 1))).toBeUndefined();
