@@ -164,6 +164,35 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     const hiddenAfter = await stranger.c.get(`/api/tasks/${hiddenTask}`);
     expect(hiddenAfter.status).toBe(200);
     expect(hiddenAfter.json).toEqual(hiddenBefore.json);
+    const archivedProject = await data.project(actor);
+    const archivedTitle = `ZZ-TEST archived ${fixture}`;
+    const archivedTask = await task(actor, archivedProject.id, {
+      title: archivedTitle, assigneeId: actor.id, dueDate: day(1),
+    });
+    ownedTasks.push(archivedTask);
+    const archivedBefore = await actor.c.get(`/api/tasks/${archivedTask}`);
+    expect(archivedBefore.status).toBe(200);
+    const archive = await actor.c.post(`/api/projects/${archivedProject.id}/archive`, {});
+    expect(archive.status, JSON.stringify(archive.json)).toBe(200);
+    const afterArchiveCards = await actor.c.get('/api/dashboard?panel=tasks');
+    expect(afterArchiveCards.status).toBe(200);
+    expect(afterArchiveCards.json).toMatchObject({ open: 3, overdue: 1, awaiting: 1 });
+    expect(afterArchiveCards.json.priorities.map((row: { id: string }) => row.id)).not.toContain(archivedTask);
+    const afterArchiveProjects = await actor.c.get('/api/dashboard?panel=projects');
+    expect(afterArchiveProjects.status).toBe(200);
+    expect(afterArchiveProjects.json.total).toBe(1);
+    expect(afterArchiveProjects.json.items.map((row: { id: string }) => row.id)).not.toContain(archivedProject.id);
+    const afterArchiveMyTasks = await actor.c.get('/api/my-tasks');
+    expect(afterArchiveMyTasks.status).toBe(200);
+    expect([...afterArchiveMyTasks.json.waitingOnMe, ...afterArchiveMyTasks.json.overdue,
+      ...afterArchiveMyTasks.json.next7, ...afterArchiveMyTasks.json.later]
+      .map((row: { id: string }) => row.id)).not.toContain(archivedTask);
+    await page.reload();
+    await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('3');
+    await expect(page.getByText(archivedTitle, { exact: true })).toHaveCount(0);
+    const archivedAfter = await actor.c.get(`/api/projects/${archivedProject.id}`);
+    expect(archivedAfter.status).toBe(200);
+    expect(archivedAfter.json.project.archived).toBe(true);
     const emptyUser = await data.person('Empty Member');
     const emptyContext = await browser.newContext({ baseURL: BASE });
     try {
@@ -191,6 +220,6 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       await expect(emptyPage.getByRole('region', { name: 'Your projects' }).getByText('You have no active membership projects.')).toBeVisible();
       await expect(emptyPage.getByText(hiddenTitle, { exact: true })).toHaveCount(0);
     } finally { await emptyContext.close(); }
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, unrelatedHiddenTask: hiddenTask, unrelatedSentinelUnchanged: true, emptyUserLoadingErrorRetryAndZeroState: true, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, unrelatedHiddenTask: hiddenTask, unrelatedSentinelUnchanged: true, archivedProject: archivedProject.id, archivedTask, archivedWorkExcluded: true, emptyUserLoadingErrorRetryAndZeroState: true, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
   } finally { await context.close(); }
 });
