@@ -171,10 +171,18 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       expect(emptySignin.status()).toBe(200);
       const emptyPage = await emptyContext.newPage();
       const tasksRoute = (url: URL) => url.pathname === '/api/dashboard' && url.searchParams.get('panel') === 'tasks';
+      await emptyPage.route(tasksRoute, async route => {
+        await new Promise(resolve => setTimeout(resolve, 1_500));
+        await route.continue();
+      });
+      await emptyPage.goto('/', { waitUntil: 'domcontentloaded' });
+      const emptyPriorities = emptyPage.getByRole('region', { name: 'Your priorities' });
+      await expect(emptyPriorities.locator('.skel-row').first()).toBeVisible();
+      await expect(emptyPage.getByLabel('Your work summary').getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('0');
+      await emptyPage.unroute(tasksRoute);
       await emptyPage.route(tasksRoute, async route =>
         route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) }));
-      await emptyPage.goto('/');
-      const emptyPriorities = emptyPage.getByRole('region', { name: 'Your priorities' });
+      await emptyPage.reload();
       await expect(emptyPriorities.getByRole('alert').getByText('Could not reach the server.')).toBeVisible();
       await emptyPage.unroute(tasksRoute);
       await emptyPriorities.getByRole('button', { name: 'Retry' }).click();
@@ -183,6 +191,6 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       await expect(emptyPage.getByRole('region', { name: 'Your projects' }).getByText('You have no active membership projects.')).toBeVisible();
       await expect(emptyPage.getByText(hiddenTitle, { exact: true })).toHaveCount(0);
     } finally { await emptyContext.close(); }
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, unrelatedHiddenTask: hiddenTask, unrelatedSentinelUnchanged: true, emptyUserErrorRetryAndZeroState: true, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, unrelatedHiddenTask: hiddenTask, unrelatedSentinelUnchanged: true, emptyUserLoadingErrorRetryAndZeroState: true, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
   } finally { await context.close(); }
 });
