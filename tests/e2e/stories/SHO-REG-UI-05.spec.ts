@@ -73,8 +73,10 @@ test('SHO-REG-UI-05: task deep link survives refresh and history, then becomes u
     await tab.goto('/my-tasks');
     await expect(tab.getByRole('heading', { name: /my tasks/i }).first()).toBeVisible();
     await tab.goBack();
+    await expect(tab).toHaveURL(new RegExp(`/projects/[^?]+\\?task=${taskId}`));
     await expect(tab.getByText(title, { exact: true }).first()).toBeVisible();
     await tab.goForward();
+    await expect(tab).toHaveURL(/\/my-tasks$/);
     await expect(tab.getByRole('heading', { name: /my tasks/i }).first()).toBeVisible();
 
     expect((await admin.api.del(`/api/tasks/${taskId}`)).status).toBe(204);
