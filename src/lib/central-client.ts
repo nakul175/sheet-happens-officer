@@ -3,7 +3,14 @@ import * as client from "openid-client";
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { holyQaIdentity, centralIdentitySecret, centralIdentityIssuer } from "@/lib/holy-qa-identity";
 export const SHO_ORIGIN = invitedTestRealm()?.origin ?? holyQaIdentity()?.origin ?? "https://sheethappensofficer.aplyd.org";
-export const CENTRAL_CALLBACK = SHO_ORIGIN + "/api/auth/aplyd/callback";
+export const CENTRAL_CALLBACK_PATH = "/api/auth/aplyd/callback";
+const TASKS_HOST = "tasks.aplyd.org";
+
+export function centralRequestOrigin(request: Request): string {
+    if (!invitedTestRealm() && !holyQaIdentity() && request.headers.get("host") === TASKS_HOST)
+        return "https://" + TASKS_HOST;
+    return SHO_ORIGIN;
+}
 export const FLOW_COOKIE = "__Host-sho_oidc_flow";
 export const flowCookieOptions = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 600 };
 export type Flow = {
@@ -11,6 +18,7 @@ export type Flow = {
     nonce: string;
     verifier: string;
     expires: number;
+    origin?: string;
     returnPath?: string;
 };
 function secret() { return centralIdentitySecret(); }
