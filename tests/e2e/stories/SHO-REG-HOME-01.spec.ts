@@ -17,9 +17,14 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
   const data = zzTestData(`home-${fixture}`);
   const ownedTasks: string[] = [];
   let ownedProject = '';
+  let archivedProjectId = '';
   let actorId = '';
   const actor = await data.person('Home Leader'); actorId = actor.id;
   later(async () => {
+    if (archivedProjectId) {
+      const restored = await actor.c.post(`/api/projects/${archivedProjectId}/unarchive`, {});
+      expect(restored.status, JSON.stringify(restored.json)).toBe(200);
+    }
     for (const id of ownedTasks) {
       const removed = await actor.c.del(`/api/tasks/${id}`);
       expect([204, 404], JSON.stringify(removed.json)).toContain(removed.status);
@@ -174,6 +179,7 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     expect(archivedBefore.status).toBe(200);
     const archive = await actor.c.post(`/api/projects/${archivedProject.id}/archive`, {});
     expect(archive.status, JSON.stringify(archive.json)).toBe(200);
+    archivedProjectId = archivedProject.id;
     const afterArchiveCards = await actor.c.get('/api/dashboard?panel=tasks');
     expect(afterArchiveCards.status).toBe(200);
     expect(afterArchiveCards.json).toMatchObject({ open: 3, overdue: 1, awaiting: 1 });
