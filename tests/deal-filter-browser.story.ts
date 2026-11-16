@@ -65,6 +65,14 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
  };
  try{
   await page.goto('/deals');await page.getByRole('tab',{name:pipeName,exact:true}).click();await waitIds(ids);
+  const sortControl=page.locator('.deal-filter-control select');
+  const firstStage=page.locator('.dcol').filter({has:page.locator('header b').getByText(firstName,{exact:true})});
+  const visibleOwnedCards=async()=>firstStage.locator('a[href^="/projects/"]').evaluateAll((links,owned)=>
+   links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
+  await sortControl.selectOption('name-desc');
+  expect(await visibleOwnedCards()).toEqual([ids[2],ids[0]]);
+  await sortControl.selectOption('name-asc');
+  expect(await visibleOwnedCards()).toEqual([ids[0],ids[2]]);
   await control('Opportunity types').locator('summary').click();
   const types=page.getByRole('group',{name:'Opportunity types',exact:true});
   await types.getByRole('checkbox',{name:'RFP/RFA',exact:true}).check();await types.getByRole('checkbox',{name:'OTC',exact:true}).check();
@@ -94,11 +102,11 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   await page.getByLabel('No date').selectOption('only');
   await waitIds(ids);
   await page.getByRole('button',{name:'Clear timeline filter'}).click();
-  await page.locator('.deal-filter-control select').selectOption('name-desc');
+  await sortControl.selectOption('name-desc');
   const rows=page.getByRole('table',{name:'RFP/RFA + OTC sales table'}).locator('tbody tr td:first-child a');
   const descending=await rows.allTextContents();
   expect(descending).toEqual([...descending].sort((a,b)=>b.localeCompare(a,'en',{sensitivity:'base'})));
-  await page.locator('.deal-filter-control select').selectOption('name-asc');
+  await sortControl.selectOption('name-asc');
   const ascending=await rows.allTextContents();
   expect(ascending).toEqual([...ascending].sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'})));
   await page.reload();
