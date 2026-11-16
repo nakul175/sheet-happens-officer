@@ -270,12 +270,19 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       await expect(emptyPriorities.locator('.skel-row').first()).toBeVisible();
       await expect(emptyPage.getByLabel('Your work summary').getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('0');
       await emptyPage.unroute(tasksRoute);
-      await emptyPage.route(tasksRoute, async route =>
-        route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) }));
+      let tasksRequests = 0;
+      await emptyPage.route(tasksRoute, async route => {
+        tasksRequests += 1;
+        if (tasksRequests === 1)
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) });
+        else
+          await route.continue();
+      });
       await test.step('reload empty-member Home with tasks error', () => emptyPage.reload(), { timeout: 20_000 });
       await expect(emptyPriorities.getByRole('alert').getByText('Could not reach the server.')).toBeVisible();
-      await emptyPage.unroute(tasksRoute);
       await test.step('retry empty-member tasks', () => emptyPriorities.getByRole('button', { name: 'Retry' }).click(), { timeout: 20_000 });
+      expect(tasksRequests).toBeGreaterThanOrEqual(2);
+      await emptyPage.unroute(tasksRoute);
       await expect(emptyPage.getByLabel('Your work summary').getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('0');
       await expect(emptyPriorities.getByText('No open work assigned to you or shared with you.')).toBeVisible();
       await expect(emptyPage.getByRole('region', { name: 'Your projects' }).getByText('You have no active membership projects.')).toBeVisible();
