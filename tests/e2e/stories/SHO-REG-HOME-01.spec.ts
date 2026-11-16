@@ -143,6 +143,27 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     await page.goto('/');
     await expect(summary.getByRole('link', { name: /Awaiting your approval/ }).locator('strong')).toHaveText('1');
     await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('3');
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
+    const stranger = await data.person('Hidden Leader');
+    const hiddenProject = await data.project(stranger);
+    const hiddenTitle = `ZZ-TEST private ${fixture}`;
+    const hiddenTask = await task(stranger, hiddenProject.id, { title: hiddenTitle, assigneeId: stranger.id, dueDate: day(1) });
+    const hiddenBefore = await stranger.c.get(`/api/tasks/${hiddenTask}`);
+    expect(hiddenBefore.status).toBe(200);
+    const isolatedCards = await actor.c.get('/api/dashboard?panel=tasks');
+    expect(isolatedCards.status).toBe(200);
+    expect(isolatedCards.json).toMatchObject({ open: 3, overdue: 1, awaiting: 1 });
+    const isolatedProjects = await actor.c.get('/api/dashboard?panel=projects');
+    expect(isolatedProjects.status).toBe(200);
+    expect(isolatedProjects.json.total).toBe(1);
+    const isolatedMyTasks = await actor.c.get('/api/my-tasks');
+    expect(isolatedMyTasks.status).toBe(200);
+    expect([...isolatedMyTasks.json.waitingOnMe, ...isolatedMyTasks.json.overdue, ...isolatedMyTasks.json.next7, ...isolatedMyTasks.json.later].map((row: { id: string }) => row.id)).not.toContain(hiddenTask);
+    await page.reload();
+    await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('3');
+    await expect(page.getByText(hiddenTitle, { exact: true })).toHaveCount(0);
+    const hiddenAfter = await stranger.c.get(`/api/tasks/${hiddenTask}`);
+    expect(hiddenAfter.status).toBe(200);
+    expect(hiddenAfter.json).toEqual(hiddenBefore.json);
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, actorId, ownedProject, ownedTasks, initial: { open: 3, overdue: 1, awaiting: 0, completed: 1 }, afterCloseAndRefresh: { open: 2, overdue: 1, awaiting: 0, completed: 2 }, afterApprovalSend: { open: 3, overdue: 1, awaiting: 1, waitingOnMe: awaitingTask }, unrelatedHiddenTask: hiddenTask, unrelatedSentinelUnchanged: true, projects: 1, topLevel: 5, initialMyTaskIds: myIds, homeAndMyTasksAgree: true }, null, 2));
   } finally { await context.close(); }
 });
