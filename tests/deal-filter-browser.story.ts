@@ -70,9 +70,9 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   const visibleOwnedCards=async()=>firstStage.locator('a[href^="/projects/"]').evaluateAll((links,owned)=>
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
   await sortControl.selectOption('name-desc');
-  expect(await visibleOwnedCards()).toEqual([ids[2],ids[0]]);
+  await expect.poll(visibleOwnedCards).toEqual([ids[2],ids[0]]);
   await sortControl.selectOption('name-asc');
-  expect(await visibleOwnedCards()).toEqual([ids[0],ids[2]]);
+  await expect.poll(visibleOwnedCards).toEqual([ids[0],ids[2]]);
   await control('Opportunity types').locator('summary').click();
   const types=page.getByRole('group',{name:'Opportunity types',exact:true});
   await types.getByRole('checkbox',{name:'RFP/RFA',exact:true}).check();await types.getByRole('checkbox',{name:'OTC',exact:true}).check();
