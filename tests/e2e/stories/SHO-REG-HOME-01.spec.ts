@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import pg from 'pg';
 import { test, local2691 } from '../helpers/2691-admin';
 import { BASE, PW, task, withVersion, zzTestData } from '../local-api';
 import { expect } from './qa';
@@ -12,6 +13,8 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
   if (!['localhost', '127.0.0.1', '[::1]'].includes(database.hostname) ||
       !/^\/sho_test(?:_[\w-]+)?$/.test(database.pathname) || process.env.TASKBOARD_URL !== BASE)
     throw new Error('Use one loopback app and synthetic sho_test database for Home audit fixtures.');
+  const source = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+  later(async () => { await source.end(); });
   const fixture = randomUUID();
   const evidenceDir = 'test-results/home-reconciliation';
   const data = zzTestData(`home-${fixture}`);
@@ -56,6 +59,12 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
   const projects = await actor.c.get('/api/dashboard?panel=projects');
   expect(projects.status).toBe(200);
   expect(projects.json).toMatchObject({ total: 1, items: [{ id: project.id, total: 4, completed: 1, percent: 25 }] });
+  const sourceTasks = await source.query<{ id: string; assigneeId: string; completedAt: Date | null }>(
+    'SELECT id, "assigneeId", "completedAt" FROM "Task" WHERE "projectId" = $1 AND "deletedAt" IS NULL', [project.id]);
+  expect(sourceTasks.rows.map(row => row.id).sort()).toEqual([overdue, today, laterTask, completed].sort());
+  expect(sourceTasks.rows.filter(row => row.completedAt === null).map(row => row.id).sort()).toEqual([overdue, today, laterTask].sort());
+  expect(sourceTasks.rows.filter(row => row.completedAt !== null).map(row => row.id)).toEqual([completed]);
+  expect(sourceTasks.rows.every(row => row.assigneeId === actor.id)).toBe(true);
   const my = await actor.c.get('/api/my-tasks');
   expect(my.status).toBe(200);
   const myIds = [...my.json.waitingOnMe, ...my.json.overdue, ...my.json.next7, ...my.json.later].map((row: { id: string }) => row.id);
@@ -122,6 +131,10 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     const refreshedProjects = await actor.c.get('/api/dashboard?panel=projects');
     expect(refreshedProjects.status).toBe(200);
     expect(refreshedProjects.json).toMatchObject({ items: [{ id: project.id, total: 4, completed: 2, percent: 50 }] });
+    const storedCompleted = await source.query<{ completedAt: Date | null }>(
+      'SELECT "completedAt" FROM "Task" WHERE id = $1 AND "projectId" = $2', [today, project.id]);
+    expect(storedCompleted.rows).toHaveLength(1);
+    expect(storedCompleted.rows[0].completedAt).not.toBeNull();
     await page.goto('/');
     await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('2');
     await expect(priorities.locator(`a[href="/tasks/${today}"]`)).toHaveCount(0);
@@ -199,12 +212,22 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     const archivedAfter = await actor.c.get(`/api/projects/${archivedProject.id}`);
     expect(archivedAfter.status).toBe(200);
     expect(archivedAfter.json.project.archived).toBe(true);
+    const storedArchive = await source.query<{ archivedAt: Date | null; taskId: string }>(
+      'SELECT p."archivedAt", t.id AS "taskId" FROM "Project" p JOIN "Task" t ON t."projectId" = p.id WHERE p.id = $1 AND t.id = $2',
+      [archivedProject.id, archivedTask]);
+    expect(storedArchive.rows).toHaveLength(1);
+    expect(storedArchive.rows[0].archivedAt).not.toBeNull();
+    expect(storedArchive.rows[0].taskId).toBe(archivedTask);
     const sharedTask = await task(worker, project.id, {
       title: `ZZ-TEST shared ${fixture}`, assigneeId: worker.id, dueDate: day(4),
     });
     ownedTasks.push(sharedTask);
     const shared = await worker.c.post(`/api/tasks/${sharedTask}/collaborators`, { userId: actor.id });
     expect(shared.status, JSON.stringify(shared.json)).toBe(201);
+    const storedShared = async () => (await source.query<{ userId: string }>(
+      'SELECT "userId" FROM "TaskCollaborator" WHERE "taskId" = $1 AND "userId" = $2',
+      [sharedTask, actor.id])).rows;
+    expect(await storedShared()).toEqual([{ userId: actor.id }]);
     const withShared = await actor.c.get('/api/dashboard?panel=tasks');
     expect(withShared.status).toBe(200);
     expect(withShared.json).toMatchObject({ open: 4, overdue: 1, awaiting: 1 });
@@ -219,6 +242,7 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     await expect(priorities.locator(`a[href="/tasks/${sharedTask}"]`)).toBeVisible();
     const unshared = await worker.c.del(`/api/tasks/${sharedTask}/collaborators/${actor.id}`);
     expect(unshared.status, JSON.stringify(unshared.json)).toBe(204);
+    expect(await storedShared()).toEqual([]);
     const afterUnshare = await actor.c.get('/api/dashboard?panel=tasks');
     expect(afterUnshare.status).toBe(200);
     expect(afterUnshare.json).toMatchObject({ open: 3, overdue: 1, awaiting: 1 });
