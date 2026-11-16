@@ -171,7 +171,13 @@ export const contactCreate = z.object({
   name: z.string().trim().min(1, "Give the contact a name.").max(200), role: optStr(200), email: z.string().trim().email("Use a valid email.").max(200).nullish().or(z.literal("")),
   phone: optStr(60), knownBy: z.array(z.string().min(1)).max(50).optional(),
 });
-export const contactUpdate = contactCreate.partial();
+export const contactUpdate = contactCreate.partial().extend({
+  organisationId: z.never().optional(),
+  expected: z.object({
+    name: z.string(), role: z.string().nullable(), email: z.string().nullable(), phone: z.string().nullable(),
+    knownBy: z.array(z.string()),
+  }).optional(),
+});
 export const noteCreate = z.object({
   kind: z.enum(["MEETING", "CALL", "INTRODUCTION", "OTHER"]), date: isoDay, text: z.string().trim().min(1, "Write what happened.").max(10000),
   projectId: z.string().min(1).nullish(), contactIds: z.array(z.string().min(1)).max(50).optional(),

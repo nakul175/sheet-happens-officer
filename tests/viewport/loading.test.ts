@@ -1,22 +1,29 @@
 // SHO-BUG-12 (APL-2647): a slow first load shows the 400 ms skeleton, not "Could not reach the server.".
 // A real network error or a 5xx still shows LoadFailed with Retry. Runs in the browser suite (npm run test:viewport),
 // against a local server on a TEST database, like the phone-size checks.
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Route } from "playwright-core";
-import { account, BASE, PW, project, superAdmin, task } from "../helpers";
+import { account, BASE, cleanupZz, PW, project, superAdmin, task, type Account } from "../helpers";
+import { requireLocalFixtures } from "./screen-ready";
 
 let browser: Browser;
 let ctx: BrowserContext;
 let projectId = "";
 let personId = "";
 let personName = "";
+const ownedProjects: string[] = [];
+const ownedPeople: Account[] = [];
+const CLEANUP = "test-results/viewport/loading/cleanup.json";
 
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the loading suite against ${BASE}: use a local server with a test database.`);
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const root = await superAdmin();
   const editor = await account("loadeditor");
+  ownedPeople.push(editor);
   const p = await project(root, root, [{ who: editor }]);
+  ownedProjects.push(p.id);
   await task(root, p.id, { title: "A task to show" });
   projectId = p.id;
   personId = editor.id;
@@ -25,7 +32,18 @@ beforeAll(async () => {
   const r = await ctx.request.post("/api/auth/signin", { data: { email: "root.test@aplyd.com", password: PW } });
   expect(r.ok(), "sign in for the loading suite").toBe(true);
 }, 60000);
-afterAll(async () => { await ctx?.close(); await browser?.close(); });
+afterAll(async () => {
+  await ctx?.close();
+  await browser?.close();
+  let cleanup = false;
+  try {
+    if (ownedProjects.length || ownedPeople.length) await cleanupZz(ownedProjects, ownedPeople);
+    cleanup = true;
+  } finally {
+    mkdirSync("test-results/viewport/loading", { recursive: true });
+    writeFileSync(CLEANUP, JSON.stringify({ projects: ownedProjects.length, people: ownedPeople.length, cleanup }, null, 2));
+  }
+});
 
 // Each screen, the API reads its first paint waits on, and what it shows once those arrive.
 const SCREENS: { name: string; path: () => string; api: () => RegExp; ready: (page: Page) => Locator }[] = [

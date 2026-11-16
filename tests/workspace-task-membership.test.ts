@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const m=vi.hoisted(()=>({ access:vi.fn(), db:{user:{findUnique:vi.fn(),findMany:vi.fn()},task:{findUnique:vi.fn()},actionLog:{findFirst:vi.fn()},$transaction:vi.fn()},tx:{$queryRaw:vi.fn(),user:{findUnique:vi.fn(),findFirst:vi.fn()},projectMember:{findUnique:vi.fn(),createMany:vi.fn()},task:{findUnique:vi.fn(),findFirst:vi.fn(),update:vi.fn(),create:vi.fn()},section:{findFirst:vi.fn()},taskCollaborator:{create:vi.fn()}},notify:vi.fn(),log:vi.fn(),targetRole:null as string|null,actorRole:"LEADER",actorOrgRole:"MEMBER",workspace:"ws",targetActive:true,failWrite:false}));
+const m=vi.hoisted(()=>({ access:vi.fn(), db:{user:{findUnique:vi.fn(),findMany:vi.fn()},task:{findUnique:vi.fn()},actionLog:{findFirst:vi.fn()},$transaction:vi.fn()},tx:{$queryRaw:vi.fn(),user:{findUnique:vi.fn(),findFirst:vi.fn()},projectMember:{findUnique:vi.fn(),createMany:vi.fn()},task:{findUnique:vi.fn(),findFirst:vi.fn(),update:vi.fn(),create:vi.fn()},actionLog:{findFirst:vi.fn()},section:{findFirst:vi.fn()},taskCollaborator:{create:vi.fn()}},notify:vi.fn(),log:vi.fn(),targetRole:null as string|null,actorRole:"LEADER",actorOrgRole:"MEMBER",workspace:"ws",targetActive:true,failWrite:false}));
 vi.mock("@/lib/db",()=>({db:m.db}));
 vi.mock("@/lib/access",async original=>({...await original<typeof import("@/lib/access")>(),projectAccess:m.access}));
 vi.mock("@/lib/notify",()=>({notify:m.notify,logAction:m.log,auditTx:vi.fn()}));
@@ -14,14 +14,14 @@ const task=()=>({id:"task",projectId:"project",parentId:null,assigneeId:"actor",
 beforeEach(()=>{
  vi.clearAllMocks();m.actorRole="LEADER";m.actorOrgRole="MEMBER";m.workspace="ws";m.targetRole=null;m.targetActive=true;m.failWrite=false;
  m.access.mockResolvedValue({role:"LEADER",admin:false,project:{id:"project",workspaceId:"ws",archivedAt:null,members:[{userId:"actor",role:"LEADER"}]}});
- m.tx.$queryRaw.mockResolvedValue([{id:"project",workspaceId:"ws",name:"Private project",archivedAt:null}]);
+ m.tx.$queryRaw.mockResolvedValue([{id:"project",projectId:"project",workspaceId:"ws",name:"Private project",archivedAt:null}]);
  m.tx.user.findUnique.mockImplementation(async()=>person("actor"));m.db.user.findUnique.mockImplementation(async()=>person("actor"));
  m.tx.user.findFirst.mockImplementation(async()=>m.targetActive?{id:"target"}:null);
  m.tx.projectMember.findUnique.mockImplementation(async({where})=>where.projectId_userId.userId==="actor"?{role:m.actorRole,user:person("actor")}:(m.targetRole?{role:m.targetRole,user:person("target")}:null));
  m.tx.projectMember.createMany.mockImplementation(async()=>{if(m.targetRole)return{count:0};m.targetRole="EDITOR";return{count:1};});
  m.tx.section.findFirst.mockResolvedValue({id:"section",isDone:false});m.tx.task.create.mockResolvedValue({id:"created",title:"New"});
  m.tx.task.findFirst.mockResolvedValue({...task(),id:"parent",parentId:null,sectionId:"section"});
- m.db.task.findUnique.mockImplementation(async()=>task());m.tx.task.findUnique.mockImplementation(async()=>task());m.db.actionLog.findFirst.mockResolvedValue(null);
+ m.db.task.findUnique.mockImplementation(async()=>task());m.tx.task.findUnique.mockImplementation(async()=>task());m.db.actionLog.findFirst.mockResolvedValue(null);m.tx.actionLog.findFirst.mockResolvedValue(null);
  m.tx.task.update.mockImplementation(async()=>{if(m.failWrite)throw Error("task write failed");return{updatedAt:new Date(version)};});
  m.db.$transaction.mockImplementation(async fn=>{const before=m.targetRole;try{return await fn(m.tx);}catch(error){m.targetRole=before;throw error;}});
 });

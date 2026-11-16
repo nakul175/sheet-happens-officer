@@ -18,6 +18,7 @@ import { crmMode } from "../src/lib/crm";
 import { getTask, listTasks, myTasks } from "../src/lib/tasks";
 import { search } from "../src/lib/search";
 import { deactivate } from "../src/lib/team";
+import { db } from "../src/lib/db";
 
 const STAGE = "Proposal";
 const GROUPS = ["waitingOnMe", "overdue", "next7", "later", "waitingOnOthers"] as const;
@@ -100,6 +101,9 @@ describe("qa:TC missing APL-2609 CRM_VISIBLE hides deals from My tasks, search, 
     const run = `${Date.now().toString(36)}${process.pid.toString(36)}`;
     const zzPerson = (role: string) => account(`ZZ-TEST cv2609 ${role}`, `zz-test-cv2609-${role}-${run}@aplyd.com`);
     const saAcc = await account("ZZ-TEST cv2609 superadmin", "zz-test-cv2609-superadmin@aplyd.com");
+    // Cleanup now checks the current stored role inside deactivate's transaction.
+    // This run-owned fixture must hold the role that its Actor claims.
+    await db.user.update({ where: { id: saAcc.id }, data: { orgRole: "SUPER_ADMIN" } });
     made.sa = saAcc;
     const adAcc = await zzPerson("admin");
     const lead: Account = await zzPerson("lead");

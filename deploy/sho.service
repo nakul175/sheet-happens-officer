@@ -1,0 +1,23 @@
+[Unit]
+Description=Sheet Happens Officer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/sho/current
+EnvironmentFile=/etc/sho/app.env
+EnvironmentFile=/etc/sho/local.env
+EnvironmentFile=-/opt/sho/current/release.env
+EnvironmentFile=/etc/bugoff/suite.env
+EnvironmentFile=/home/deploy/aplyd-accounts-stage/private/sho-central.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node --import tsx server.js
+Restart=always
+RestartSec=3
+TimeoutStopSec=40
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

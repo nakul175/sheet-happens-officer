@@ -8,6 +8,7 @@
 // with SHO_QA_PASS: it uses login("ADMIN") (SHARD_* in a CI shard, otherwise SHO_ADMIN_EMAIL / SHO_ADMIN_PASS). beforeAll
 // checks that account too, so a missing one fails once with its variable names. No password is written here.
 import { expect, zz, login } from "../support";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { test, local2691 } from "../helpers/2691-admin";
 import { getTask, newTask, ymd, type Who } from "../g2";
 
@@ -38,12 +39,12 @@ async function makeDeal(admin: Who, later: Later, label: string, step: string) {
   expect(d.status, JSON.stringify(d.json)).toBe(201);
   const id = d.json.deal.id as string;
   later(() => admin.api.post(`/api/projects/${id}/archive`));
-  return { id, step, pro };
+  return { id, orgId, step, pro };
 }
 
 const projectOf = async (who: Who, id: string) => (await who.api.get(`/api/projects/${id}`)).json.project as {
   archived: boolean;
-  deal: { stage: { name: string }; nextStep: { id: string; title: string } | null };
+  deal: { stage: { id: string; name: string }; stageReason: string | null; nextStep: { id: string; title: string } | null };
 };
 
 /** The next step plus `extra` more open tasks. Returns every title and id, next step first. */
@@ -75,6 +76,67 @@ test.beforeAll(() => {
 
 test.describe("qa:TC missing APL-2691", { tag: "@APL-2691" }, () => {
   test.describe.configure({ timeout: 180_000 });
+
+  test('SHO-REG-DEALS-05 partial: On hold cancel, required reason and Undo preserve deal state', async ({ admin, later }) => {
+    if (!local2691) throw new Error('This audit case uses only the guarded local test database.');
+    const evidenceDir = 'test-results/deal-stage-outcome';
+    let dealId = '';
+    let orgId = '';
+    later(async () => {
+      if (!dealId || !orgId) return;
+      const [deal, organisation] = await Promise.all([
+        admin.api.get(`/api/projects/${dealId}`), admin.api.get(`/api/orgs/${orgId}`),
+      ]);
+      expect(deal.status).toBe(200);
+      expect(deal.json.project.archived).toBe(true);
+      expect(organisation.status).toBe(200);
+      expect(organisation.json.organisation.archived).toBe(true);
+      mkdirSync(evidenceDir, { recursive: true });
+      writeFileSync(`${evidenceDir}/cleanup.json`, JSON.stringify({ dealId, orgId, dealArchived: true, organisationArchived: true }, null, 2));
+    });
+    const deal = await makeDeal(admin, later, 'stage outcome audit', zz('stage outcome next step'));
+    dealId = deal.id;
+    orgId = deal.orgId;
+    const state = async () => {
+      const current = await projectOf(admin, deal.id);
+      return { stageId: current.deal.stage.id, stageReason: current.deal.stageReason, nextStep: current.deal.nextStep, archived: current.archived };
+    };
+    const before = await state();
+    const hold = deal.pro.stages.find(stage => stage.name === 'On hold')!;
+    await admin.page.goto(`/projects/${deal.id}`);
+    const pick = admin.page.getByRole('group', { name: 'Stage' }).getByRole('button', { name: 'On hold', exact: true });
+    await pick.click();
+    let dialog = admin.page.getByRole('dialog', { name: 'Move to On hold' });
+    await expect(dialog.getByRole('button', { name: 'Move deal' })).toBeDisabled();
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(await state()).toEqual(before);
+
+    const missing = await admin.api.post(`/api/projects/${deal.id}/stage`, { stageId: hold.id });
+    expect(missing.status).toBe(400);
+    expect(missing.json.needsReason).toBe(true);
+    expect(await state()).toEqual(before);
+
+    await pick.click();
+    dialog = admin.page.getByRole('dialog', { name: 'Move to On hold' });
+    await dialog.getByLabel('Reason (required)').fill('ZZ-TEST paused pending review');
+    const [moved] = await Promise.all([
+      admin.page.waitForResponse(response => response.url().endsWith(`/api/projects/${deal.id}/stage`) && response.request().method() === 'POST'),
+      dialog.getByRole('button', { name: 'Move deal' }).click(),
+    ]);
+    expect(moved.status()).toBe(200);
+    const undoId = moved.headers()['x-undo-id'];
+    expect(undoId).toBeTruthy();
+    const held = await projectOf(admin, deal.id);
+    expect(held.deal.stage.id).toBe(hold.id);
+    expect(held.deal.stageReason).toBe('ZZ-TEST paused pending review');
+    expect(held.deal.nextStep).toEqual(before.nextStep);
+    const undone = await admin.api.post(`/api/actions/${undoId}/undo`, {});
+    expect(undone.status, JSON.stringify(undone.json)).toBe(200);
+    expect(await state()).toEqual(before);
+    mkdirSync(evidenceDir, { recursive: true });
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ dealId, orgId, holdStageId: hold.id, cancelUnchanged: true, requiredReasonDenied: true, validMove: true, undoRestored: true }, null, 2));
+  });
 
   test(
     "@APL-2691 qa:TC missing AC1 v2 (SHO-3050): UI moves to Won with21 open tasks and preserves every task",

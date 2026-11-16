@@ -62,6 +62,82 @@ async function openTask(user: Actor, taskId: string, write: boolean) {
   return { t, a, members };
 }
 
+/** Hold the task, project and writer's membership through a comment write.
+ * A removal or role change after the preflight must either win first and be
+ * observed here, or wait until this transaction commits. */
+async function freshCommentWrite(tx: Tx, user: Actor, taskId: string) {
+  try {
+    await tx.$queryRaw`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR SHARE NOWAIT`;
+    const task = await tx.task.findUnique({ where: { id: taskId }, select: { projectId: true } });
+    if (!task) throw notFound("Task");
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${task.projectId} FOR SHARE NOWAIT`;
+    await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${task.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+  } catch (error) {
+    const failure = error as { code?: string; meta?: { code?: string } } | null;
+    if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+      throw new ApiError(409, "Project membership is changing. Reload and try again.");
+    }
+    throw error;
+  }
+  const task = await tx.task.findUnique({ where: { id: taskId } });
+  if (!task || task.deletedAt) throw notFound("Task");
+  const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+  if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Task");
+  let access;
+  try {
+    access = await projectAccess({ ...user, orgRole: actor.orgRole }, task.projectId, { tx });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) throw notFound("Task");
+    throw error;
+  }
+  if (actor.workspaceId !== access.project.workspaceId) throw notFound("Task");
+  if (access.project.archivedAt) throw new ApiError(403, "This project is archived and read-only.", { code: "project_archived" });
+  requireWrite(access);
+  return { task, access };
+}
+
+async function lockedComment(tx: Tx, taskId: string, commentId: string) {
+  try {
+    await tx.$queryRaw`SELECT "id" FROM "Comment" WHERE "id" = ${commentId} FOR UPDATE NOWAIT`;
+  } catch (error) {
+    const failure = error as { code?: string; meta?: { code?: string } } | null;
+    if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+      throw new ApiError(409, "The comment is changing. Reload and try again.");
+    }
+    throw error;
+  }
+  const comment = await tx.comment.findFirst({ where: { id: commentId, taskId, removedAt: null } });
+  if (!comment) throw notFound("Comment");
+  return comment;
+}
+
+/** A mention chosen before the write must still be a member when it commits.
+ * Hold selected memberships and accounts through comment/notice creation so
+ * a concurrent removal or deactivation cannot receive a new task title. */
+async function verifyMentionRecipients(tx: Tx, projectId: string, ids: string[]) {
+  if (!ids.length) return;
+  try {
+    for (const id of [...ids].sort()) {
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${id} FOR SHARE NOWAIT`;
+    }
+  } catch (error) {
+    const failure = error as { code?: string; meta?: { code?: string } } | null;
+    if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+      throw new ApiError(409, "Mention recipients changed. Reload and try again.");
+    }
+    throw error;
+  }
+  const rows = await tx.projectMember.findMany({
+    where: { projectId, userId: { in: ids } },
+    include: { user: { select: { deactivatedAt: true, emailVerifiedAt: true } } },
+  });
+  if (rows.length !== ids.length || rows.some((row) => !isActive(row.user))) {
+    throw new ApiError(409, "Mention recipients changed. Reload and try again.");
+  }
+}
+
 /** @Name matches, longest name first, plus explicit ids. Distinct. Unknown explicit ids still count toward the cap. */
 export function resolveMentions(text: string, members: { id: string; name: string }[], explicit: string[] = []) {
   const byLength = [...members].sort((a, b) => b.name.length - a.name.length);
@@ -134,7 +210,7 @@ async function notifyComment(tx: Tx, user: Actor, t: { id: string; projectId: st
 }
 
 export async function addComment(user: Actor, taskId: string, input: { text?: string | null; mentions?: string[] }) {
-  const { t, members } = await openTask(user, taskId, true);
+  const { members } = await openTask(user, taskId, true);
   const text = input.text ?? "";
   if (text.length > COMMENT_MAX) throw fail("comment_too_long", "A comment can be 5,000 characters at most.");
   const body = text.trim();
@@ -144,6 +220,8 @@ export async function addComment(user: Actor, taskId: string, input: { text?: st
   await assertCommentRoom(db, taskId);
   return db.$transaction(async (tx) => {
     await assertCommentRoom(tx, taskId, true); // APL-2590 D3: the locked count is the one that holds the cap
+    const { task: t } = await freshCommentWrite(tx, user, taskId);
+    await verifyMentionRecipients(tx, t.projectId, resolved);
     const c = await tx.comment.create({
       data: { taskId, authorId: user.id, text: body, mentions: resolved },
     });
@@ -157,7 +235,7 @@ export async function addComment(user: Actor, taskId: string, input: { text?: st
 }
 
 export async function editComment(user: Actor, taskId: string, commentId: string, input: { text?: string | null; mentions?: string[] }) {
-  const { t, members } = await openTask(user, taskId, true);
+  const { members } = await openTask(user, taskId, true);
   const c = await db.comment.findFirst({ where: { id: commentId, taskId, removedAt: null } });
   if (!c) throw notFound("Comment");
   if (c.authorId !== user.id) throw new ApiError(403, "Only the author can edit a comment.");
@@ -168,6 +246,9 @@ export async function editComment(user: Actor, taskId: string, commentId: string
   const { resolved, attempted } = resolveMentions(body, members, input.mentions ?? []);
   if (attempted > MENTIONS_PER_COMMENT) throw fail("too_many_mentions", "A comment can mention at most 20 people.");
   return db.$transaction(async (tx) => {
+    const { task: t } = await freshCommentWrite(tx, user, taskId);
+    await lockedComment(tx, taskId, commentId);
+    await verifyMentionRecipients(tx, t.projectId, resolved);
     const row = await tx.comment.update({ where: { id: c.id }, data: { text: body, mentions: resolved, editedAt: new Date() } });
     await logAction(tx, {
       actorId: user.id, projectId: t.projectId, targetType: "task", targetId: t.id,
@@ -178,11 +259,14 @@ export async function editComment(user: Actor, taskId: string, commentId: string
 }
 
 export async function removeComment(user: Actor, taskId: string, commentId: string) {
-  const { t, a } = await openTask(user, taskId, true);
+  const { a } = await openTask(user, taskId, true);
   const c = await db.comment.findFirst({ where: { id: commentId, taskId, removedAt: null } });
   if (!c) throw notFound("Comment");
   if (c.authorId !== user.id && !canManage(a)) throw new ApiError(403, "Only the author, the Leader or an Admin can delete a comment.");
   await db.$transaction(async (tx) => {
+    const { task: t, access } = await freshCommentWrite(tx, user, taskId);
+    const current = await lockedComment(tx, taskId, commentId);
+    if (current.authorId !== user.id && !canManage(access)) throw new ApiError(403, "Only the author, the Leader or an Admin can delete a comment.");
     await tx.comment.update({ where: { id: c.id }, data: { removedAt: new Date() } });
     await logAction(tx, {
       actorId: user.id, projectId: t.projectId, targetType: "task", targetId: t.id,

@@ -7,9 +7,10 @@ import { isAdmin, type Actor } from "@/lib/access";
 import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
 import { commentsEnabled } from "@/lib/flags";
 import { rankedSearch } from "@/lib/search-query";
+import { SEARCH_MAX_QUERY } from "@/lib/search-ranking";
 
 export async function search(user: Actor, q: string, includeArchived: boolean, ideasOnly = false) {
-  const text = q.trim();
+  const text = q.trim().slice(0, SEARCH_MAX_QUERY);
   if (text.length < 2) return { projects: [], tasks: [], organisations: [], contacts: [] };
   // Activation is part of the separately reviewed database cut. Ordinary deployments
   // retain the existing search until pg_trgm, indexes and acceptance are approved.
@@ -29,7 +30,7 @@ export async function search(user: Actor, q: string, includeArchived: boolean, i
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { workspaceId: true } });
   const [organisations, contacts] = crm && !ideasOnly ? await Promise.all([
     db.organisation.findMany({ where: { workspaceId: me.workspaceId, archivedAt: includeArchived ? undefined : null, name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, kind: true } }),
-    db.contact.findMany({ where: { workspaceId: me.workspaceId, removedAt: null, name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, organisation: { select: { id: true, name: true } } } }),
+    db.contact.findMany({ where: { workspaceId: me.workspaceId, removedAt: null, ...(includeArchived ? {} : { organisation: { archivedAt: null } }), name: { contains: text, mode: "insensitive" } }, orderBy: { name: "asc" }, take: 20, select: { id: true, name: true, organisation: { select: { id: true, name: true } } } }),
   ]) : [[], []];
   // Comment text is searchable only while ff_task_comments is on, and only inside projects the person can see.
   // The hit is the task. The comment body is not copied into the result.

@@ -3,33 +3,25 @@
 // Database rows are ZZ-TEST data owned by a nakul17+ alias. Cleanup deletes only those rows.
 // The purge calls are scoped, and the suite refuses any database that is not on localhost.
 import "dotenv/config";
-import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
 import type { Prisma } from "../src/generated/prisma/client";
 import { db } from "../src/lib/db";
 import { purgeTrash } from "../src/lib/tasks";
 import { UNDO_WINDOW_MS, isTooOldToUndo, trashPurgeBefore } from "../src/lib/undoable";
+import { assertLocalFixture } from "./e2e/local-fixture-guard";
 
 const NOW = Date.parse("2026-10-19T02:11:00.000Z");
-const EMAIL = "nakul17+apl2711@example.invalid";
-const PREFIX = "ZZ-TEST-APL-2711";
+const RUN = randomUUID();
+const EMAIL = `nakul17+apl2711-${RUN}@example.invalid`;
+const PREFIX = `ZZ-TEST-APL-2711-${RUN}`;
 const BOUNDARY = `${PREFIX}-boundary`;
+const purgeAuditIds: string[] = [];
 const SCOPE: Prisma.TaskWhereInput = {
   title: { startsWith: BOUNDARY },
   createdBy: { email: EMAIL },
 };
 const CONCURRENCY = 48;
-
-function assertLocalDatabase() {
-  const raw = process.env.DATABASE_URL ?? "";
-  let host = "";
-  try {
-    host = new URL(raw).hostname;
-  } catch {
-    throw new Error("Refusing the purge test: DATABASE_URL is missing or not a URL.");
-  }
-  if (!/^(localhost|127\.0\.0\.1)$/.test(host)) throw new Error(`Refusing the purge test against ${host}.`);
-  if (/prod|sheethappens/i.test(raw)) throw new Error("Refusing the purge test: DATABASE_URL looks like production.");
-}
 
 async function cleanup() {
   const user = await db.user.findUnique({ where: { email: EMAIL }, select: { id: true, workspaceId: true } });
@@ -41,7 +33,8 @@ async function cleanup() {
     });
   }
   if (user) await db.notification.deleteMany({ where: { actorId: user.id } });
-  await db.auditLog.deleteMany({ where: { event: "TASK_PURGED", data: { path: ["limited"], equals: "1" } } });
+  await db.auditLog.deleteMany({ where: { id: { in: purgeAuditIds } } });
+  expect(await db.auditLog.count({ where: { id: { in: purgeAuditIds } } })).toBe(0);
   if (user) await db.auditLog.deleteMany({ where: { actorId: user.id } });
   await db.task.deleteMany({ where: { title: { startsWith: PREFIX } } });
   if (projectIds.length) await db.project.deleteMany({ where: { id: { in: projectIds } } });
@@ -84,9 +77,15 @@ describe("undo window (APL-2711)", () => {
 describe("trash purge boundary (APL-2711)", () => {
   it("purges only Trash strictly older than 30×24h, including 48 concurrent deletes", async () => {
     expect(CONCURRENCY).toBeGreaterThanOrEqual(40);
-    assertLocalDatabase();
+    assertLocalFixture(process.env.DATABASE_URL);
     await cleanup();
     const now = new Date(NOW);
+    const createAudit = db.auditLog.create.bind(db.auditLog);
+    const auditSpy = vi.spyOn(db.auditLog, "create").mockImplementation((async (args: Parameters<typeof db.auditLog.create>[0]) => {
+      const row = await createAudit(args);
+      purgeAuditIds.push(row.id);
+      return row;
+    }) as unknown as typeof db.auditLog.create);
     try {
       const ws = await db.workspace.create({ data: { name: PREFIX } });
       const user = await db.user.create({
@@ -136,6 +135,7 @@ describe("trash purge boundary (APL-2711)", () => {
       const counts = await Promise.all(Array.from({ length: CONCURRENCY }, () => purgeTrash(now, SCOPE)));
       expect(counts.every((n) => n === 0 || n === 1)).toBe(true);
       expect(counts.reduce((sum, n) => sum + n, 0)).toBe(1);
+      expect(purgeAuditIds).toHaveLength(2);
 
       const afterLoad = new Set((await db.task.findMany({ where: { projectId: project.id }, select: { title: true } })).map((t) => t.title));
       expect(afterLoad.has(`${BOUNDARY}-young`)).toBe(true);
@@ -146,6 +146,7 @@ describe("trash purge boundary (APL-2711)", () => {
         expect(await db.task.findUnique({ where: { id: row.id }, select: { id: true } })).not.toBeNull();
       }
     } finally {
+      auditSpy.mockRestore();
       await cleanup();
     }
   }, 60_000);

@@ -9,7 +9,7 @@ import { Confirm, Field, LoadFailed, Skeleton } from "@/components/ui";
 import { Page, useMe } from "../../../Shell";
 
 type M = { userId: string; name: string; role: string; active: boolean; email?: string };
-type Proj = { id: string; name: string; archived: boolean; role: string; type?: string; isVertical?: boolean; verticalId?: string | null; members: M[] };
+type Proj = { id: string; name: string; description?: string | null; archived: boolean; role: string; type?: string; isVertical?: boolean; verticalId?: string | null; members: M[] };
 type Person = { id: string; name: string; email?: string; status?: "ACTIVE" | "UNVERIFIED" | "DEACTIVATED" };
 
 export default function Members({ params }: { params: Promise<{ id: string }> }) {
@@ -18,6 +18,10 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   const verticals = useGet<{ verticals: { id: string; name: string; retired: boolean }[] }>("/api/verticals");
   const [classify, setClassify] = useState(false);
   const [classifying, setClassifying] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [detailName, setDetailName] = useState("");
+  const [detailDescription, setDetailDescription] = useState("");
+  const [savingDetails, setSavingDetails] = useState(false);
   const pr = useGet<{ project: Proj }>(`/api/projects/${id}`);
   const team = useGet<{ people: Person[] }>("/api/team");
   const [q, setQ] = useState("");
@@ -28,12 +32,22 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
   if (!p && pr.failed) return <Page title="Settings"><LoadFailed onRetry={pr.reload} /></Page>;
   if (pr.error && !p) return <Page title="This project isn't available"><div className="card empty">It may not exist, or you are not a member.<br /><Link href="/projects">Back to Projects</Link></div></Page>;
   const manage = p?.role === "LEADER" && !p?.archived;
+  const canEditDetails = manage && (!p?.isVertical || admin);
   const inProject = new Set(p?.members.map((m) => m.userId));
   const found = q.trim().length < 1 ? [] : (team.data?.people ?? []).filter((x) => (!x.status || x.status === "ACTIVE") && !inProject.has(x.id) && (x.name + " " + (x.email ?? "")).toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8);
 
   async function add(userId: string) {
     const r = await api("POST", `/api/projects/${id}/members`, { userId, role: addRole });
     if (r.ok) { setErr(null); setQ(""); pr.reload(); } else setErr(r.error ?? "Could not add.");
+  }
+  async function saveDetails(e: React.FormEvent) {
+    e.preventDefault();
+    if (savingDetails || !detailName.trim()) return;
+    setSavingDetails(true);
+    const r = await api("PATCH", `/api/projects/${id}`, { name: detailName.trim(), description: detailDescription.trim() || null });
+    setSavingDetails(false);
+    if (r.ok) { setErr(null); setEditingDetails(false); pr.reload(); }
+    else setErr(r.error ?? "Could not save project details.");
   }
   async function setRole(m: M, role: string) {
     if (role === "VIEWER") { setDlg({ kind: "viewer", m }); return; }
@@ -49,7 +63,7 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
       {err && <div className="err" role="alert">{err}</div>}
       {p?.archived && <div className="box warn" style={{ marginBottom: 12 }}>This project is archived and read-only.</div>}
       {pr.loading && !p && <Skeleton />}
-      <div className="settings-grid">
+      <div className={`settings-grid${p?.type === "DEAL" ? " settings-deal" : ""}`}>
       <section className="settings-panel settings-members"><h2>Project members {p && `(${p.members.length})`}</h2>
       <div className="list">
         {p?.members.map((m) => (
@@ -66,6 +80,18 @@ export default function Members({ params }: { params: Promise<{ id: string }> })
         ))}
       </div>
       </section>
+      {p && p.type !== "DEAL" && <section className="settings-panel settings-details">
+        <h2>Project details</h2>
+        {editingDetails && canEditDetails ? <form onSubmit={saveDetails} aria-busy={savingDetails}>
+          <Field label="Project name">{fieldId => <input id={fieldId} className="in" value={detailName} maxLength={200} required onChange={e => setDetailName(e.target.value)} />}</Field>
+          <Field label="Description">{fieldId => <textarea id={fieldId} className="in" value={detailDescription} maxLength={5000} onChange={e => setDetailDescription(e.target.value)} />}</Field>
+          <div className="settings-detail-actions"><button className="btn sm" type="submit" disabled={savingDetails || !detailName.trim()}>Save changes</button><button className="btn ghost sm" type="button" disabled={savingDetails} onClick={() => { setEditingDetails(false); setErr(null); }}>Cancel</button></div>
+        </form> : <>
+          <b>{p.name}</b>
+          <p className="settings-description">{p.description || "No description"}</p>
+          {canEditDetails && <button className="btn ghost sm" onClick={() => { setDetailName(p.name); setDetailDescription(p.description ?? ""); setErr(null); setEditingDetails(true); }}>Edit project</button>}
+        </>}
+      </section>}
       {manage && (
         <>
           {p && p.type !== "DEAL" && <section className="settings-panel settings-classification"><h2>Project settings</h2>

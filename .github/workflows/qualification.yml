@@ -1,0 +1,140 @@
+# Shared qualification: PRs and requested production cuts execute the same gates.
+name: Release qualification
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Lint, build and test
+    # Match the documented production native ABI/toolchain; latest is a moving image.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sho"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      APP_URL: http://localhost:3100
+      TASKBOARD_URL: http://localhost:3100
+      JOB_SECRET: ci-only-not-a-real-secret-0123
+      SUITE_ACCOUNTS_CLIENT_SECRET: ci-synthetic-accounts-only-0123456789
+      SUITE_BUGOFF_CLIENT_SECRET: ci-synthetic-bugoff-only-0123456789
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # pull_request workflows otherwise check out a merge commit. Pin the head so the run is that SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # Node 22 treats `node --test scripts/ci/` as a file and exits MODULE_NOT_FOUND.
+      # This glob is that directory on Node 22: every *.test.mjs under scripts/ci/.
+      - name: Node tests for scripts/ci
+        run: node --test "scripts/ci/**/*.test.mjs"
+      - name: Reproduce the pinned native shutdown binary
+        run: node scripts/ci/reproduce-native.mjs
+      - run: npm ci
+      - name: Synthetic backup recovery rehearsal
+        env:
+          RECOVERY_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: node scripts/ci/recovery-drill.mjs
+      # APL-2761. Listing loads every story spec without a browser or a server. One file that cannot load (a vitest import)
+      # makes Playwright collect 0 tests, so a total of 0 fails here instead of in staging-e2e.
+      - name: Playwright collects the story specs
+        run: |
+          out=$(npx playwright test --list 2>&1) || true
+          total=$(printf '%s\n' "$out" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
+          printf '%s\n' "$out" | grep -E '^(Total|Error)' || true
+          if [ "${total:-0}" -eq 0 ]; then
+            printf '%s\n' "$out" | tail -n 40
+            echo "::error::Playwright collected 0 tests from tests/e2e/stories."; exit 1
+          fi
+          echo "Playwright story tests collected: $total"
+      - name: Data contract reference
+        run: node scripts/data-reference.mjs --check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npx next typegen && npx tsc --noEmit
+      # tsconfig.json leaves tests/e2e out (Playwright story specs), so check them on their own (APL-2748).
+      - name: Typecheck story specs
+        run: npx tsc --noEmit -p tsconfig.e2e.json
+      - run: npx prisma migrate deploy
+      - name: Build
+        run: npm run build
+      - name: Verify retired routes and preserved suite routes
+        run: node scripts/verify-concierge-removal.mjs
+      # APL-2609's mode test drives these mode servers in Playwright Chromium.
+      - name: Install Playwright Chromium
+        run: npx playwright-core install --with-deps chromium
+      # SHO-2881. Every *.mode.test.ts file is excluded from `npm test` by one glob and run in this single loop.
+      - name: Per-mode tests
+        run: npm run test:modes -- --reporter=default --reporter=json --outputFile=test-results/modes.json
+      - name: Start the app
+        run: |
+          # APL-2652: RETURN_PATH_LOG=1 makes the proxy log the return path it forwards, for tests/return-to.test.ts.
+          (RETURN_PATH_LOG=1 NODE_ENV=production PORT=3100 node --import tsx server.js > server.log 2>&1 &)
+          url="${APP_HEALTH_URL:-http://localhost:3100/api/health}"
+          attempts="${APP_HEALTH_ATTEMPTS:-30}"
+          pause="${APP_HEALTH_PAUSE:-2}"
+          ready=0
+          for i in $(seq 1 "$attempts"); do
+            if curl -fsS "$url"; then
+              ready=1
+              break
+            fi
+            sleep "$pause"
+          done
+          if [ "$ready" -ne 1 ]; then
+            echo 'The app did not come up' >&2
+            tail -n 50 server.log >&2 || true
+            exit 1
+          fi
+      - name: Unit tests
+        run: npm test -- --reporter=default --reporter=json --outputFile=test-results/unit.json
+      # Audit-only residue check: run the complete suite again against the same
+      # disposable database and app process, retaining a separate report.
+      - name: Repeat unit tests on same disposable database (audit candidate)
+        if: ${{ github.event.pull_request.head.ref == 'codex/sho-handover-hardening-7c4a' }}
+        run: npm test -- --reporter=default --reporter=json --outputFile=test-results/unit-repeat.json
+      - name: Deal filter browser regression
+        run: npx vitest run -c vitest.deal-filters.config.mts --reporter=default --reporter=json --outputFile=test-results/deal-filters.json
+      # APL-2911. Story specs that drive this local server in Playwright Chromium (outbox mail, the CI Super Admin), so
+      # staging cannot run them and npm test no longer does. Each file must collect at least one test, then every test runs.
+      - name: Local Playwright story specs
+        run: |
+          specs=(tests/e2e/stories/SHO-REG-TASKS-02.spec.ts tests/e2e/stories/SHO-REG-TASKS-03.spec.ts tests/e2e/stories/SHO-REG-TASKS-01.spec.ts tests/e2e/stories/APL-2531.spec.ts tests/e2e/stories/APL-2533.spec.ts tests/e2e/stories/APL-2691.spec.ts tests/e2e/stories/APL-2624.spec.ts tests/e2e/stories/APL-2721.spec.ts tests/e2e/stories/APL-2737.spec.ts tests/e2e/stories/SHO-REG-SEARCH-04.spec.ts tests/e2e/stories/SHO-REG-PROJECTS-01.spec.ts tests/e2e/stories/SHO-REG-PROJECTS-02.spec.ts tests/e2e/stories/SHO-REG-PROJECTS-03.spec.ts tests/e2e/stories/SHO-REG-PROJECTS-04.spec.ts tests/e2e/stories/SHO-REG-PROJECTS-05.spec.ts tests/e2e/stories/SHO-REG-PROJECTS-06.spec.ts tests/e2e/stories/SHO-REG-CRM-01.spec.ts tests/e2e/stories/SHO-REG-CRM-02.spec.ts tests/e2e/stories/SHO-REG-AUTH-01.spec.ts tests/e2e/stories/SHO-REG-AUTH-05.spec.ts tests/e2e/stories/SHO-REG-SEARCH-01.spec.ts tests/e2e/stories/SHO-REG-SEARCH-02.spec.ts tests/e2e/stories/SHO-REG-HOME-01.spec.ts tests/e2e/stories/SHO-AUDIT-MY-TASKS-PAGING.spec.ts tests/e2e/stories/SHO-REG-UI-05.spec.ts tests/e2e/stories/SHO-REG-UI-06.spec.ts tests/e2e/stories/SHO-REG-TASKS-04.spec.ts tests/e2e/stories/SHO-REG-TASKS-06.spec.ts tests/e2e/stories/SHO-REG-TASKS-07.spec.ts tests/e2e/stories/SHO-REG-TASKS-08.spec.ts tests/e2e/stories/SHO-REG-TASKS-09.spec.ts tests/e2e/stories/SHO-REG-TASKS-12.spec.ts tests/e2e/stories/SHO-REG-TASKS-13.spec.ts tests/e2e/stories/SHO-AUDIT-UNDO-CONFLICT.spec.ts)
+          for f in "${specs[@]}"; do
+            total=$(npx playwright test --list "$f" | sed -n 's/^Total: \([0-9][0-9]*\) tests\{0,1\} in .*/\1/p')
+            echo "$f: ${total:-0} tests"
+            if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
+          done
+          npx playwright test "${specs[@]}"
+      - name: Qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualification-results
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Server log (on failure)
+        if: failure()
+        run: tail -n 200 server.log || true

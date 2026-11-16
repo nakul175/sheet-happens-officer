@@ -8,7 +8,9 @@ export async function GET(req: Request) {
   try {
     await connection();
     const url = new URL(req.url);
-    const cfg = suiteConfig(url.searchParams.get("client_id") ?? "");
+    const clientId = url.searchParams.get("client_id");
+    if (clientId !== "accounts" && clientId !== "bugoff") return oauthJson({ error: "invalid_request" }, 400);
+    const cfg = suiteConfig(clientId);
     if (!validAuthorization(url.searchParams, cfg)) return oauthJson({ error: "invalid_request" }, 400);
     let user;
     try { user = await currentUser(); }

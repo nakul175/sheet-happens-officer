@@ -7,8 +7,8 @@ import { isActive, isAdmin, projectAccess, requireWrite, type Actor, type Tx } f
 import { WORKSTREAM_DEAL, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { logAction } from "@/lib/notify";
-import { assertNoCycle, orgOf } from "@/lib/orgs";
-import { taskAccess } from "@/lib/tasks";
+import { assertSafeParentTx, orgOf, requireOrgEdit } from "@/lib/orgs";
+import { taskAccess } from "@/lib/task-access";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
@@ -33,6 +33,8 @@ async function contactOf(user: Actor, id: string, o: { removed?: boolean } = {})
   return c;
 }
 const canEditContact = (user: Actor, c: { createdById: string }) => isAdmin(user) || c.createdById === user.id;
+const canEditNote = (user: Actor, note: { authorId: string }, dealLeader: boolean) =>
+  isAdmin(user) || note.authorId === user.id || dealLeader;
 function requireContactEdit(user: Actor, c: { createdById: string }) {
   if (!canEditContact(user, c)) throw new ApiError(403, "Only the person who added this contact, or an Admin, can change it.");
 }
@@ -80,14 +82,36 @@ export async function createContact(user: Actor, orgId: string, input: { name: s
   const u = await me(user);
   const known = await knownByList(input.knownBy, user, u.workspaceId);
   return db.$transaction(async (tx) => {
-    const c = await tx.contact.create({ data: { workspaceId: u.workspaceId, organisationId: orgId, name, role: clean(input.role), email: clean(input.email), phone: clean(input.phone), createdById: user.id } });
+    let currentOrg;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${orgId} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      for (const userId of [...known].sort()) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR SHARE NOWAIT`;
+      currentOrg = await tx.organisation.findUnique({ where: { id: orgId }, select: { workspaceId: true, archivedAt: true } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The organisation or Known by membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!account || !isActive(account) || account.workspaceId !== u.workspaceId) throw notFound("Contact");
+    requireCrm({ ...user, orgRole: account.orgRole });
+    if (!currentOrg || currentOrg.workspaceId !== account.workspaceId) throw notFound("Organisation");
+    if (currentOrg.archivedAt) throw new ApiError(409, "This organisation is archived.");
+    const recipients = await tx.user.findMany({ where: { id: { in: known }, workspaceId: account.workspaceId }, select: { id: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (recipients.length !== known.length || recipients.some((recipient) => !isActive(recipient))) {
+      throw new ApiError(409, "Known by membership changed. Reload and try again.");
+    }
+    const c = await tx.contact.create({ data: { workspaceId: account.workspaceId, organisationId: orgId, name, role: clean(input.role), email: clean(input.email), phone: clean(input.phone), createdById: user.id } });
     await tx.contactKnownBy.createMany({ data: known.map((userId) => ({ contactId: c.id, userId })) });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: c.id, action: "contact.created", after: { name, organisationId: orgId } });
     return c;
   });
 }
 
-export async function updateContact(user: Actor, id: string, input: { name?: string; role?: string | null; email?: string | null; phone?: string | null; knownBy?: string[] }) {
+export async function updateContact(user: Actor, id: string, input: { name?: string; role?: string | null; email?: string | null; phone?: string | null; knownBy?: string[]; expected?: { name: string; role: string | null; email: string | null; phone: string | null; knownBy: string[] } }) {
   requireCrm(user);
   const c = await contactOf(user, id);
   requireContactEdit(user, c);
@@ -104,8 +128,49 @@ export async function updateContact(user: Actor, id: string, input: { name?: str
     const was = cur.map((k) => k.userId).sort();
     if (JSON.stringify([...known].sort()) !== JSON.stringify(was)) { before.knownBy = was; after.knownBy = [...known].sort(); } else known = null;
   }
-  if (!Object.keys(after).length) return c;
+  if (!Object.keys(after).length && !input.expected) return c;
   return db.$transaction(async (tx) => {
+    let fresh;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      for (const userId of [...(known ?? [])].sort()) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR SHARE NOWAIT`;
+      fresh = await tx.contact.findUnique({ where: { id } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The contact or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!fresh || !account || !isActive(account) || account.workspaceId !== c.workspaceId || fresh.workspaceId !== account.workspaceId) throw notFound("Contact");
+    const currentActor = { ...user, orgRole: account.orgRole };
+    requireCrm(currentActor);
+    requireContactEdit(currentActor, fresh);
+    if (input.expected) {
+      const original = input.expected;
+      const currentKnownBy = (await tx.contactKnownBy.findMany({ where: { contactId: id }, select: { userId: true } })).map((item) => item.userId).sort();
+      if (fresh.name !== original.name || fresh.role !== original.role || fresh.email !== original.email || fresh.phone !== original.phone ||
+          JSON.stringify(currentKnownBy) !== JSON.stringify([...original.knownBy].sort())) {
+        throw new ApiError(409, "This contact changed while you were editing. Reload and try again.");
+      }
+    }
+    if (fresh.removedAt || fresh.organisationId !== c.organisationId || fresh.createdById !== c.createdById ||
+        (["name", "role", "email", "phone"] as const).some((key) => fresh[key] !== c[key])) {
+      throw new ApiError(409, "This contact changed while you were editing. Reload and try again.");
+    }
+    if (!Object.keys(after).length) return fresh;
+    if (known) {
+      const currentKnown = (await tx.contactKnownBy.findMany({ where: { contactId: id }, select: { userId: true } })).map((item) => item.userId).sort();
+      if (JSON.stringify(currentKnown) !== JSON.stringify(cur.map((item) => item.userId).sort())) {
+        throw new ApiError(409, "Known by changed while you were editing. Reload and try again.");
+      }
+      const currentRecipients = await tx.user.findMany({ where: { id: { in: known }, workspaceId: account.workspaceId }, select: { id: true, deactivatedAt: true, emailVerifiedAt: true } });
+      if (currentRecipients.length !== known.length || currentRecipients.some((recipient) => !isActive(recipient))) {
+        throw new ApiError(409, "Known by membership changed. Reload and try again.");
+      }
+    }
     const row = Object.keys(data).length ? await tx.contact.update({ where: { id }, data }) : c;
     if (known) { await tx.contactKnownBy.deleteMany({ where: { contactId: id } }); await tx.contactKnownBy.createMany({ data: known.map((userId) => ({ contactId: id, userId })) }); }
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: id, action: "contact.updated", before, after });
@@ -118,9 +183,28 @@ export async function removeContact(user: Actor, id: string) {
   const c = await contactOf(user, id);
   requireContactEdit(user, c);
   await db.$transaction(async (tx) => {
-    await tx.contact.update({ where: { id }, data: { removedAt: new Date() } });
-    await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: id, action: "contact.removed", before: { removedAt: null }, after: { removedAt: new Date().toISOString() } });
-  });
+    let fresh;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      fresh = await tx.contact.findUnique({ where: { id } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The contact or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!fresh || !account || !isActive(account) || account.workspaceId !== c.workspaceId || fresh.workspaceId !== account.workspaceId) throw notFound("Contact");
+    const currentActor = { ...user, orgRole: account.orgRole };
+    requireCrm(currentActor);
+    requireContactEdit(currentActor, fresh);
+    if (fresh.removedAt) throw new ApiError(409, "This contact is already removed.");
+    const removedAt = new Date();
+    await tx.contact.update({ where: { id }, data: { removedAt } });
+    await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: id, action: "contact.removed", before: { removedAt: null }, after: { removedAt: removedAt.toISOString() } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- notes (11.3)
@@ -133,7 +217,6 @@ export async function createNote(user: Actor, orgId: string, input: NoteInput) {
   const text = input.text.trim();
   if (!text) throw new ApiError(400, "Write what happened.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || Number.isNaN(Date.parse(`${input.date}T00:00:00Z`))) throw new ApiError(400, "Use a date like 2026-10-31.");
-  const u = await me(user);
   if (input.projectId) {
     const a = await projectAccess(user, input.projectId); // non-members get "not found"
     if (a.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Notes can only be linked to a deal.");
@@ -146,13 +229,48 @@ export async function createNote(user: Actor, orgId: string, input: NoteInput) {
     if (ok !== contactIds.length) throw new ApiError(400, "Choose contacts of this organisation.");
   }
   return db.$transaction(async (tx) => {
+    let currentOrg;
+    let account;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${orgId} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      currentOrg = await tx.organisation.findUnique({ where: { id: orgId } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      if (!currentOrg || !account || !isActive(account) || currentOrg.workspaceId !== account.workspaceId) throw notFound("Organisation");
+      const currentActor = { ...user, orgRole: account.orgRole };
+      requireCrm(currentActor);
+      if (currentOrg.archivedAt) throw new ApiError(409, "This organisation is archived.");
+      if (input.projectId) {
+        await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${input.projectId} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${input.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        const access = await projectAccess(currentActor, input.projectId, { tx, write: true });
+        if (access.project.workspaceId !== account.workspaceId || access.project.typeId !== WORKSTREAM_DEAL) throw notFound("Project");
+        await tx.$queryRaw`SELECT "id" FROM "DealParty" WHERE "projectId" = ${input.projectId} AND "organisationId" = ${orgId} FOR SHARE NOWAIT`;
+        if (!await tx.dealParty.findFirst({ where: { projectId: input.projectId, organisationId: orgId } })) {
+          throw new ApiError(400, "That deal does not involve this organisation.");
+        }
+      }
+      for (const contactId of [...contactIds].sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${contactId} FOR SHARE NOWAIT`;
+      }
+      if (contactIds.length) {
+        const currentContacts = await tx.contact.count({ where: { id: { in: contactIds }, organisationId: orgId, removedAt: null } });
+        if (currentContacts !== contactIds.length) throw new ApiError(400, "Choose contacts of this organisation.");
+      }
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "The note or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!account || !currentOrg) throw notFound("Organisation");
     const n = await tx.note.create({
-      data: { workspaceId: u.workspaceId, organisationId: orgId, projectId: input.projectId ?? null, kind: input.kind, date: new Date(`${input.date}T00:00:00Z`), text, authorId: user.id },
+      data: { workspaceId: account.workspaceId, organisationId: orgId, projectId: input.projectId ?? null, kind: input.kind, date: new Date(`${input.date}T00:00:00Z`), text, authorId: user.id },
     });
     if (contactIds.length) await tx.noteContact.createMany({ data: contactIds.map((contactId) => ({ noteId: n.id, contactId })) });
     await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: n.id, action: "note.created", after: { kind: input.kind, organisationId: orgId, dealId: input.projectId ?? null } });
     return n;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 function presentNotes(rows: Awaited<ReturnType<typeof loadNotes>>, user: Actor, leaderOf: Set<string>) {
@@ -196,14 +314,93 @@ export async function removeNote(user: Actor, id: string) {
   const n = await db.note.findFirst({ where: { id, workspaceId: u.workspaceId, ...visibleNotes(user) } });
   if (!n) throw notFound("Note");
   const leads = n.projectId ? !!(await db.projectMember.findFirst({ where: { projectId: n.projectId, userId: user.id, role: "LEADER" } })) : false;
-  if (!(isAdmin(user) || n.authorId === user.id || leads)) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can delete a note.");
+  if (!canEditNote(user, n, leads)) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can delete a note.");
   await db.$transaction(async (tx) => {
-    await tx.note.update({ where: { id }, data: { removedAt: new Date() } });
-    await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: id, action: "note.removed", before: { removedAt: null }, after: { removedAt: new Date().toISOString() } });
-  });
+    let fresh;
+    let account;
+    let currentActor;
+    let currentLead = false;
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "Note" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      fresh = await tx.note.findUnique({ where: { id } });
+      account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      if (!fresh || !account || !isActive(account) || fresh.workspaceId !== account.workspaceId) throw notFound("Note");
+      currentActor = { ...user, orgRole: account.orgRole };
+      requireCrm(currentActor);
+      if (fresh.projectId) {
+        await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${fresh.projectId} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${fresh.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        const access = await projectAccess(currentActor, fresh.projectId, { tx });
+        if (access.project.typeId !== WORKSTREAM_DEAL) throw notFound("Note");
+        currentLead = access.member?.role === "LEADER";
+      }
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This note or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    if (!fresh || !currentActor) throw notFound("Note");
+    if (!canEditNote(currentActor, fresh, currentLead)) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can delete a note.");
+    if (fresh.removedAt) throw new ApiError(409, "This note is already removed.");
+    const removedAt = new Date();
+    const changed = await tx.note.updateMany({ where: { id, removedAt: null }, data: { removedAt } });
+    if (changed.count !== 1) throw new ApiError(409, "This note is already removed.");
+    await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: id, action: "note.removed", before: { removedAt: null }, after: { removedAt: removedAt.toISOString() } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 // ---------------------------------------------------------------- task links (11.4)
+async function lockedTaskLinkWriter(tx: Tx, user: Actor, taskId: string) {
+  let projectId: string;
+  try {
+    const [row] = await tx.$queryRaw<{ projectId: string }[]>`SELECT "projectId" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
+    if (!row) throw notFound("Task");
+    projectId = row.projectId;
+    // Membership departure can take its member lock before reaching the task.
+    // NOWAIT avoids holding the task while waiting in the reverse order.
+    await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR SHARE NOWAIT`;
+    await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+  } catch (error) {
+    if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+      throw new ApiError(409, "This task link or its access is changing. Reload and try again.");
+    }
+    throw error;
+  }
+  const account = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+  if (!account || !isActive(account)) throw notFound("Task");
+  const currentActor = { ...user, orgRole: account.orgRole };
+  requireCrm(currentActor);
+  const task = await tx.task.findUnique({ where: { id: taskId } });
+  if (!task || task.deletedAt) throw notFound("Task");
+  const access = await taskAccess(currentActor, task.projectId, { write: true, tx });
+  if (account.workspaceId !== access.project.workspaceId || task.workspaceId !== account.workspaceId) throw notFound("Task");
+  requireWrite(access);
+  return task;
+}
+
+async function currentTaskLinkLabel(tx: Tx, workspaceId: string, input: { organisationId?: string | null; contactId?: string | null }) {
+  try {
+    if (input.organisationId) {
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${input.organisationId} FOR SHARE NOWAIT`;
+      const org = await tx.organisation.findFirst({ where: { id: input.organisationId, workspaceId } });
+      if (!org) throw notFound("Organisation");
+      return org.name;
+    }
+    await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${input.contactId!} FOR SHARE NOWAIT`;
+    const contact = await tx.contact.findFirst({ where: { id: input.contactId!, workspaceId, removedAt: null } });
+    if (!contact) throw notFound("Contact");
+    return contact.name;
+  } catch (error) {
+    if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+      throw new ApiError(409, "The linked record is changing. Reload and try again.");
+    }
+    throw error;
+  }
+}
+
 export async function addTaskLink(user: Actor, taskId: string, input: { organisationId?: string | null; contactId?: string | null }) {
   requireCrm(user);
   const t = await db.task.findUnique({ where: { id: taskId } });
@@ -211,16 +408,20 @@ export async function addTaskLink(user: Actor, taskId: string, input: { organisa
   const a = await taskAccess(user, t.projectId, { write: true });
   requireWrite(a);
   if (!!input.organisationId === !!input.contactId) throw new ApiError(400, "Link either an organisation or a contact.");
-  let label = "";
-  if (input.organisationId) label = (await orgOf(user, input.organisationId)).name;
-  else label = (await contactOf(user, input.contactId!)).name;
+  if (input.organisationId) await orgOf(user, input.organisationId);
+  else await contactOf(user, input.contactId!);
   const dup = await db.taskLink.findFirst({ where: { taskId, organisationId: input.organisationId ?? null, contactId: input.contactId ?? null } });
   if (dup) throw new ApiError(409, "This task is already linked there.");
   return db.$transaction(async (tx) => {
+    const current = await lockedTaskLinkWriter(tx, user, taskId);
+    const label = await currentTaskLinkLabel(tx, current.workspaceId, input);
+    if (await tx.taskLink.findFirst({ where: { taskId, organisationId: input.organisationId ?? null, contactId: input.contactId ?? null } })) {
+      throw new ApiError(409, "This task is already linked there.");
+    }
     const l = await tx.taskLink.create({ data: { taskId, organisationId: input.organisationId ?? null, contactId: input.contactId ?? null } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: taskId, action: "task.link_added", after: { linkId: l.id, organisationId: l.organisationId, contactId: l.contactId, label } });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: taskId, action: "task.link_added", after: { linkId: l.id, organisationId: l.organisationId, contactId: l.contactId, label } });
     return l;
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function removeTaskLink(user: Actor, taskId: string, linkId: string) {
@@ -232,9 +433,12 @@ export async function removeTaskLink(user: Actor, taskId: string, linkId: string
   const l = await db.taskLink.findFirst({ where: { id: linkId, taskId } });
   if (!l) throw notFound("Link");
   await db.$transaction(async (tx) => {
+    const current = await lockedTaskLinkWriter(tx, user, taskId);
+    const fresh = await tx.taskLink.findFirst({ where: { id: linkId, taskId } });
+    if (!fresh) throw notFound("Link");
     await tx.taskLink.delete({ where: { id: linkId } });
-    await logAction(tx, { actorId: user.id, projectId: t.projectId, targetType: "task", targetId: taskId, action: "task.link_removed", before: { linkId, organisationId: l.organisationId, contactId: l.contactId } });
-  });
+    await logAction(tx, { actorId: user.id, projectId: current.projectId, targetType: "task", targetId: taskId, action: "task.link_removed", before: { linkId, organisationId: fresh.organisationId, contactId: fresh.contactId } });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 export async function linksOfTask(taskId: string) {
@@ -285,14 +489,14 @@ const norm = (v: unknown) => JSON.stringify(v === undefined ? null : v);
 const diff = (keys: string[], b: Record<string, unknown>, f: Record<string, unknown>, now: Record<string, unknown>) =>
   keys.filter((k) => norm(now[k]) !== norm(f[k])).map((k) => ({ field: k, before: b[k], after: f[k], now: now[k] }));
 
-async function planRecord(row: { action: string; targetId: string; beforeState: unknown; afterState: unknown }, user: Actor): Promise<RecPlan> {
+async function planRecord(row: { action: string; targetId: string; beforeState: unknown; afterState: unknown }, user: Actor, tx?: Tx): Promise<RecPlan> {
   const b = (row.beforeState ?? {}) as Record<string, unknown>;
   const f = (row.afterState ?? {}) as Record<string, unknown>;
   const id = row.targetId;
   const bad = (m: string) => new ApiError(409, m);
   switch (row.action) {
     case "organisation.created": case "organisation.archived": case "organisation.unarchived": {
-      const o = await db.organisation.findUnique({ where: { id } });
+      const o = await (tx ?? db).organisation.findUnique({ where: { id } });
       if (!o) throw bad("This organisation no longer exists.");
       // Undo reverses the logged action. Creating an organisation is undone by archiving it.
       const archive = row.action === "organisation.created" || row.action === "organisation.unarchived";
@@ -300,35 +504,70 @@ async function planRecord(row: { action: string; targetId: string; beforeState: 
       return { conflicts: [], apply: async (tx) => { await tx.organisation.update({ where: { id }, data: { archivedAt: archive ? new Date() : null } }); } };
     }
     case "organisation.updated": {
-      const o = await db.organisation.findUnique({ where: { id } });
-      if (!o) throw bad("This organisation no longer exists.");
+      if (!tx) throw bad("This organisation action needs a fresh check.");
+      const o = await tx.organisation.findUnique({ where: { id } });
+      if (!o || o.archivedAt) throw bad("This organisation is no longer editable.");
       const keys = Object.keys(f);
-      if (keys.includes("parentId") && b.parentId) await assertNoCycle(id, b.parentId as string);
+      if (!keys.length || keys.some((key) => !["name", "kind", "country", "level", "parentId"].includes(key) || !(key in b))) throw bad("This organisation action is incomplete.");
+      for (const key of keys) {
+        const valid = key === "name"
+          ? [b[key], f[key]].every((v) => typeof v === "string" && !!v.trim())
+          : key === "level"
+            ? [b[key], f[key]].every((v) => v === null || ["GROUP", "LEGAL_ENTITY", "BUYING_OFFICE"].includes(v as string))
+            : [b[key], f[key]].every((v) => v === null || typeof v === "string");
+        if (!valid) throw bad("This organisation action is incomplete.");
+      }
+      if (keys.includes("parentId") && b.parentId) await assertSafeParentTx(tx, id, b.parentId as string, o.workspaceId);
       return { conflicts: diff(keys, b, f, { name: o.name, kind: o.kind, country: o.country, level: o.level, parentId: o.parentId }), apply: async (tx) => { await tx.organisation.update({ where: { id }, data: Object.fromEntries(keys.map((k) => [k, b[k] ?? null])) }); } };
     }
     case "contact.created": case "contact.removed": {
-      const c = await db.contact.findUnique({ where: { id } });
+      const c = await (tx ?? db).contact.findUnique({ where: { id } });
       if (!c) throw bad("This contact no longer exists.");
       const remove = row.action === "contact.created";
       if (remove === !!c.removedAt) throw bad(remove ? "This contact is already removed." : "This contact is already back.");
       return { conflicts: [], apply: async (tx) => { await tx.contact.update({ where: { id }, data: { removedAt: remove ? new Date() : null } }); } };
     }
     case "contact.updated": {
-      const c = await db.contact.findUnique({ where: { id }, include: { knownBy: true } });
+      const c = await (tx ?? db).contact.findUnique({ where: { id }, include: { knownBy: true } });
       if (!c || c.removedAt) throw bad("This contact no longer exists.");
       const keys = Object.keys(f);
+      if (!keys.length || keys.some((key) => !["name", "role", "email", "phone", "knownBy"].includes(key) || !(key in b))) throw bad("This contact action is incomplete.");
+      for (const key of keys) {
+        const valid = key === "knownBy"
+          ? [b[key], f[key]].every((v) => Array.isArray(v) && v.every((id) => typeof id === "string") && new Set(v).size === v.length)
+          : key === "name"
+            ? [b[key], f[key]].every((v) => typeof v === "string" && !!v.trim())
+            : [b[key], f[key]].every((v) => v === null || typeof v === "string");
+        if (!valid) throw bad("This contact action is incomplete.");
+      }
       const now: Record<string, unknown> = { name: c.name, role: c.role, email: c.email, phone: c.phone, knownBy: c.knownBy.map((k) => k.userId).sort() };
       return {
         conflicts: diff(keys, b, f, now),
         apply: async (tx) => {
           const data = Object.fromEntries(keys.filter((k) => k !== "knownBy").map((k) => [k, b[k] ?? null]));
           if (Object.keys(data).length) await tx.contact.update({ where: { id }, data });
-          if (keys.includes("knownBy")) { await tx.contactKnownBy.deleteMany({ where: { contactId: id } }); await tx.contactKnownBy.createMany({ data: (b.knownBy as string[]).map((userId) => ({ contactId: id, userId })) }); }
+          if (keys.includes("knownBy")) {
+            const prior = b.knownBy as unknown[];
+            if (prior.some((value) => typeof value !== "string") || new Set(prior).size !== prior.length) throw bad("This contact action is incomplete.");
+            // Keep prior recipients active until the relation restore commits.
+            try {
+              for (const userId of (prior as string[]).toSorted()) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR SHARE NOWAIT`;
+            } catch (error) {
+              if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+                throw new ApiError(409, "Known by membership is changing. Reload and try again.");
+              }
+              throw error;
+            }
+            const active = await tx.user.findMany({ where: { id: { in: prior as string[] }, workspaceId: c.workspaceId, deactivatedAt: null }, select: { id: true } });
+            if (active.length !== prior.length) throw bad("The previous Known by members are no longer available.");
+            await tx.contactKnownBy.deleteMany({ where: { contactId: id } });
+            await tx.contactKnownBy.createMany({ data: (prior as string[]).map((userId) => ({ contactId: id, userId })) });
+          }
         },
       };
     }
     case "note.created": case "note.removed": {
-      const n = await db.note.findUnique({ where: { id } });
+      const n = await (tx ?? db).note.findUnique({ where: { id } });
       if (!n) throw bad("This note no longer exists.");
       const remove = row.action === "note.created";
       if (remove === !!n.removedAt) throw bad(remove ? "This note is already deleted." : "This note is already back.");
@@ -345,6 +584,140 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
   if (row.undoneAt) throw new ApiError(409, "This action was already undone.");
   if (!isUndoable(row.action)) throw new ApiError(409, "This kind of action cannot be undone.");
   if (isTooOldToUndo(row.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
+  if (row.action === "note.created" || row.action === "note.removed") {
+    if (row.targetType !== "note") throw new ApiError(409, "This note action has changed. Reload before undoing it.");
+    return db.$transaction(async (tx) => {
+      let currentOrgRole = user.orgRole;
+      let hasNoteEditRights = false;
+      try {
+        await tx.$queryRaw`SELECT "id" FROM "Note" WHERE "id" = ${row.targetId} FOR UPDATE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+        const note = await tx.note.findUnique({ where: { id: row.targetId } });
+        if (!note) throw notFound("Note");
+        const currentUser = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+        if (!currentUser || !isActive(currentUser) || currentUser.workspaceId !== note.workspaceId) throw notFound("Note");
+        currentOrgRole = currentUser.orgRole;
+        const currentActor = { ...user, orgRole: currentOrgRole };
+        requireCrm(currentActor);
+        hasNoteEditRights = canEditNote(currentActor, note, false);
+        if (note.projectId) {
+          await tx.$queryRaw`SELECT "id" FROM "Project" WHERE "id" = ${note.projectId} FOR SHARE NOWAIT`;
+          await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${note.projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+          try {
+            const access = await projectAccess(currentActor, note.projectId, { tx });
+            if (access.project.typeId !== WORKSTREAM_DEAL) throw notFound("Note");
+            // Match removeNote's real Leader seat, not projectAccess's creator role.
+            hasNoteEditRights ||= canEditNote(currentActor, note, access.member?.role === "LEADER");
+          } catch (error) {
+            if (error instanceof ApiError && error.status === 404) throw notFound("Note");
+            throw error;
+          }
+        }
+        await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw new ApiError(409, "This note or its access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      const fresh = await tx.actionLog.findUnique({ where: { id: row.id } });
+      if (!fresh || fresh.projectId || fresh.action !== row.action || fresh.targetType !== "note" || fresh.targetId !== row.targetId) {
+        throw new ApiError(409, "This note action has changed. Reload before undoing it.");
+      }
+      if (fresh.actorId !== user.id && !isAdmin({ orgRole: currentOrgRole })) throw new ApiError(403, "You can only undo your own actions.");
+      if (!hasNoteEditRights) throw new ApiError(403, "Only the author, the deal's Leader or an Admin can undo this note action.");
+      if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
+      if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
+      const plan = await planRecord(fresh, user, tx);
+      const claimed = await tx.actionLog.updateMany({ where: { id: fresh.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+      if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
+      await plan.apply(tx);
+      await logAction(tx, { actorId: user.id, projectId: null, targetType: "note", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: false } });
+      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
+    }, { isolationLevel: "ReadCommitted" });
+  }
+  if (row.action === "contact.created" || row.action === "contact.removed" || row.action === "contact.updated") {
+    if (row.targetType !== "contact") throw new ApiError(409, "This contact action has changed. Reload before undoing it.");
+    return db.$transaction(async (tx) => {
+      let contact;
+      let currentUser;
+      try {
+        // Lock the resource before planning, then the actor and action. This makes
+        // direct contact edits and competing Undo requests serialize with the inverse.
+        await tx.$queryRaw`SELECT "id" FROM "Contact" WHERE "id" = ${row.targetId} FOR UPDATE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
+        contact = await tx.contact.findUnique({ where: { id: row.targetId } });
+        currentUser = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw new ApiError(409, "This contact or its access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      if (!contact || !currentUser || !isActive(currentUser) || currentUser.workspaceId !== contact.workspaceId) throw notFound("Contact");
+      const currentActor = { ...user, orgRole: currentUser.orgRole };
+      requireCrm(currentActor);
+      requireContactEdit(currentActor, contact);
+      const fresh = await tx.actionLog.findUnique({ where: { id: row.id } });
+      if (!fresh || fresh.projectId || fresh.action !== row.action || fresh.targetType !== "contact" || fresh.targetId !== contact.id) {
+        throw new ApiError(409, "This contact action has changed. Reload before undoing it.");
+      }
+      if (fresh.actorId !== user.id && !isAdmin(currentActor)) throw new ApiError(403, "You can only undo your own actions.");
+      if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
+      if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
+      const plan = await planRecord(fresh, currentActor, tx);
+      if (plan.conflicts.length && !anyway) {
+        throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[fresh.action], changedBy: [], conflicts: plan.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });
+      }
+      const claimed = await tx.actionLog.updateMany({ where: { id: fresh.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+      if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
+      await plan.apply(tx);
+      const overrode = anyway && plan.conflicts.length > 0;
+      await logAction(tx, { actorId: user.id, projectId: null, targetType: "contact", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: overrode } });
+      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode };
+    }, { isolationLevel: "ReadCommitted" });
+  }
+  if (row.action === "organisation.created" || row.action === "organisation.archived" || row.action === "organisation.unarchived" || row.action === "organisation.updated") {
+    if (row.targetType !== "organisation") throw new ApiError(409, "This organisation action has changed. Reload before undoing it.");
+    return db.$transaction(async (tx) => {
+      let organisation;
+      let currentUser;
+      try {
+        await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${row.targetId} FOR UPDATE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "ActionLog" WHERE "id" = ${row.id} FOR UPDATE NOWAIT`;
+        organisation = await tx.organisation.findUnique({ where: { id: row.targetId } });
+        currentUser = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw new ApiError(409, "This organisation or its access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      if (!organisation || !currentUser || !isActive(currentUser) || currentUser.workspaceId !== organisation.workspaceId) throw notFound("Organisation");
+      const currentActor = { ...user, orgRole: currentUser.orgRole };
+      requireCrm(currentActor);
+      requireOrgEdit(currentActor, organisation);
+      const fresh = await tx.actionLog.findUnique({ where: { id: row.id } });
+      if (!fresh || fresh.projectId || fresh.action !== row.action || fresh.targetType !== "organisation" || fresh.targetId !== organisation.id) {
+        throw new ApiError(409, "This organisation action has changed. Reload before undoing it.");
+      }
+      if (fresh.actorId !== user.id && !isAdmin(currentActor)) throw new ApiError(403, "You can only undo your own actions.");
+      if (fresh.undoneAt) throw new ApiError(409, "This action was already undone.");
+      if (isTooOldToUndo(fresh.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
+      const plan = await planRecord(fresh, currentActor, tx);
+      if (plan.conflicts.length && !anyway) {
+        throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[fresh.action], changedBy: [], conflicts: plan.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });
+      }
+      const claimed = await tx.actionLog.updateMany({ where: { id: fresh.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+      if (claimed.count !== 1) throw new ApiError(409, "This action was already undone.");
+      await plan.apply(tx);
+      const overrode = anyway && plan.conflicts.length > 0;
+      await logAction(tx, { actorId: user.id, projectId: null, targetType: "organisation", targetId: fresh.targetId, action: "undo", before: { undoes: fresh.id, action: fresh.action }, after: { undoes: fresh.id, label: UNDO_LABELS[fresh.action], anyway: overrode } });
+      return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode };
+    }, { isolationLevel: "ReadCommitted" });
+  }
   const p = await planRecord(row, user);
   if (p.conflicts.length && !anyway) {
     throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[row.action], changedBy: [], conflicts: p.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });

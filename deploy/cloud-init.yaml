@@ -49,7 +49,7 @@ write_files:
       Description=Sheet Happens Officer
       After=network-online.target
       Wants=network-online.target
-
+      
       [Service]
       User=deploy
       Group=deploy
@@ -57,11 +57,15 @@ write_files:
       EnvironmentFile=/etc/sho/app.env
       EnvironmentFile=/etc/sho/local.env
       EnvironmentFile=-/opt/sho/current/release.env
+      EnvironmentFile=/etc/bugoff/suite.env
+      EnvironmentFile=/home/deploy/aplyd-accounts-stage/private/sho-central.env
       Environment=NODE_ENV=production
-      ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p 3000 -H 127.0.0.1
+      ExecStart=/usr/bin/node --import tsx server.js
       Restart=always
       RestartSec=3
-
+      TimeoutStopSec=40
+      KillSignal=SIGTERM
+      
       [Install]
       WantedBy=multi-user.target
 
@@ -71,17 +75,7 @@ write_files:
     content: |
       deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart sho, /usr/bin/systemctl reload caddy, /usr/bin/journalctl -u sho *
 
-  # Scheduled jobs, in IST (the droplet's time zone). /opt/sho/bin/job.sh is installed by each release.
-  - path: /etc/cron.d/sho
-    permissions: "0644"
-    content: |
-      SHELL=/bin/bash
-      PATH=/usr/local/bin:/usr/bin:/bin
-      17 3 * * * deploy /opt/sho/bin/job.sh purge-trash
-      37 3 * * * deploy /opt/sho/bin/job.sh purge-old
-      0 8 * * * deploy /opt/sho/bin/job.sh reminders
-      50 7 * * * deploy /opt/sho/bin/job.sh stalled-deals
-      5 8 * * * deploy /opt/sho/bin/job.sh check
+  # Schedules are deliberately not provisioned. Separate approval is required.
 
   - path: /etc/logrotate.d/sho
     content: |

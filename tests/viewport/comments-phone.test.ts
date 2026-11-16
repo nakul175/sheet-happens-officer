@@ -2,10 +2,11 @@
 // textarea blur and swallow the pointerup. Needs Chromium (PW_CHROMIUM, or Playwright's build)
 // and a local server. When that server has ff_task_comments off, this starts a second one.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { account, BASE, project, superAdmin, task, type Account } from "../helpers";
+import { account, BASE, cleanupZz, project, PW, superAdmin, task, type Account } from "../helpers";
+import { requireLocalFixtures } from "./screen-ready";
 
 const SHOTS = "test-results/viewport";
 let browser: Browser;
@@ -14,11 +15,13 @@ let app = BASE;
 let projectId = "";
 let taskId = "";
 let email = "";
+let viewerEmail = "";
 // QA #128 D4: ZZ-TEST names and nakul17+ aliases. The Super Admin leads the project so that, in afterAll,
 // it can deactivate both people and archive the project through the API.
 const RUN = Date.now().toString(36);
 let root: Account | null = null;
 const made: Account[] = [];
+const CLEANUP = "test-results/viewport/comments/cleanup.json";
 
 async function up(url: string) {
   for (let i = 0; i < 40; i++) {
@@ -32,15 +35,19 @@ async function up(url: string) {
 }
 
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the phone comment test against ${BASE}.`);
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   mkdirSync(SHOTS, { recursive: true });
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const writer = await account("phonewriter", `nakul17+zztest-apl2590-phone-writer-${RUN}@aplyd.com`, "ZZ-TEST phone writer");
+  made.push(writer);
   email = writer.email;
   const colleague = await account("phonecolleague", `nakul17+zztest-apl2590-phone-colleague-${RUN}@aplyd.com`, "ZZ-TEST phone colleague");
-  made.push(writer, colleague);
+  made.push(colleague);
+  const viewer = await account("phoneviewer", `nakul17+zztest-apl2590-phone-viewer-${RUN}@aplyd.com`, "ZZ-TEST phone viewer");
+  made.push(viewer);
+  viewerEmail = viewer.email;
   root = await superAdmin();
-  const p = await project(root, root, [{ who: writer, role: "EDITOR" }, { who: colleague, role: "EDITOR" }], `ZZ-TEST phone ${RUN}`);
+  const p = await project(root, root, [{ who: writer, role: "EDITOR" }, { who: colleague, role: "EDITOR" }, { who: viewer, role: "VIEWER" }], `ZZ-TEST phone ${RUN}`);
   projectId = p.id;
   taskId = await task(writer, p.id, { title: "ZZ-TEST phone comment" });
   const probe = await writer.c.get(`/api/tasks/${taskId}`);
@@ -57,18 +64,15 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
+  let cleanup = false;
   try {
-    // Clean-up through the API: deactivate this run's people, then archive its project.
-    if (root) {
-      for (const who of made) {
-        const off = await root.c.post(`/api/team/${who.id}/deactivate`, { reassign: "leaders" });
-        expect(off.status, `deactivate ${who.name}`).toBe(200);
-      }
-      if (projectId) expect((await root.c.post(`/api/projects/${projectId}/archive`)).status, "archive the project").toBe(200);
-    }
+    if (projectId || made.length) await cleanupZz(projectId ? [projectId] : [], made);
+    cleanup = true;
   } finally {
     await browser?.close();
     if (child && !child.killed) child.kill();
+    mkdirSync("test-results/viewport/comments", { recursive: true });
+    writeFileSync(CLEANUP, JSON.stringify({ projects: Number(Boolean(projectId)), people: made.length, cleanup }, null, 2));
   }
 });
 
@@ -86,6 +90,261 @@ async function phone(): Promise<{ ctx: BrowserContext; page: Page }> {
 }
 
 describe("phone comments", () => {
+  it("shows one private assignee bell notice for a colleague comment and none for an edit, the author or a Viewer", async () => {
+    const writer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const colleague = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const viewer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const url = `/api/tasks/${taskId}/comments`;
+    const text = `ZZ-TEST feed comment ${RUN}`;
+    try {
+      for (const [ctx, who] of [[writer, made[0]], [colleague, made[1]], [viewer, made[2]]] as const) {
+        expect((await ctx.request.post("/api/auth/signin", { data: { email: who.email, password: PW } })).status()).toBe(200);
+      }
+      const notices = async (ctx: BrowserContext) => {
+        const r = await ctx.request.get("/api/notifications?limit=200");
+        expect(r.status()).toBe(200);
+        return (await r.json()).items as { id: string; text: string; href: string | null }[];
+      };
+      const writerBefore = new Set((await notices(writer)).map((n) => n.id));
+      const colleagueBefore = new Set((await notices(colleague)).map((n) => n.id));
+      const viewerBefore = new Set((await notices(viewer)).map((n) => n.id));
+      const authorPage = await colleague.newPage();
+      await authorPage.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+      await authorPage.getByRole("dialog", { name: "Task", exact: true }).waitFor();
+      await authorPage.getByLabel("Add a comment").fill(text);
+      const [posted] = await Promise.all([
+        authorPage.waitForResponse((r) => r.url().endsWith(url) && r.request().method() === "POST"),
+        authorPage.getByRole("button", { name: "Add comment" }).click(),
+      ]);
+      expect(posted.status()).toBe(201);
+      const commentId = (await posted.json()).comment.id as string;
+      const newWriter = (await notices(writer)).filter((n) => !writerBefore.has(n.id));
+      expect(newWriter).toHaveLength(1);
+      expect(newWriter[0].text).toContain("commented on");
+      expect(newWriter[0].text).not.toContain(text);
+      expect(newWriter[0].href).toBe(`/tasks/${taskId}`);
+      expect((await notices(colleague)).filter((n) => !colleagueBefore.has(n.id))).toHaveLength(0);
+      expect((await notices(viewer)).filter((n) => !viewerBefore.has(n.id))).toHaveLength(0);
+
+      const recipientPage = await writer.newPage();
+      await recipientPage.goto("/my-tasks", { waitUntil: "load" });
+      await recipientPage.getByRole("button", { name: /^Notifications/ }).click();
+      const bell = recipientPage.getByRole("dialog", { name: "Notifications" });
+      await bell.waitFor();
+      await bell.locator(".bell-row").filter({ hasText: newWriter[0].text }).first().waitFor();
+      expect((await bell.textContent()) ?? "").not.toContain(text);
+
+      expect((await colleague.request.patch(`${url}/${commentId}`, { data: { text: `${text} edited` } })).status()).toBe(200);
+      expect((await notices(writer)).filter((n) => !writerBefore.has(n.id)).map((n) => n.id)).toEqual([newWriter[0].id]);
+      expect((await notices(colleague)).filter((n) => !colleagueBefore.has(n.id))).toHaveLength(0);
+      expect((await notices(viewer)).filter((n) => !viewerBefore.has(n.id))).toHaveLength(0);
+    } finally {
+      await writer.close();
+      await colleague.close();
+      await viewer.close();
+    }
+  });
+
+  it("feature OFF hides an existing comment from routes, task UI and search without deleting it", async () => {
+    expect(app, "the default fixture server must have comments OFF; the second server has them ON").not.toBe(BASE);
+    const on = await browser.newContext({ baseURL: app });
+    const off = await browser.newContext({ baseURL: BASE });
+    const token = `ZZ-TEST-flag-off-${RUN}`;
+    const url = `/api/tasks/${taskId}/comments`;
+    try {
+      for (const ctx of [on, off]) {
+        expect((await ctx.request.post("/api/auth/signin", { data: { email, password: PW } })).status()).toBe(200);
+      }
+      const created = await on.request.post(url, { data: { text: token } });
+      expect(created.status()).toBe(201);
+      const commentId = (await created.json()).comment.id as string;
+      const enabledSearch = await on.request.get(`/api/search?q=${encodeURIComponent(token)}`);
+      expect(enabledSearch.status()).toBe(200);
+      const enabledResults = await enabledSearch.json();
+      expect(enabledResults.tasks.map((found: { id: string }) => found.id)).toContain(taskId);
+      expect(JSON.stringify(enabledResults)).not.toContain(token);
+      expect((await off.request.get(url)).status()).toBe(404);
+      expect((await off.request.post(url, { data: { text: "ZZ-TEST denied while OFF" } })).status()).toBe(404);
+      expect((await off.request.patch(`${url}/${commentId}`, { data: { text: "ZZ-TEST denied edit while OFF" } })).status()).toBe(404);
+      expect((await off.request.delete(`${url}/${commentId}`)).status()).toBe(404);
+      const search = await off.request.get(`/api/search?q=${encodeURIComponent(token)}`);
+      expect(search.status()).toBe(200);
+      expect((await search.json()).tasks).toEqual([]);
+      const page = await off.newPage();
+      await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+      await page.getByRole("dialog", { name: "Task", exact: true }).waitFor();
+      expect(await page.getByRole("heading", { name: /Comments/ }).count()).toBe(0);
+      expect(await page.getByText(token).count()).toBe(0);
+      const retained = await on.request.get(url);
+      expect(retained.status()).toBe(200);
+      expect((await retained.json()).comments.some((comment: { id: string; text: string }) => comment.id === commentId && comment.text === token)).toBe(true);
+    } finally {
+      await on.close();
+      await off.close();
+    }
+  });
+
+  it("denies signed-in Viewer comment writes on the feature-enabled server without changing the visible list", async () => {
+    const writer = await browser.newContext({ baseURL: app });
+    const viewer = await browser.newContext({ baseURL: app });
+    try {
+      expect((await writer.request.post("/api/auth/signin", { data: { email, password: "correct-horse-9" } })).status()).toBe(200);
+      expect((await viewer.request.post("/api/auth/signin", { data: { email: viewerEmail, password: "correct-horse-9" } })).status()).toBe(200);
+      const url = `/api/tasks/${taskId}/comments`;
+      const created = await writer.request.post(url, { data: { text: `ZZ-TEST viewer boundary ${RUN}` } });
+      expect(created.status()).toBe(201);
+      const id = (await created.json()).comment.id as string;
+      const before = await viewer.request.get(url);
+      expect(before.status()).toBe(200);
+      const list = await before.json();
+      expect(list.comments.some((comment: { id: string }) => comment.id === id)).toBe(true);
+      expect((await viewer.request.post(url, { data: { text: "ZZ-TEST denied" } })).status()).toBe(403);
+      expect((await viewer.request.patch(`${url}/${id}`, { data: { text: "ZZ-TEST denied edit" } })).status()).toBe(403);
+      expect((await viewer.request.delete(`${url}/${id}`)).status()).toBe(403);
+      expect(await (await viewer.request.get(url)).json()).toEqual(list);
+    } finally {
+      await writer.close();
+      await viewer.close();
+    }
+  });
+
+  it("allows author-only edits and Admin deletion while another Editor is denied", async () => {
+    const writer = await browser.newContext({ baseURL: app });
+    const colleague = await browser.newContext({ baseURL: app });
+    const admin = await browser.newContext({ baseURL: app });
+    const url = `/api/tasks/${taskId}/comments`;
+    try {
+      for (const [ctx, who] of [[writer, made[0]], [colleague, made[1]], [admin, root]] as const) {
+        expect(who).toBeTruthy();
+        expect((await ctx.request.post("/api/auth/signin", { data: { email: who!.email, password: PW } })).status()).toBe(200);
+      }
+      const original = `ZZ-TEST author matrix ${RUN}`;
+      const created = await writer.request.post(url, { data: { text: original } });
+      expect(created.status()).toBe(201);
+      const id = (await created.json()).comment.id as string;
+      const target = `${url}/${id}`;
+      for (const ctx of [colleague, admin]) {
+        expect((await ctx.request.patch(target, { data: { text: "ZZ-TEST denied edit" } })).status()).toBe(403);
+      }
+      expect((await colleague.request.delete(target)).status()).toBe(403);
+      const ownEdit = `ZZ-TEST author edited ${RUN}`;
+      expect((await writer.request.patch(target, { data: { text: ownEdit } })).status()).toBe(200);
+      const beforeDelete = await writer.request.get(url);
+      expect(beforeDelete.status()).toBe(200);
+      expect((await beforeDelete.json()).comments.find((comment: { id: string }) => comment.id === id)?.text).toBe(ownEdit);
+      expect((await admin.request.delete(target)).status()).toBe(204);
+      const afterDelete = await writer.request.get(url);
+      expect(afterDelete.status()).toBe(200);
+      expect((await afterDelete.json()).comments.some((comment: { id: string }) => comment.id === id)).toBe(false);
+    } finally {
+      await writer.close();
+      await colleague.close();
+      await admin.close();
+    }
+  });
+
+  it("keeps comment roles, private notice and delete Undo consistent in one phone journey", async () => {
+    const writer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const colleague = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const viewer = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const admin = await browser.newContext({ baseURL: app, viewport: { width: 390, height: 800 } });
+    const url = `/api/tasks/${taskId}/comments`;
+    const text = `ZZ-TEST integrated comment ${RUN}`;
+    try {
+      for (const [ctx, who] of [[writer, made[0]], [colleague, made[1]], [viewer, made[2]], [admin, root]] as const) {
+        expect((await ctx.request.post("/api/auth/signin", { data: { email: who!.email, password: PW } })).status()).toBe(200);
+      }
+      const notices = async (ctx: BrowserContext) => {
+        const response = await ctx.request.get("/api/notifications?limit=200");
+        expect(response.status()).toBe(200);
+        return (await response.json()).items as { id: string; text: string }[];
+      };
+      const before = new Map(await Promise.all([writer, colleague, viewer].map(async (ctx) => [ctx, new Set((await notices(ctx)).map((n) => n.id))] as const)));
+      const page = await colleague.newPage();
+      await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+      await page.getByLabel("Add a comment").fill(text);
+      const [posted] = await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith(url) && response.request().method() === "POST"),
+        page.getByRole("button", { name: "Add comment" }).click(),
+      ]);
+      expect(posted.status()).toBe(201);
+      const id = (await posted.json()).comment.id as string;
+      const fresh = async (ctx: BrowserContext) => (await notices(ctx)).filter((item) => !before.get(ctx)!.has(item.id));
+      const recipient = await fresh(writer);
+      expect(recipient).toHaveLength(1);
+      expect(recipient[0].text).not.toContain(text);
+      expect(await fresh(colleague)).toHaveLength(0);
+      expect(await fresh(viewer)).toHaveLength(0);
+
+      const target = `${url}/${id}`;
+      expect((await viewer.request.patch(target, { data: { text: "viewer edit" } })).status()).toBe(403);
+      expect((await viewer.request.delete(target)).status()).toBe(403);
+      expect((await writer.request.patch(target, { data: { text: "other editor edit" } })).status()).toBe(403);
+      const edited = `${text} edited`;
+      expect((await colleague.request.patch(target, { data: { text: edited } })).status()).toBe(200);
+      expect((await fresh(writer)).map((item) => item.id)).toEqual([recipient[0].id]);
+      const removed = await admin.request.delete(target);
+      expect(removed.status()).toBe(204);
+      const undoId = removed.headers()["x-undo-id"];
+      expect(undoId).toBeTruthy();
+      expect((await (await writer.request.get(url)).json()).comments.some((item: { id: string }) => item.id === id)).toBe(false);
+      expect((await admin.request.post(`/api/actions/${undoId}/undo`, { data: {} })).status()).toBe(200);
+      expect((await admin.request.post(`/api/actions/${undoId}/undo`, { data: {} })).status()).toBe(409);
+      const restored = (await (await writer.request.get(url)).json()).comments.find((item: { id: string }) => item.id === id);
+      expect(restored).toMatchObject({ id, text: edited, author: expect.objectContaining({ id: made[1].id }) });
+      expect((await fresh(writer)).map((item) => item.id)).toEqual([recipient[0].id]);
+    } finally {
+      await writer.close();
+      await colleague.close();
+      await viewer.close();
+      await admin.close();
+    }
+  });
+
+  it("edits and deletes an owned comment in the phone UI with escaped text and server readback", async () => {
+    const { ctx, page } = await phone();
+    const original = `ZZ-TEST edit phone ${RUN}`;
+    const edited = `ZZ-TEST edited <img src=x onerror=alert(1)> ${RUN}`;
+    const url = `/api/tasks/${taskId}/comments`;
+    try {
+      await page.goto(`/projects/${projectId}?task=${taskId}`, { waitUntil: "load" });
+      await page.getByRole("dialog", { name: "Task", exact: true }).waitFor();
+      await page.getByLabel("Add a comment").fill(original);
+      await page.getByRole("button", { name: "Add comment" }).click();
+      const comment = page.locator("article.comment").filter({ hasText: original });
+      await comment.waitFor();
+      const created = await ctx.request.get(url);
+      expect(created.status()).toBe(200);
+      const id = (await created.json()).comments.find((item: { id: string; text: string }) => item.text === original)?.id as string | undefined;
+      expect(id).toBeTruthy();
+
+      await comment.getByRole("button", { name: "Edit comment" }).click();
+      await comment.getByLabel("Edit comment").fill(edited);
+      const [patch] = await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith(`${url}/${id}`) && response.request().method() === "PATCH"),
+        page.getByRole("dialog", { name: "Task", exact: true }).getByRole("button", { name: "Save", exact: true }).click(),
+      ]);
+      expect(patch.status()).toBe(200);
+      const changed = page.locator("article.comment").filter({ hasText: edited });
+      await changed.waitFor();
+      expect(await changed.locator("img").count()).toBe(0);
+      expect((await (await ctx.request.get(url)).json()).comments.some((item: { id: string; text: string }) => item.id === id && item.text === edited)).toBe(true);
+
+      const [deleted] = await Promise.all([
+        page.waitForResponse((response) => response.url().endsWith(`${url}/${id}`) && response.request().method() === "DELETE"),
+        changed.getByRole("button", { name: "Delete comment" }).click(),
+      ]);
+      expect(deleted.status()).toBe(204);
+      await changed.waitFor({ state: "detached" });
+      expect((await (await ctx.request.get(url)).json()).comments.some((item: { id: string }) => item.id === id)).toBe(false);
+    } catch (error) {
+      await page.screenshot({ path: `${SHOTS}/phone-edit-delete-comment.png`, fullPage: true }).catch(() => {});
+      throw error;
+    } finally {
+      await ctx.close();
+    }
+  });
+
   it("qa:TC missing N1: posts a comment from a 390x800 viewport", async () => {
     const { ctx, page } = await phone();
     const text = `ZZ-TEST phone ${Date.now().toString(36)}`;

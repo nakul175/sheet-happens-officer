@@ -16,16 +16,13 @@ export class MailError extends Error {
   }
 }
 
-// One line, bounded: Resend's message names the problem (e.g. an unverified domain) but is still provider text.
-const oneLine = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
-
-/** Resend's error body is {statusCode, name, message}; anything else (an HTML gateway page) is not logged. */
-async function resendError(res: Response): Promise<{ name: string; message: string }> {
+/** Keep only a bounded error category in the exception; provider response text is untrusted. */
+async function resendError(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { name?: unknown; message?: unknown };
-    return { name: oneLine(body.name) || "unknown", message: oneLine(body.message) || "no message" };
+    const body = (await res.json()) as { name?: unknown };
+    return typeof body.name === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(body.name) ? body.name : "unknown";
   } catch {
-    return { name: "unknown", message: "the response was not JSON" };
+    return "unknown";
   }
 }
 
@@ -33,8 +30,8 @@ async function resendError(res: Response): Promise<{ name: string; message: stri
  * Sends through Resend when RESEND_API_KEY is set (production).
  * Without a key, outside production, mail is written to a local outbox folder so
  * development and tests can read the links. In production a missing key is an error.
- * Every failure is logged (APL-2742) with the subject, the HTTP status and Resend's error name and message:
- * never the key, the recipient or the body, which can hold a sign-in link or a password.
+ * Failures log only a fixed label and HTTP status. Provider/transport text and mail fields may
+ * echo a recipient, sign-in link or credential, so none of them are logged.
  */
 export async function sendMail(mail: Mail): Promise<void> {
   if (process.env.MAIL_SINK) {
@@ -50,20 +47,20 @@ export async function sendMail(mail: Mail): Promise<void> {
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
         body: JSON.stringify({ from: FROM, to: [mail.to], subject: mail.subject, text: mail.text }),
       });
-    } catch (err) {
-      console.error(`[mail] could not reach Resend for "${mail.subject}": ${oneLine((err as Error)?.message)}`);
+    } catch {
+      console.error("[mail] could not reach Resend");
       throw new MailError("Could not reach Resend");
     }
     if (!res.ok) {
-      const { name, message } = await resendError(res);
-      console.error(`[mail] Resend rejected "${mail.subject}": HTTP ${res.status} ${name}: ${message}`);
+      const name = await resendError(res);
+      console.error(`[mail] Resend rejected: HTTP ${res.status}`);
       throw new MailError(`Resend rejected the email (HTTP ${res.status})`, res.status, name);
     }
     return;
   }
   // The outbox is for development and CI only; production must name a key unless an outbox folder is set on purpose.
   if (process.env.NODE_ENV === "production" && !process.env.EMAIL_OUTBOX_DIR) {
-    console.error(`[mail] not sent "${mail.subject}": RESEND_API_KEY is not set`);
+    console.error("[mail] not sent: RESEND_API_KEY is not set");
     throw new MailError("RESEND_API_KEY is not set");
   }
   const dir = process.env.EMAIL_OUTBOX_DIR ?? ".outbox";
