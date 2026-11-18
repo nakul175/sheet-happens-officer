@@ -68,6 +68,9 @@ it("Deal date-range error names both invalid inputs and clears after correction 
   try {
     const page = await ctx.newPage();
     await page.goto("/deals", { waitUntil: "load" });
+    // The server-rendered toggle is present before hydration; wait for the
+    // deals request so the click is handled and the mobile panel stays open.
+    await page.locator(".deal-results").getByText(/^\d+ deals$/).waitFor();
     await page.getByRole("button", { name: "Date filters", exact: true }).click();
     const from = page.getByLabel("From", { exact: true });
     const through = page.getByLabel("Through", { exact: true });

@@ -272,18 +272,30 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       await expect(emptyPriorities.getByText('No open work assigned to you or shared with you.')).toBeVisible();
       await emptyPage.unrouteAll({ behavior: 'wait' });
       let tasksRequests = 0;
+      let faulted = false;
+      let releaseRetry = () => {};
+      const retryGate = new Promise<void>(resolve => { releaseRetry = resolve; });
       const faultRoute = async (route: import('@playwright/test').Route) => {
         tasksRequests += 1;
-        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) });
+        if (!faulted) {
+          faulted = true;
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) });
+        } else {
+          // Hold focus/refresh requests until Retry is clicked so they cannot
+          // clear the error and remove its button before the test acts on it.
+          await retryGate;
+          await route.continue();
+        }
       };
       await emptyPage.route(tasksRoute, faultRoute);
       await test.step('reload empty-member Home with tasks error', () => emptyPage.reload(), { timeout: 20_000 });
       await expect(emptyPriorities.getByRole('alert').getByText('Could not reach the server.')).toBeVisible();
       expect(tasksRequests).toBeGreaterThanOrEqual(1);
-      await emptyPage.unrouteAll({ behavior: 'wait' });
       await test.step('retry empty-member tasks', () => emptyPriorities.getByRole('button', { name: 'Retry' }).click(), { timeout: 20_000 });
+      releaseRetry();
       await expect(emptyPage.getByLabel('Your work summary').getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('0');
       await expect(emptyPriorities.getByText('No open work assigned to you or shared with you.')).toBeVisible();
+      await emptyPage.unrouteAll({ behavior: 'wait' });
       await expect(emptyPage.getByRole('region', { name: 'Your projects' }).getByText('You have no active membership projects.')).toBeVisible();
       await expect(emptyPage.getByText(hiddenTitle, { exact: true })).toHaveCount(0);
     } finally { await emptyContext.close().catch(() => undefined); }
