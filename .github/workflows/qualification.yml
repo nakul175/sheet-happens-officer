@@ -81,8 +81,15 @@ jobs:
         run: node scripts/ci/workspace-preflight-db.mjs
       - name: Custom SQL catalog fingerprint on disposable PostgreSQL
         run: node scripts/ci/schema-catalog-fingerprint.mjs
-      - name: Build
-        run: npm run build
+      - name: Build with disk high-water receipt
+        run: node scripts/ci/measure-command.mjs test-results/build-capacity.json -- npm run build
+      - name: Retain build capacity receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-capacity-${{ github.event.pull_request.head.sha || github.sha }}
+          path: test-results/build-capacity.json
+          if-no-files-found: ignore
       # Audit PR #385 only: reuse this Linux build for staging without compiling on
       # the resource-constrained shared production/staging host. The artifact has
       # no runtime environment files and expires after one day.
