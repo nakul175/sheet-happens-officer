@@ -9,6 +9,8 @@ export function assessWorkspaceContract({ mode, workspaces, foreignUsers }) {
   return null;
 }
 
+export const runtimeDatabaseUrl = (env) => env.DATABASE_URL || null;
+
 export async function readWorkspaceCounts(client) {
   const { rows } = await client.query(`SELECT
     (SELECT count(*)::int FROM "Workspace") AS workspaces,
@@ -18,7 +20,9 @@ export async function readWorkspaceCounts(client) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const url = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
+  // The app authenticates through DATABASE_URL. An admin/direct URL may point
+  // elsewhere and must never certify the runtime database by proxy.
+  const url = runtimeDatabaseUrl(process.env);
   if (!url) {
     console.error('WORKSPACE_DATABASE_URL_MISSING');
     process.exitCode = 1;

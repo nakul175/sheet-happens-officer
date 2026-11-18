@@ -1,11 +1,12 @@
 // Real SQL contract check on the disposable CI PostgreSQL database.
 // All fixture writes stay inside a rolled-back transaction.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { assessWorkspaceContract, readWorkspaceCounts } from '../../deploy/verify-workspace-contract.mjs';
 
-const url = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
+const url = process.env.DATABASE_URL;
 assert.ok(url, 'CI database URL required');
 const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 5000, query_timeout: 8000 });
 let transactionOpen = false;
@@ -30,6 +31,12 @@ try {
   await client.query('ROLLBACK');
   transactionOpen = false;
   assert.deepEqual(await readWorkspaceCounts(client), initial);
+  const cli = spawnSync(process.execPath, ['deploy/verify-workspace-contract.mjs'], {
+    env: { ...process.env, DIRECT_DATABASE_URL: 'postgresql://wrong:wrong@127.0.0.1:1/wrong' },
+    encoding: 'utf8', timeout: 10_000,
+  });
+  assert.equal(cli.status, 1);
+  assert.match(cli.stderr, /^WORKSPACE_COUNT_INVALID\s*$/);
   console.log('WORKSPACE_SQL_ZERO_ONE_TWO_PASS');
 } finally {
   if (transactionOpen) await client.query('ROLLBACK').catch(() => {});
