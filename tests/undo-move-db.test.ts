@@ -6,6 +6,8 @@ import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { removeMember } from '@/lib/projects';
 import { undoAction } from '@/lib/undo';
+import { projectActivity } from '@/lib/feed';
+import { deleteSection } from '@/lib/sections';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 vi.mock('next/server', () => ({ connection: vi.fn() }));
@@ -66,6 +68,16 @@ async function snapshot(projectId: string) {
   ]);
   return { tasks, actions, notices };
 }
+it('does not offer Undo for a task moved by deleting its original section', async () => {
+  const { project, from, to, task } = await fixture();
+  await db.task.update({ where: { id: task.id }, data: { sectionId: from.id } });
+  await deleteSection(leader, project.id, from.id, to.id);
+  const moved = await db.actionLog.findFirstOrThrow({ where: { projectId: project.id, targetId: task.id, action: 'task.moved' } });
+  const activity = await projectActivity(leader, project.id);
+  expect(activity.items.find((row) => row.id === moved.id)?.undo).toBe('none');
+  await expect(undoAction(leader, moved.id)).rejects.toMatchObject({ status: 409 });
+  expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).sectionId).toBe(to.id);
+});
 const transact = db.$transaction.bind(db);
 function pauseBeforeTransactions(count: number) {
   let release!: () => void, arrived = 0;

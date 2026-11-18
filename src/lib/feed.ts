@@ -255,6 +255,7 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
     db.task.findMany({ where: { id: { in: ids } }, select: { id: true, title: true } }),
   ]);
   const names = new Map<string, string>([...users, ...sections].map((x) => [x.id, x.name] as [string, string]));
+  const existingSectionIds = new Set(sections.map((s) => s.id));
   for (const t of tasks) names.set(`t:${t.id}`, t.title);
   return {
     items: page.map((r) => ({
@@ -267,7 +268,8 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       // "How" is only worth a word when it was not the screen (SHO-US-14.14 AC4).
       via: r.channel === "SCREEN" ? "screen" : "historical",
       // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
-      undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
+      undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id)
+        || (r.action === "task.moved" && !existingSectionIds.has(String((r.beforeState as { sectionId?: unknown } | null)?.sectionId ?? ""))) ? "none"
         : isTooOldToUndo(r.createdAt) ? "too_old" : "available",
     })),
     nextCursor: more ? page[page.length - 1].id : null,
