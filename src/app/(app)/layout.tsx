@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { currentUser, publicUser } from "@/lib/auth";
+import { authorityRevision } from "@/lib/authority-revision";
 import { RETURN_PATH_HEADER, returnToEnabled, signedOutSignInHref } from "@/lib/return-to";
 import { ReturnToBridge } from "@/components/ReturnToBridge";
 import { Shell, type Me } from "./Shell";
@@ -30,7 +31,7 @@ async function Gate({ children }: { children: React.ReactNode }) {
   // SHO-US-23.5: on a Super-Admin-issued password, this screen stands in for every page (the page itself is never rendered).
   // Saving refreshes the same URL, so the person lands on the page they asked for.
   if (user.tempPasswordAt) return <>{returnToEnabled() ? <ReturnToBridge /> : null}<SetOwnPassword email={user.email} /></>;
-  return <>{returnToEnabled() ? <ReturnToBridge /> : null}<Shell user={{ ...(publicUser(user) as Me), multiWorkspace:multiWorkspaceEnabled(), compact: user.compactRows, crm: crmVisible(user), review: await leadsAnyDeal(user), workload: await workloadAvailable(user), startGuide: !user.startGuideDismissedAt }}>{children}</Shell><UndoHost /></>;
+  return <>{returnToEnabled() ? <ReturnToBridge /> : null}<Shell initialAuthorityRevision={await authorityRevision(user)} user={{ ...(publicUser(user) as Me), multiWorkspace:multiWorkspaceEnabled(), compact: user.compactRows, crm: crmVisible(user), review: await leadsAnyDeal(user), workload: await workloadAvailable(user), startGuide: !user.startGuideDismissedAt }}>{children}</Shell><UndoHost /></>;
 }
 
 export default function AppLayout({ children }: LayoutProps<"/">) {

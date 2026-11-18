@@ -108,13 +108,13 @@ function DensityToggle({ compact, onChange }: { compact: boolean; onChange: (v: 
   );
 }
 
-export function Shell({ user, children }: { user: Me; children: React.ReactNode }) {
+export function Shell({ user, initialAuthorityRevision, children }: { user: Me; initialAuthorityRevision: string; children: React.ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   useEffect(() => watchAuthority(() => {
     window.dispatchEvent(new Event(AUTHORITY_CHANGED));
     router.refresh();
-  }), [router]);
+  }, initialAuthorityRevision), [router, initialAuthorityRevision]);
   const [compact, setCompact] = useState(!!user.compact);
   const chooseDensity = async (v: boolean) => {
     setCompact(v);

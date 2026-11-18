@@ -272,13 +272,12 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       await expect(emptyPriorities.getByText('No open work assigned to you or shared with you.')).toBeVisible();
       await emptyPage.unrouteAll({ behavior: 'wait' });
       let tasksRequests = 0;
-      let faulted = false;
+      let holdAfterError = false;
       let releaseRetry = () => {};
       const retryGate = new Promise<void>(resolve => { releaseRetry = resolve; });
       const faultRoute = async (route: import('@playwright/test').Route) => {
         tasksRequests += 1;
-        if (!faulted) {
-          faulted = true;
+        if (!holdAfterError) {
           await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) });
         } else {
           // Hold focus/refresh requests until Retry is clicked so they cannot
@@ -290,6 +289,7 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       await emptyPage.route(tasksRoute, faultRoute);
       await test.step('reload empty-member Home with tasks error', () => emptyPage.reload(), { timeout: 20_000 });
       await expect(emptyPriorities.getByRole('alert').getByText('Could not reach the server.')).toBeVisible();
+      holdAfterError = true;
       expect(tasksRequests).toBeGreaterThanOrEqual(1);
       await test.step('retry empty-member tasks', () => emptyPriorities.getByRole('button', { name: 'Retry' }).click(), { timeout: 20_000 });
       releaseRetry();
