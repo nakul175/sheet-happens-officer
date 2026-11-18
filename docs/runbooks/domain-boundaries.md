@@ -2,7 +2,7 @@
 
 `access.ts` owns project membership, role and CRM visibility. `task-access.ts` adapts that access to task/action not-found semantics; it must not import task/deal/record mutation services. `tasks.ts` re-exports the adapters for compatibility. Deals and records import the small adapter directly, removing the two known reciprocal runtime imports.
 
-`tests/lib-runtime-import-cycles.test.ts` scans static runtime imports and re-exports across all `src/lib` TypeScript modules. It fails if a new cycle appears, while ignoring type-only edges. Keep this guard with the targeted task/deal/record boundary test; it does not prove transaction ownership or detect dynamic imports.
+`tests/lib-runtime-import-cycles.test.ts` scans static runtime imports, re-exports, literal dynamic imports and `require` calls across all `src/lib` TypeScript modules. It rejects computed import/require calls and fails if a new local runtime cycle appears, while ignoring type-only edges. Keep this guard with the targeted task/deal/record boundary test; it does not prove transaction ownership or Undo invariants.
 
 `tasks.ts` owns task state changes and validation (assignment, approval, completion, move, deletion). `deals.ts` owns deal classification, stage and next-step invariants. `records.ts` owns contact/note/task-link changes. Changes spanning these records must remain in the caller's Prisma transaction; do not replace transaction clients with the global client in helpers.
 
