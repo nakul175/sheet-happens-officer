@@ -955,10 +955,10 @@ export async function notifyStalledDeals(now = new Date()) {
     // crmVisible is the same lever as crmProjectWhere. A leader the CRM is hidden from is not told.
     if (!leader || !crmVisible(leader.user)) continue;
     const created = await db.$transaction(async (tx) => {
-      // Serialize concurrent job invocations for this deal. ReadCommitted gives
-      // the following existence check a fresh snapshot after the lock is held.
-      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${d.id} FOR UPDATE`;
-      if (!locked) return false;
+      // Serialize only stalled-job invocations for this deal. A Project row
+      // lock would also block ordinary task writes that take FOR SHARE NOWAIT.
+      // Hash collisions only serialize unrelated jobs; they cannot merge rows.
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('DEAL_STALLED'), hashtext(${d.id}))`;
       const already = await tx.notification.findFirst({ where: { recipientId: leader.userId, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
       if (already) return false;
       await notify(tx, [leader.userId], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true });
