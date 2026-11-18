@@ -958,7 +958,9 @@ export async function notifyStalledDeals(now = new Date()) {
       // Serialize only stalled-job invocations for this deal. A Project row
       // lock would also block ordinary task writes that take FOR SHARE NOWAIT.
       // Hash collisions only serialize unrelated jobs; they cannot merge rows.
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('DEAL_STALLED'), hashtext(${d.id}))`;
+      // Select a plain integer so Prisma never has to deserialize the lock
+      // function's PostgreSQL void return type.
+      await tx.$queryRaw<{ locked: number }[]>`SELECT 1::integer AS locked FROM pg_advisory_xact_lock(hashtext('DEAL_STALLED'), hashtext(${d.id}))`;
       const already = await tx.notification.findFirst({ where: { recipientId: leader.userId, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
       if (already) return false;
       await notify(tx, [leader.userId], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true });
