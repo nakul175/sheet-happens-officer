@@ -52,6 +52,8 @@ trap recover ERR
 [ -d "$REL" ] && [ ! -L "$REL" ] && [ "$(readlink -f "$REL")" = "$REL" ] || { echo "Release folder is missing or resolves outside its reserved path"; exit 1; }
 [ -f "$REL/deploy/verify-release.mjs" ] && [ ! -L "$REL/deploy/verify-release.mjs" ] &&
   [ "$(readlink -f "$REL/deploy/verify-release.mjs")" = "$REL/deploy/verify-release.mjs" ] || { echo "Candidate release verifier is missing or outside its release"; exit 1; }
+[ -f "$REL/deploy/verify-workspace-contract.mjs" ] && [ ! -L "$REL/deploy/verify-workspace-contract.mjs" ] &&
+  [ "$(readlink -f "$REL/deploy/verify-workspace-contract.mjs")" = "$REL/deploy/verify-workspace-contract.mjs" ] || { echo "Workspace preflight is missing or outside its release"; exit 1; }
 [ -f /etc/sho/app.env ] || { echo "/etc/sho/app.env is missing"; exit 1; }
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 [ "$PREV" != "$REL" ] || { echo "Refusing to rebuild the active release"; exit 1; }
@@ -92,6 +94,8 @@ export NODE_ENV=production NODE_OPTIONS=--max-old-space-size=3072
 
 log "installing packages"
 npm ci --include=dev --no-audit --no-fund --loglevel=error
+log "checking one-organisation data contract (read-only)"
+node "$REL/deploy/verify-workspace-contract.mjs"
 log "checking migration prerequisites (read-only)"
 npx --no-install prisma migrate status
 log "building"
