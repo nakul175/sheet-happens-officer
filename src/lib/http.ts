@@ -83,8 +83,9 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
       }
       if (code === "P2025") return Response.json({ error: "Resource not found" }, { status: 404 });
       if (code === "P2003") return Response.json({ error: "Referenced record does not exist" }, { status: 400 });
-      // Error names and codes are also caller-controlled fields; only fixed Prisma codes are safe diagnostics.
-      const safeCode = typeof code === "string" && /^P\d{4}$/.test(code) ? code : "";
+      // Keep only fixed-shape Prisma codes or SQLSTATEs. Never log the error
+      // message, which may contain query parameters or request data.
+      const safeCode = typeof code === "string" && (/^P\d{4}$/.test(code) || /^(?:08|22|23|25|28|40|42|53|55|57|58|XX)[0-9A-Z]{3}$/.test(code)) ? code : "";
       const errorId = randomUUID();
       console.error("unexpected error", safeCode || "UNKNOWN", errorId);
       return Response.json({ error: "Internal server error" }, { status: 500, headers: { "x-error-id": errorId } });

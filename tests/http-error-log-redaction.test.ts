@@ -35,3 +35,20 @@ it("separates unexpected requests and leaves mapped errors without a diagnostic 
   expect(mapped.status).toBe(409);
   expect(mapped.headers.has("x-error-id")).toBe(false);
 });
+
+it("records a PostgreSQL SQLSTATE without exposing the error text or code to the client", async () => {
+  const marker = "ZZ-TEST-PRIVATE-SQL-PARAMETER";
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await handle(async () => {
+    throw Object.assign(new Error(marker), { code: "40P01" });
+  })();
+  const errorId = response.headers.get("x-error-id");
+  expect(response.status).toBe(500);
+  expect(log.mock.calls.map((call) => call.join(" "))).toEqual([`unexpected error 40P01 ${errorId}`]);
+  expect(await response.text()).not.toMatch(/40P01|ZZ-TEST-PRIVATE-SQL-PARAMETER/);
+  const untrusted = await handle(async () => {
+    throw Object.assign(new Error(marker), { code: "ABCDE" });
+  })();
+  expect(log.mock.calls.at(-1)?.[1]).toBe("UNKNOWN");
+  expect(await untrusted.text()).not.toContain(marker);
+});

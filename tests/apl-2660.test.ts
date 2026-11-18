@@ -134,7 +134,7 @@ describe("APL-2660 approver edge cases", () => {
       if (response.status === 500 && existsSync('server.log')) {
         const recent = readFileSync('server.log').subarray(logOffset).toString();
         const errorId = response.headers.get('x-error-id');
-        const matches = [...recent.matchAll(/unexpected error (P\d{4}|UNKNOWN) ([0-9a-f-]{36})/g)];
+        const matches = [...recent.matchAll(/unexpected error (P\d{4}|(?:08|22|23|25|28|40|42|53|55|57|58|XX)[0-9A-Z]{3}|UNKNOWN) ([0-9a-f-]{36})/g)];
         const safeCodes = errorId ? matches.filter(match => match[2] === errorId).map(match => match[1]) : [];
         mkdirSync('test-results/approver-valid-swap', { recursive: true });
         writeFileSync('test-results/approver-valid-swap/diagnostic.json', JSON.stringify({ status: 500, errorId: errorId && /^[0-9a-f-]{36}$/.test(errorId) ? errorId : null, safeCodes, logBytesSinceRequest: Buffer.byteLength(recent), attribution: safeCodes.length ? 'matched response ID' : 'no matching sanitized server line' }, null, 2));
