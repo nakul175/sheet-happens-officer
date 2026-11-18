@@ -79,6 +79,23 @@ jobs:
       - run: npx prisma migrate deploy
       - name: Build
         run: npm run build
+      # Audit PR #385 only: reuse this Linux build for staging without compiling on
+      # the resource-constrained shared production/staging host. The artifact has
+      # no runtime environment files and expires after one day.
+      - name: Retain isolated audit staging build
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 385
+        run: |
+          printf '%s\n' '${{ github.event.pull_request.head.sha }}' > AUDIT_BUILD_SHA
+          tar -czf audit-staging-build.tgz .next node_modules AUDIT_BUILD_SHA
+          sha256sum audit-staging-build.tgz
+      - name: Upload isolated audit staging build
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 385
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-staging-build-${{ github.event.pull_request.head.sha }}
+          path: audit-staging-build.tgz
+          if-no-files-found: error
+          retention-days: 1
       - name: Verify retired routes and preserved suite routes
         run: node scripts/verify-concierge-removal.mjs
       # APL-2609's mode test drives these mode servers in Playwright Chromium.
