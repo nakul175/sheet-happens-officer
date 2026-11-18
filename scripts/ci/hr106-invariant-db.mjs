@@ -50,6 +50,26 @@ try {
   await attempt("wrong pipeline type rejected", project("wrong-type-after", "wst_project", "pl_proactive", null), "23503");
   await attempt("wrong stage pipeline rejected", project("wrong-stage-after", "wst_deal", "pl_bid", "st_pro_lead"), "23503");
   await attempt("stage without pipeline remains rejected", project("no-pipeline-after", "wst_deal", null, "st_pro_lead"), "23514");
+
+  // The new composite FKs must retain the old single-column nulling behavior.
+  const pipeline = `${id}-pipeline`;
+  const stage = `${id}-stage`;
+  const projectId = `${id}-delete-semantics`;
+  await client.query('INSERT INTO "Pipeline" ("id","typeId","key","name","position") VALUES ($1,$2,$3,$4,$5)', [pipeline, "wst_deal", pipeline, "HR106 disposable", 999]);
+  await client.query('INSERT INTO "Stage" ("id","pipelineId","name","position","category","requiredFields") VALUES ($1,$2,$3,$4,$5,$6)', [stage, pipeline, "HR106 disposable", 999, "ACTIVE", []]);
+  await client.query('INSERT INTO "Project" ("id","workspaceId","name","updatedAt","typeId","pipelineId","stageId") VALUES ($1,$2,$3,NOW(),$4,$5,$6)', [projectId, id, "HR106 disposable", "wst_deal", pipeline, stage]);
+  await client.query('DELETE FROM "Stage" WHERE "id"=$1', [stage]);
+  let row = await client.query('SELECT "typeId","pipelineId","stageId" FROM "Project" WHERE "id"=$1', [projectId]);
+  if (row.rows.length !== 1 || row.rows[0].typeId !== "wst_deal" || row.rows[0].pipelineId !== pipeline || row.rows[0].stageId !== null) {
+    throw new Error("HR106_STAGE_DELETE_SEMANTICS");
+  }
+  cases++;
+  await client.query('DELETE FROM "Pipeline" WHERE "id"=$1', [pipeline]);
+  row = await client.query('SELECT "typeId","pipelineId","stageId" FROM "Project" WHERE "id"=$1', [projectId]);
+  if (row.rows.length !== 1 || row.rows[0].typeId !== "wst_deal" || row.rows[0].pipelineId !== null || row.rows[0].stageId !== null) {
+    throw new Error("HR106_PIPELINE_DELETE_SEMANTICS");
+  }
+  cases++;
   passed = true;
 } finally {
   if (connected) {
