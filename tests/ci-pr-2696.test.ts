@@ -59,7 +59,7 @@ it("AC1 every pull request runs lint, tsc, unit tests and build", () => {
   expect(workflow).toContain("run: npm run lint");
   expect(workflow).toContain("npx next typegen && npx tsc --noEmit");
   expect(workflow).toContain("run: npm test");
-  expect(workflow).toContain("run: npm run build");
+  expect(workflow).toContain("run: node scripts/ci/measure-command.mjs test-results/build-capacity.json -- npm run build");
 });
 
 it("AC2 a non-zero lint, tsc, unit test or build fails the job", () => {
@@ -68,6 +68,20 @@ it("AC2 a non-zero lint, tsc, unit test or build fails the job", () => {
     const line = workflow.split("\n").find((row) => row.includes(command));
     expect(line, command).toBeTruthy();
     expect(line).not.toContain("|| true");
+  }
+});
+
+it("the measured build wrapper propagates a command failure", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ci-build-capacity-"));
+  try {
+    const receipt = path.join(dir, "receipt.json");
+    const result = spawnSync(process.execPath, [
+      "scripts/ci/measure-command.mjs", receipt, "--", process.execPath, "-e", "process.exit(7)",
+    ], { encoding: "utf8" });
+    expect(result.status).toBe(7);
+    expect(JSON.parse(readFileSync(receipt, "utf8")).exitCode).toBe(7);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
