@@ -41,6 +41,9 @@ try {
     }
     const fingerprint = createHash('md5').update(rows.map((r) => `${r.name}=${r.digest}`).join('|')).digest('hex');
     console.log(`SCHEMA_CATALOG_${kind.toUpperCase()} ${rows.length}/${expected[kind].length} ${fingerprint}`);
+    if (kind === 'function') {
+      for (const row of rows) console.log(`SCHEMA_CATALOG_FUNCTION_OBJECT ${row.name} ${row.digest}`);
+    }
   }
 } finally {
   await client.end().catch(() => {});
