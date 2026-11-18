@@ -5,6 +5,7 @@ import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { test, local2691 } from '../helpers/2691-admin';
 import { BASE_URL, expect } from './qa';
 import { PW, zzTestData } from '../local-api';
@@ -72,6 +73,10 @@ test('SHO-REG-AUTH-01: a Member session uses a Secure cookie over real loopback 
     if (!address || typeof address === 'string') throw new Error('No owned TLS port');
     const origin = `https://127.0.0.1:${address.port}`;
     const member = await fixture.person('member');
+    const sentinel = await fixture.project(member);
+    const sentinelBefore = await member.c.get(`/api/projects/${sentinel.id}`);
+    expect(sentinelBefore.status).toBe(200);
+    const sentinelFingerprint = createHash('sha256').update(JSON.stringify(sentinelBefore.json.project)).digest('hex');
     expect((await member.c.post('/api/auth/signout')).status).toBe(204);
     context = await browser.newContext({ baseURL: origin, ignoreHTTPSErrors: true });
     const signedIn = await context.request.post('/api/auth/signin', { data: { email: member.email, password: PW } });
@@ -82,6 +87,9 @@ test('SHO-REG-AUTH-01: a Member session uses a Secure cookie over real loopback 
     expect(cookie!.secure).toBe(true);
     expect(cookie!.httpOnly).toBe(true);
     expect(cookie!.sameSite).toBe('Lax');
+    expect(cookie!.path).toBe('/');
+    expect(cookie!.expires * 1000 - Date.now()).toBeGreaterThan(29 * 86400_000);
+    expect(cookie!.expires * 1000 - Date.now()).toBeLessThan(31 * 86400_000);
     const page = await context.newPage();
     const protectedResponse = await page.goto('/projects');
     expect(protectedResponse?.status()).toBe(200);
@@ -95,11 +103,18 @@ test('SHO-REG-AUTH-01: a Member session uses a Secure cookie over real loopback 
     const after = await context.request.get('/api/auth/me');
     expect(after.status()).toBe(200);
     expect((await after.json()).user.id).toBe(member.id);
-    expect((await context.request.post('/api/auth/signout')).status()).toBe(204);
+    await page.getByRole('button', { name: /Account and utilities/ }).click();
+    await page.getByRole('button', { name: 'Sign out' }).click();
+    await expect(page).toHaveURL(/\/signin(?:\?|$)/);
     await context.addCookies([{ name: cookie!.name, value: cookie!.value, domain: cookie!.domain, path: cookie!.path, httpOnly: true, secure: true, sameSite: 'Lax' }]);
     expect((await context.request.get('/api/auth/me')).status()).toBe(401);
+    const signedInAgain = await context.request.post('/api/auth/signin', { data: { email: member.email, password: PW } });
+    expect(signedInAgain.status()).toBe(200);
+    const sentinelAfter = await context.request.get(`/api/projects/${sentinel.id}`);
+    expect(sentinelAfter.status()).toBe(200);
+    expect(createHash('sha256').update(JSON.stringify((await sentinelAfter.json()).project)).digest('hex')).toBe(sentinelFingerprint);
     mkdirSync('test-results/auth-session-https', { recursive: true });
-    writeFileSync('test-results/auth-session-https/verification.json', JSON.stringify({ ownedLoopbackHttps: true, verifiedMember: true, secure: true, httpOnly: true, sameSite: 'Lax', protectedReload: true, replayDenied: true }, null, 2));
+    writeFileSync('test-results/auth-session-https/verification.json', JSON.stringify({ ownedLoopbackHttps: true, verifiedMember: true, secure: true, httpOnly: true, sameSite: 'Lax', path: '/', expiryAbout30Days: true, protectedReload: true, uiSignout: true, replayDenied: true, sentinelFingerprint, sentinelPreserved: true }, null, 2));
   } finally {
     if (context) await context.close();
     const closingServer = server;
@@ -111,6 +126,6 @@ test('SHO-REG-AUTH-01: a Member session uses a Secure cookie over real loopback 
     const cleanup = await fixture.cleanUp();
     expect(cleanup).toEqual([]);
     mkdirSync('test-results/auth-session-https', { recursive: true });
-    writeFileSync('test-results/auth-session-https/cleanup.json', JSON.stringify({ ownedProxyStopped: true, tlsFilesRemoved: true, memberDeactivated: true, cleanup: true }, null, 2));
+    writeFileSync('test-results/auth-session-https/cleanup.json', JSON.stringify({ ownedProxyStopped: true, tlsFilesRemoved: true, memberDeactivated: true, runOwnedProjectArchived: true, cleanup: true }, null, 2));
   }
 });
