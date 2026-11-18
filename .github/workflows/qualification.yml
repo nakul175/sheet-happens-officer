@@ -86,7 +86,7 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 385
         run: |
           printf '%s\n' '${{ github.event.pull_request.head.sha }}' > AUDIT_BUILD_SHA
-          tar -czf audit-staging-build.tgz .next node_modules AUDIT_BUILD_SHA
+          tar -czf audit-staging-build.tgz .next node_modules src/generated/prisma AUDIT_BUILD_SHA
           sha256sum audit-staging-build.tgz
       - name: Upload isolated audit staging build
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 385
