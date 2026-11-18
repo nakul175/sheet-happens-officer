@@ -85,3 +85,18 @@ it('locks on the fifth failure, denies a sixth and recovers beyond the window', 
   verified = true;
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fifthFailure: 401, sixthAttempt: 429, insideWindow: 429, outsideWindow: 200, failedAttempts: 5, lockedAuditRows: 3, failedAuditRows: 5, attemptsClearedOnRecovery: true, unrelatedSentinelPreserved: true }, null, 2));
 });
+
+it('serializes concurrent failures at the per-email lockout boundary', async () => {
+  const who = await account(`${prefix}race`); owned.push(who);
+  const sentinel = await account(`${prefix}raceSentinel`); owned.push(sentinel);
+  const sentinelBefore = await db.user.findUniqueOrThrow({ where: { id: sentinel.id } });
+  const wrongPassword = `wrong-${randomUUID()}`;
+  const replies = await Promise.all(Array.from({ length: 12 }, () => who.c.post('/api/auth/signin', { email: who.email, password: wrongPassword })));
+  const statuses = replies.map((reply) => reply.status);
+  expect(statuses.filter((status) => status === 401)).toHaveLength(5);
+  expect(statuses.filter((status) => status === 429)).toHaveLength(7);
+  expect(await db.loginAttempt.count({ where: { email: who.email, success: false } })).toBe(5);
+  expect((await who.c.post('/api/auth/signin', { email: who.email, password: PW })).status).toBe(429);
+  expect(await db.user.findUniqueOrThrow({ where: { id: sentinel.id } })).toEqual(sentinelBefore);
+  writeFileSync(`${evidenceDir}/race-verification.json`, JSON.stringify({ concurrentRequests: 12, invalidResponses: 5, lockedResponses: 7, recordedFailures: 5, correctPasswordStillLocked: true, unrelatedSentinelPreserved: true }, null, 2));
+});
