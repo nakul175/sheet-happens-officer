@@ -54,7 +54,7 @@ export function HolySheetDocuments({ kind, id }: {
                 }
                 setVisible(true);
                 if (!response.ok)
-                    throw Error('Sign in with Aplyd and check your SHO access, then retry.');
+                    throw Error('Sign in with Aplyd and check your Tasks by aplyd access, then retry.');
                 const data: Context = await response.json();
                 if (!active.current || attempt !== checks.current)
                     return;
