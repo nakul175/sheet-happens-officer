@@ -954,10 +954,17 @@ export async function notifyStalledDeals(now = new Date()) {
     const leader = d.members[0];
     // crmVisible is the same lever as crmProjectWhere. A leader the CRM is hidden from is not told.
     if (!leader || !crmVisible(leader.user)) continue;
-    const already = await db.notification.findFirst({ where: { recipientId: leader.userId, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
-    if (already) continue;
-    await db.$transaction((tx) => notify(tx, [leader.userId], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true }));
-    notified++;
+    const created = await db.$transaction(async (tx) => {
+      // Serialize concurrent job invocations for this deal. ReadCommitted gives
+      // the following existence check a fresh snapshot after the lock is held.
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${d.id} FOR UPDATE`;
+      if (!locked) return false;
+      const already = await tx.notification.findFirst({ where: { recipientId: leader.userId, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
+      if (already) return false;
+      await notify(tx, [leader.userId], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true });
+      return true;
+    }, { isolationLevel: "ReadCommitted" });
+    if (created) notified++;
   }
   return { stalled, notified };
 }
