@@ -9,6 +9,14 @@ export function assessWorkspaceContract({ mode, workspaces, foreignUsers }) {
   return null;
 }
 
+export async function readWorkspaceCounts(client) {
+  const { rows } = await client.query(`SELECT
+    (SELECT count(*)::int FROM "Workspace") AS workspaces,
+    (SELECT count(*)::int FROM "User" u WHERE NOT EXISTS
+      (SELECT 1 FROM "Workspace" w WHERE w.id = u."workspaceId")) AS "foreignUsers"`);
+  return rows[0];
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const url = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
   if (!url) {
@@ -22,11 +30,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const { default: pg } = await import('pg');
       client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 5000, query_timeout: 8000 });
       await client.connect();
-      const { rows } = await client.query(`SELECT
-        (SELECT count(*)::int FROM "Workspace") AS workspaces,
-        (SELECT count(*)::int FROM "User" u WHERE NOT EXISTS
-          (SELECT 1 FROM "Workspace" w WHERE w.id = u."workspaceId")) AS "foreignUsers"`);
-      const code = assessWorkspaceContract({ mode: process.env.SHO_MULTI_WORKSPACE_ENABLED, ...rows[0] });
+      const counts = await readWorkspaceCounts(client);
+      const code = assessWorkspaceContract({ mode: process.env.SHO_MULTI_WORKSPACE_ENABLED, ...counts });
       if (code) {
         console.error(code);
         process.exitCode = 1;
