@@ -87,8 +87,9 @@ it('locks on the fifth failure, denies a sixth and recovers beyond the window', 
 });
 
 it('serializes concurrent failures at the per-email lockout boundary', async () => {
-  const who = await account(`${prefix}race`); owned.push(who);
-  const sentinel = await account(`${prefix}raceSentinel`); owned.push(sentinel);
+  // The helper appends a timestamp; keep the local part below the email limit.
+  const who = await account(`${prefix}r`); owned.push(who);
+  const sentinel = await account(`${prefix}s`); owned.push(sentinel);
   const sentinelBefore = await db.user.findUniqueOrThrow({ where: { id: sentinel.id } });
   const wrongPassword = `wrong-${randomUUID()}`;
   const replies = await Promise.all(Array.from({ length: 12 }, () => who.c.post('/api/auth/signin', { email: who.email, password: wrongPassword })));
