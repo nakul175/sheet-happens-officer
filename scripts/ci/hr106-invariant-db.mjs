@@ -58,6 +58,8 @@ try {
   await client.query('INSERT INTO "Pipeline" ("id","typeId","key","name","position") VALUES ($1,$2,$3,$4,$5)', [pipeline, "wst_deal", pipeline, "HR106 disposable", 999]);
   await client.query('INSERT INTO "Stage" ("id","pipelineId","name","position","category","requiredFields") VALUES ($1,$2,$3,$4,$5,$6)', [stage, pipeline, "HR106 disposable", 999, "ACTIVE", []]);
   await client.query('INSERT INTO "Project" ("id","workspaceId","name","updatedAt","typeId","pipelineId","stageId") VALUES ($1,$2,$3,NOW(),$4,$5,$6)', [projectId, id, "HR106 disposable", "wst_deal", pipeline, stage]);
+  await attempt("referenced pipeline type change rejected", `UPDATE "Pipeline" SET "typeId"='wst_project' WHERE "id"='${pipeline}'`, "23503");
+  await attempt("referenced stage pipeline change rejected", `UPDATE "Stage" SET "pipelineId"='pl_bid' WHERE "id"='${stage}'`, "23503");
   await client.query('DELETE FROM "Stage" WHERE "id"=$1', [stage]);
   let row = await client.query('SELECT "typeId","pipelineId","stageId" FROM "Project" WHERE "id"=$1', [projectId]);
   if (row.rows.length !== 1 || row.rows[0].typeId !== "wst_deal" || row.rows[0].pipelineId !== pipeline || row.rows[0].stageId !== null) {
