@@ -25,6 +25,10 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: BASE_URL,
+    // The audit cross-browser job terminates TLS on loopback so WebKit can store Secure cookies.
+    // Never disable certificate checks for an external staging or production target.
+    ignoreHTTPSErrors: process.env.SHO_AUDIT_LOOPBACK_TLS === "1" &&
+      new URL(BASE_URL).protocol === "https:" && ["localhost", "127.0.0.1", "[::1]"].includes(new URL(BASE_URL).hostname),
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     launchOptions: { executablePath: process.env.PW_CHROMIUM || undefined },
     screenshot: "only-on-failure",

@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpsServer } from 'node:https';
+import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -57,7 +58,8 @@ test('SHO-REG-AUTH-01: a Member session uses a Secure cookie over real loopback 
   try {
     execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-subj', '/CN=localhost', '-days', '1'], { stdio: 'ignore' });
     server = createHttpsServer({ key: readFileSync(key), cert: readFileSync(cert) }, (incoming, outgoing) => {
-      const upstream = httpRequest(new URL(incoming.url ?? '/', BASE_URL), {
+      const upstreamUrl = new URL(incoming.url ?? '/', BASE_URL);
+      const upstream = (upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest)(upstreamUrl, {
         method: incoming.method,
         headers: { ...incoming.headers, host: new URL(BASE_URL).host, 'x-forwarded-proto': 'https' },
       }, (reply) => { outgoing.writeHead(reply.statusCode ?? 502, reply.headers); reply.pipe(outgoing); });
