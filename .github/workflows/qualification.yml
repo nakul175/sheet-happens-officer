@@ -79,6 +79,8 @@ jobs:
       - run: npx prisma migrate deploy
       - name: HR-106 transactional invariant characterization on disposable PostgreSQL
         run: CI=true node scripts/ci/hr106-invariant-db.mjs
+      - name: HR-106 concurrent FK race on disposable PostgreSQL
+        run: CI=true node scripts/ci/hr106-concurrency-db.mjs
       - name: Workspace release preflight against disposable PostgreSQL
         run: node scripts/ci/workspace-preflight-db.mjs
       - name: Custom SQL catalog fingerprint on disposable PostgreSQL
