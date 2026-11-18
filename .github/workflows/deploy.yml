@@ -50,6 +50,8 @@ jobs:
         run: |
           [[ "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$APPROVED_SHA" = "$GITHUB_SHA" ] || { echo "::error::Exact SHA approval required"; exit 1; }
       - uses: actions/checkout@v4
+      - name: Require independent production approval protection
+        run: node deploy/verify-environment-protection.mjs
       - name: SSH key
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
