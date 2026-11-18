@@ -79,6 +79,8 @@ jobs:
       - run: npx prisma migrate deploy
       - name: Workspace release preflight against disposable PostgreSQL
         run: node scripts/ci/workspace-preflight-db.mjs
+      - name: Custom SQL catalog fingerprint on disposable PostgreSQL
+        run: node scripts/ci/schema-catalog-fingerprint.mjs
       - name: Build
         run: npm run build
       # Audit PR #385 only: reuse this Linux build for staging without compiling on
