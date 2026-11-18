@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
-import { assessWorkspaceContract, readWorkspaceCounts } from '../../deploy/verify-workspace-contract.mjs';
+import { assessFunctionSearchPaths, assessWorkspaceContract, readFunctionSearchPaths, readWorkspaceCounts } from '../../deploy/verify-workspace-contract.mjs';
 
 const url = process.env.DATABASE_URL;
 assert.ok(url, 'CI database URL required');
@@ -15,6 +15,7 @@ try {
   await client.query('BEGIN');
   transactionOpen = true;
   const initial = await readWorkspaceCounts(client);
+  assert.equal(assessFunctionSearchPaths(await readFunctionSearchPaths(client)), null);
   assert.deepEqual(initial, { workspaces: 0, foreignUsers: 0 });
   assert.equal(assessWorkspaceContract({ mode: undefined, ...initial }), 'WORKSPACE_COUNT_INVALID');
 
