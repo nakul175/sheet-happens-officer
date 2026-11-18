@@ -1,0 +1,88 @@
+# Draft audit PR #385 only. Synthetic loopback database and app; no staging or production target.
+name: Audit cross-browser qualification
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-cross-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firefox-webkit:
+    if: github.event.pull_request.number == 385
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: sho
+          POSTGRES_PASSWORD: sho
+          POSTGRES_DB: sho_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sho"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      DIRECT_DATABASE_URL: postgresql://sho:sho@localhost:5432/sho_test?schema=public
+      EMAIL_OUTBOX_DIR: ${{ github.workspace }}/.outbox-ci
+      SUPER_ADMIN_EMAILS: root.test@aplyd.com
+      APP_URL: http://localhost:3100
+      TASKBOARD_URL: http://localhost:3100
+      JOB_SECRET: ci-only-not-a-real-secret-0123
+      SUITE_ACCOUNTS_CLIENT_SECRET: ci-synthetic-accounts-only-0123456789
+      SUITE_BUGOFF_CLIENT_SECRET: ci-synthetic-bugoff-only-0123456789
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - name: Install Firefox and WebKit
+        run: npx playwright-core install --with-deps firefox webkit
+      - name: Start guarded local app
+        run: |
+          (NODE_ENV=production PORT=3100 node --import tsx server.js > server.log 2>&1 &)
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3100/api/health; then exit 0; fi
+            sleep 2
+          done
+          tail -n 50 server.log
+          exit 1
+      - name: Firefox critical flows
+        run: >-
+          npx playwright test --browser=firefox
+          tests/e2e/stories/SHO-REG-AUTH-01.spec.ts
+          tests/e2e/stories/SHO-REG-TASKS-01.spec.ts
+          tests/e2e/stories/SHO-REG-HOME-01.spec.ts
+          tests/e2e/stories/SHO-REG-UI-06.spec.ts
+      - name: WebKit critical flows
+        run: >-
+          npx playwright test --browser=webkit
+          tests/e2e/stories/SHO-REG-AUTH-01.spec.ts
+          tests/e2e/stories/SHO-REG-TASKS-01.spec.ts
+          tests/e2e/stories/SHO-REG-HOME-01.spec.ts
+          tests/e2e/stories/SHO-REG-UI-06.spec.ts
+      - name: Retain redacted test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-browser-${{ github.event.pull_request.head.sha }}
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Server log on failure
+        if: failure()
+        run: tail -n 120 server.log || true
