@@ -52,3 +52,17 @@ it("records a PostgreSQL SQLSTATE without exposing the error text or code to the
   expect(log.mock.calls.at(-1)?.[1]).toBe("UNKNOWN");
   expect(await untrusted.text()).not.toContain(marker);
 });
+
+it("correlates a Prisma raw-query code with a validated nested SQLSTATE only", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const marker = "ZZ-TEST-PRIVATE-QUERY-VALUE";
+  const run = (state: string) => handle(async () => {
+    throw Object.assign(new Error(marker), { code: "P2010", meta: { code: state, message: marker } });
+  })();
+  const safe = await run("40P01");
+  expect(log.mock.calls.at(-1)?.[1]).toBe("P2010/40P01");
+  expect(await safe.text()).not.toMatch(/40P01|P2010|ZZ-TEST-PRIVATE-QUERY-VALUE/);
+  const unsafe = await run(marker);
+  expect(log.mock.calls.at(-1)?.[1]).toBe("P2010");
+  expect(await unsafe.text()).not.toContain(marker);
+});

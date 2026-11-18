@@ -83,9 +83,15 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
       }
       if (code === "P2025") return Response.json({ error: "Resource not found" }, { status: 404 });
       if (code === "P2003") return Response.json({ error: "Referenced record does not exist" }, { status: 400 });
-      // Keep only fixed-shape Prisma codes or SQLSTATEs. Never log the error
-      // message, which may contain query parameters or request data.
-      const safeCode = typeof code === "string" && (/^P\d{4}$/.test(code) || /^(?:08|22|23|25|28|40|42|53|55|57|58|XX)[0-9A-Z]{3}$/.test(code)) ? code : "";
+      // Keep only fixed-shape Prisma codes or SQLSTATEs. Raw-query failures
+      // carry PostgreSQL's SQLSTATE in meta.code, so retain that safe category
+      // alongside P2010 without logging the query or parameter values.
+      const sqlstate = /^(?:08|22|23|25|28|40|42|53|55|57|58|XX)[0-9A-Z]{3}$/;
+      const prismaCode = typeof code === "string" && /^P\d{4}$/.test(code) ? code : "";
+      const directState = typeof code === "string" && sqlstate.test(code) ? code : "";
+      const metaCode = (err as { meta?: { code?: unknown } })?.meta?.code;
+      const nestedState = prismaCode === "P2010" && typeof metaCode === "string" && sqlstate.test(metaCode) ? metaCode : "";
+      const safeCode = nestedState ? `${prismaCode}/${nestedState}` : prismaCode || directState;
       const errorId = randomUUID();
       console.error("unexpected error", safeCode || "UNKNOWN", errorId);
       return Response.json({ error: "Internal server error" }, { status: 500, headers: { "x-error-id": errorId } });
