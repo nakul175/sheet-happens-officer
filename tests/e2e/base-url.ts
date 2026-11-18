@@ -96,6 +96,13 @@ export function resolveBaseUrl(env: TargetEnv = process.env): string {
 
 export const BASE_URL = resolveBaseUrl();
 
+/** Ignore a short-lived self-signed certificate only for the audit job's HTTPS loopback proxy. */
+export function auditLoopbackIgnoreHTTPSErrors(baseUrl = BASE_URL): boolean {
+  if (process.env.SHO_AUDIT_LOOPBACK_TLS !== '1') return false;
+  const target = new URL(baseUrl);
+  return target.protocol === 'https:' && ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname);
+}
+
 if (!process.env.VITEST) {
   const host = hostOf(BASE_URL);
   if (!host) throw new Error(`BASE_URL is not a URL: ${BASE_URL}`);

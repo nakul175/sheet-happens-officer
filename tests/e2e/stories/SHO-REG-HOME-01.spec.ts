@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import pg from 'pg';
 import { test, local2691 } from '../helpers/2691-admin';
 import { BASE, PW, task, withVersion, zzTestData } from '../local-api';
+import { auditLoopbackIgnoreHTTPSErrors } from '../base-url';
 import { expect } from './qa';
 
 const day = (offset: number) => new Date(Date.now() + 5.5 * 3600_000 + offset * 86400_000).toISOString().slice(0, 10);
@@ -71,7 +72,7 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
   expect(myIds.sort()).toEqual([overdue, today, laterTask].sort());
   expect(myIds).not.toContain(completed);
 
-  const context = await browser.newContext({ baseURL: BASE });
+  const context = await browser.newContext({ baseURL: BASE, ignoreHTTPSErrors: auditLoopbackIgnoreHTTPSErrors(BASE) });
   try {
     const signin = await context.request.post('/api/auth/signin', { data: { email: actor.email, password: PW } });
     expect(signin.status()).toBe(200);
@@ -255,7 +256,7 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
     await expect(summary.getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('3');
     await expect(priorities.locator(`a[href="/tasks/${sharedTask}"]`)).toHaveCount(0);
     const emptyUser = await test.step('create isolated empty member', () => data.person('Empty Member'), { timeout: 20_000 });
-    const emptyContext = await test.step('open isolated empty-member browser', () => browser.newContext({ baseURL: BASE }), { timeout: 20_000 });
+    const emptyContext = await test.step('open isolated empty-member browser', () => browser.newContext({ baseURL: BASE, ignoreHTTPSErrors: auditLoopbackIgnoreHTTPSErrors(BASE) }), { timeout: 20_000 });
     try {
       const emptySignin = await test.step('sign in empty member', () => emptyContext.request.post('/api/auth/signin', { data: { email: emptyUser.email, password: PW } }), { timeout: 20_000 });
       expect(emptySignin.status()).toBe(200);

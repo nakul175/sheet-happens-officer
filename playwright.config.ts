@@ -1,5 +1,5 @@
 import { defineConfig } from "@playwright/test";
-import { BASE_URL } from "./tests/e2e/base-url";
+import { BASE_URL, auditLoopbackIgnoreHTTPSErrors } from "./tests/e2e/base-url";
 // Every story spec that imports vitest. scripts/ci/story-specs-no-vitest.test.mjs checks the rest against this same list.
 import { VITEST_SPECS } from "./tests/e2e/vitest-specs.cjs";
 
@@ -27,8 +27,7 @@ export default defineConfig({
     baseURL: BASE_URL,
     // The audit cross-browser job terminates TLS on loopback so WebKit can store Secure cookies.
     // Never disable certificate checks for an external staging or production target.
-    ignoreHTTPSErrors: process.env.SHO_AUDIT_LOOPBACK_TLS === "1" &&
-      new URL(BASE_URL).protocol === "https:" && ["localhost", "127.0.0.1", "[::1]"].includes(new URL(BASE_URL).hostname),
+    ignoreHTTPSErrors: auditLoopbackIgnoreHTTPSErrors(),
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
     launchOptions: { executablePath: process.env.PW_CHROMIUM || undefined },
     screenshot: "only-on-failure",

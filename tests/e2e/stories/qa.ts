@@ -5,6 +5,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { APIRequestContext, Browser, BrowserContext, Locator, Page } from "@playwright/test";
 import { test as baseTest, api, expect, zz, RUN, BASE_URL, type Api, type Json, type Later } from "../support";
+import { auditLoopbackIgnoreHTTPSErrors } from "../base-url";
 
 export { zz, RUN, BASE_URL, expect };
 
@@ -177,6 +178,7 @@ export type Who = { ctx: BrowserContext; page: Page; api: Api; user: Json };
 export async function signInAs(browser: Browser, email: string, password: string): Promise<Who> {
   const ctx = await browser.newContext({
     baseURL: BASE_URL,
+    ignoreHTTPSErrors: auditLoopbackIgnoreHTTPSErrors(),
     httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined,
   });
   const res = await ctx.request.post("/api/auth/signin", { data: { email, password } });
