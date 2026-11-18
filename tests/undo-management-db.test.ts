@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { undoAction } from '@/lib/undo';
 import { changeLeader, unarchiveProject } from '@/lib/projects';
+import { updateSection } from '@/lib/sections';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 vi.mock('next/server', () => ({ connection: vi.fn() }));
@@ -62,6 +63,16 @@ async function snapshot(projectId: string) {
   ]);
   return { project, members, actions, notices };
 }
+async function movedSectionFixture() {
+  const f = await fixture(leader, 'project.updated');
+  const sections = await Promise.all(['First', 'Middle', 'Last'].map((name, position) =>
+    db.section.create({ data: { projectId: f.projectId, name: `${prefix}-${name}`, position } })));
+  await updateSection(leader, f.projectId, sections[1].id, { move: 'right' });
+  const action = await db.actionLog.findFirstOrThrow({ where: { projectId: f.projectId, action: 'section.moved', targetId: sections[1].id } });
+  const order = async () => (await db.section.findMany({ where: { projectId: f.projectId }, orderBy: { position: 'asc' }, select: { id: true } })).map((s) => s.id);
+  expect(await order()).toEqual([sections[0].id, sections[2].id, sections[1].id]);
+  return { ...f, sections, action, order };
+}
 function latch() {
   let release!: () => void;
   const promise = new Promise<void>((resolve) => { release = resolve; });
@@ -80,6 +91,27 @@ it('a former Leader who is now an Editor cannot use Undo to unarchive a project'
   const before = await snapshot(f.projectId);
   await expect(undoAction(editor, f.actionId)).rejects.toMatchObject({ status: 403 });
   expect(await snapshot(f.projectId)).toEqual(before); completed.push('former-leader-denied');
+});
+it('restores a moved section from its real action log and claims the inverse once', async () => {
+  const f = await movedSectionFixture();
+  const result = await undoAction(leader, f.action.id);
+  expect(result.label).toBe('Section moved');
+  expect(await f.order()).toEqual(f.sections.map((s) => s.id));
+  const original = await db.actionLog.findUniqueOrThrow({ where: { id: f.action.id } });
+  expect(original.undoneAt).not.toBeNull();
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'undo', targetId: f.action.targetId } })).toBe(1);
+  await expect(undoAction(leader, f.action.id)).rejects.toMatchObject({ status: 409 });
+  expect(await f.order()).toEqual(f.sections.map((s) => s.id));
+  completed.push('section-move-inverse-once');
+});
+it('makes two concurrent section-move Undo requests one winner with one activity', async () => {
+  const f = await movedSectionFixture();
+  const attempts = await Promise.allSettled([undoAction(leader, f.action.id), undoAction(leader, f.action.id)]);
+  expect(attempts.filter((a) => a.status === 'fulfilled')).toHaveLength(1);
+  expect(attempts.filter((a) => a.status === 'rejected')).toEqual([expect.objectContaining({ reason: expect.objectContaining({ status: 409 }) })]);
+  expect(await f.order()).toEqual(f.sections.map((s) => s.id));
+  expect(await db.actionLog.count({ where: { projectId: f.projectId, action: 'undo', targetId: f.action.targetId } })).toBe(1);
+  completed.push('section-move-concurrent-one-winner');
 });
 it('losing Leader rights after preflight blocks the inverse and leaves current state unchanged', async () => {
   const f = await fixture(editor, 'project.updated'), pause = pauseBeforeTransactions(1);
