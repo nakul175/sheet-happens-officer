@@ -81,6 +81,10 @@ else
 fi
 pid="$(systemctl show sho -p MainPID --value)"
 node "$PREV_VERIFIER" "$PREV" "$PREV_SHA" "http://127.0.0.1:$PORT" "$pid" || { echo "Previous release failed pre-cut verification"; exit 1; }
+# Recheck the same 6 GiB floor after upload, before dependency installation.
+available_kib="$(LC_ALL=C df -Pk "$ROOT/releases" | awk 'NR==2 {print $4}')"
+[[ "$available_kib" =~ ^[0-9]+$ ]] || { echo "RELEASE_SPACE_UNKNOWN"; exit 1; }
+[ "$available_kib" -ge 6291456 ] || { echo "INSUFFICIENT_RELEASE_SPACE available_kib=$available_kib required_kib=6291456"; exit 1; }
 cd "$REL"
 set -a
 # shellcheck disable=SC1091
