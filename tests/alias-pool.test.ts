@@ -207,6 +207,7 @@ describe("qa:TC missing APL-2748 AC2/AC3: no secret printed, never production", 
       expect(() => provisionTarget(bad), String(bad)).toThrow();
     }
     expect(provisionTarget("https://staging.sheethappensofficer.com/x").href).toBe("https://staging.sheethappensofficer.com/");
+    expect(provisionTarget("https://staging.tasks.aplyd.org/x").href).toBe("https://staging.tasks.aplyd.org/");
     expect(provisionTarget("https://pr4.staging.sheethappensofficer.com").host).toBe("pr4.staging.sheethappensofficer.com");
     expect(provisionTarget("https://pr5.staging.sheethappensofficer.com").host).toBe("pr5.staging.sheethappensofficer.com");
     expect(provisionTarget("https://pr8.staging.sheethappensofficer.com").host).toBe("pr8.staging.sheethappensofficer.com");
