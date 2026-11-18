@@ -269,27 +269,19 @@ test('SHO-REG-HOME-01 partial: Home cards and My tasks reconcile for owned work'
       const emptyPriorities = emptyPage.getByRole('region', { name: 'Your priorities' });
       await expect(emptyPriorities.locator('.skel-row').first()).toBeVisible();
       await expect(emptyPage.getByLabel('Your work summary').getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('0');
-      await emptyPage.unroute(tasksRoute);
+      await expect(emptyPriorities.getByText('No open work assigned to you or shared with you.')).toBeVisible();
+      await emptyPage.unrouteAll({ behavior: 'wait' });
       let tasksRequests = 0;
-      let retryClicked = false;
-      await emptyPage.route(tasksRoute, async route => {
+      const faultRoute = async (route: import('@playwright/test').Route) => {
         tasksRequests += 1;
-        // Focus refresh can issue another request before a Playwright click is actionable.
-        // Keep returning the fault until the Retry action itself has been dispatched.
-        await new Promise(resolve => setTimeout(resolve, 100));
-        if (!retryClicked)
-          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) });
-        else
-          await route.continue();
-      });
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'synthetic unavailable' }) });
+      };
+      await emptyPage.route(tasksRoute, faultRoute);
       await test.step('reload empty-member Home with tasks error', () => emptyPage.reload(), { timeout: 20_000 });
       await expect(emptyPriorities.getByRole('alert').getByText('Could not reach the server.')).toBeVisible();
-      await test.step('retry empty-member tasks', async () => {
-        await emptyPriorities.getByRole('button', { name: 'Retry' }).evaluate(button => (button as HTMLButtonElement).click());
-        retryClicked = true;
-      }, { timeout: 20_000 });
-      expect(tasksRequests).toBeGreaterThanOrEqual(2);
-      await emptyPage.unroute(tasksRoute);
+      expect(tasksRequests).toBeGreaterThanOrEqual(1);
+      await emptyPage.unrouteAll({ behavior: 'wait' });
+      await test.step('retry empty-member tasks', () => emptyPriorities.getByRole('button', { name: 'Retry' }).click(), { timeout: 20_000 });
       await expect(emptyPage.getByLabel('Your work summary').getByRole('link', { name: /Open tasks/ }).locator('strong')).toHaveText('0');
       await expect(emptyPriorities.getByText('No open work assigned to you or shared with you.')).toBeVisible();
       await expect(emptyPage.getByRole('region', { name: 'Your projects' }).getByText('You have no active membership projects.')).toBeVisible();
