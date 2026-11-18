@@ -9,6 +9,8 @@ if (process.env.CI !== "true" || !["localhost", "127.0.0.1"].includes(url.hostna
 const client = new Client({ connectionString: url.toString() });
 const id = `hr106-${randomUUID()}`;
 let cases = 0;
+let connected = false;
+let passed = false;
 
 async function attempt(label, sql, expectedCode) {
   await client.query("SAVEPOINT hr106_case");
@@ -27,6 +29,7 @@ function project(suffix, type, pipeline, stage) {
 
 try {
   await client.connect();
+  connected = true;
   await client.query("BEGIN");
   await client.query("SET LOCAL lock_timeout = '5s'");
   await client.query("SET LOCAL statement_timeout = '15s'");
@@ -47,7 +50,14 @@ try {
   await attempt("wrong pipeline type rejected", project("wrong-type-after", "wst_project", "pl_proactive", null), "23503");
   await attempt("wrong stage pipeline rejected", project("wrong-stage-after", "wst_deal", "pl_bid", "st_pro_lead"), "23503");
   await attempt("stage without pipeline remains rejected", project("no-pipeline-after", "wst_deal", null, "st_pro_lead"), "23514");
-  console.log(JSON.stringify({ finding: "HR-106", result: "PASS", cases, transactionalDdl: true, persisted: false }));
+  passed = true;
 } finally {
-  try { await client.query("ROLLBACK"); } finally { await client.end(); }
+  if (connected) {
+    try {
+      await client.query("ROLLBACK");
+      const residue = await client.query('SELECT count(*)::int AS count FROM "Workspace" WHERE "id"=$1', [id]);
+      if (residue.rows[0].count !== 0) throw new Error("HR106_FIXTURE_RESIDUE");
+    } finally { await client.end(); }
+  }
 }
+if (passed) console.log(JSON.stringify({ finding: "HR-106", result: "PASS", cases, transactionalDdl: true, persisted: false }));
