@@ -17,7 +17,9 @@ const sql = {
     FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace
     WHERE n.nspname='public' AND c.contype='c' AND c.conname=ANY($1::text[]) ORDER BY c.conname`,
   function: `SELECT p.proname AS name, md5(pg_get_functiondef(p.oid)) AS digest,
-    coalesce(array_to_string(p.proconfig,','),'') AS config
+    coalesce(array_to_string(p.proconfig,','),'') AS config,
+    md5(p.prosrc) AS body_digest,
+    md5(coalesce(array_to_string(p.proconfig,','),'')) AS config_digest
     FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
     WHERE n.nspname='public' AND p.proname=ANY($1::text[]) ORDER BY p.proname`,
   trigger: `SELECT t.tgname AS name, md5(pg_get_triggerdef(t.oid)) AS digest
@@ -42,7 +44,7 @@ try {
     const fingerprint = createHash('md5').update(rows.map((r) => `${r.name}=${r.digest}`).join('|')).digest('hex');
     console.log(`SCHEMA_CATALOG_${kind.toUpperCase()} ${rows.length}/${expected[kind].length} ${fingerprint}`);
     if (kind === 'function') {
-      for (const row of rows) console.log(`SCHEMA_CATALOG_FUNCTION_OBJECT ${row.name} ${row.digest}`);
+      for (const row of rows) console.log(`SCHEMA_CATALOG_FUNCTION_OBJECT ${row.name} ${row.digest} ${row.body_digest} ${row.config_digest}`);
     }
   }
 } finally {
