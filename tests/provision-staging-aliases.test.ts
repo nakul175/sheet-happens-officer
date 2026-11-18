@@ -95,6 +95,7 @@ describe("qa:TC missing APL-2748 create mode guard: staging only, never producti
 
   it("qa:TC missing guard: the new production host is refused as production", () => {
     expect(() => provisionTarget("https://sheethappensofficer.aplyd.org")).toThrow("Refusing to provision aliases on production (sheethappensofficer.aplyd.org).");
+    expect(() => provisionTarget("https://tasks.aplyd.org")).toThrow("Refusing to provision aliases on production (tasks.aplyd.org).");
   });
 
   it("qa:TC missing guard: the script's --create refuses a non-staging BASE_URL before it reads a password or sends anything", () => {

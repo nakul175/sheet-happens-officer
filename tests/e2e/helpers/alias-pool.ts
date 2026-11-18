@@ -51,7 +51,7 @@ export function parseSlots(raw: string | undefined): string[] {
   return [...new Set(out)];
 }
 
-const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "sheethappensofficer.aplyd.org", "168.144.144.69"]);
+const PRODUCTION_HOSTS = new Set(["sheethappensofficer.com", "www.sheethappensofficer.com", "app.sheethappensofficer.com", "sheethappensofficer.aplyd.org", "tasks.aplyd.org", "168.144.144.69"]);
 const ALLOWED_HOST = /^(staging\.sheethappensofficer\.com|pr[1-8]\.staging\.sheethappensofficer\.com|localhost|127\.0\.0\.1)$/;
 
 /** The provisioning script's target. Staging, a pr1-pr8 preview or this machine; production and everything else are refused. */
