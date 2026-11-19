@@ -68,6 +68,7 @@ function exercise(failure='') {
   writeFileSync(path.join(dir,'app.env'),'DATABASE_URL=postgresql://synthetic@127.0.0.1:1/unused\nDIRECT_DATABASE_URL=postgresql://synthetic-admin@127.0.0.1:1/unused\nUNKNOWN_SENTINEL=preserve-me\n');
   const dispatcher=`#!${process.execPath}\nconst fs=require('fs'),path=require('path');const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);fs.appendFileSync(process.env.CALL_LOG,JSON.stringify({cmd,args})+'\\n');if(cmd==='mv'){const a=args.filter(x=>x!=='-T');fs.renameSync(a[0],a[1]);}if(cmd==='npx'&&args.includes('status')&&process.env.FAILURE==='migration')process.exit(7);if(cmd==='npx'&&args.includes('build')&&process.env.FAILURE==='build')process.exit(8);if(cmd==='flock'&&process.env.FAILURE==='lock')process.exit(1);if(cmd==='sudo'&&(process.env.FAILURE==='rollback'||(process.env.FAILURE==='restart'&&fs.readFileSync(process.env.CALL_LOG,'utf8').split('\"cmd\":\"sudo\"').length===2)))process.exit(9);if(cmd==='systemctl')console.log('123');if(cmd==='node'&&process.env.FAILURE==='verify'&&args[2]==='${sha}')process.exit(10);if(cmd==='node'&&['candidate-verifier','legacy-candidate-verifier'].includes(process.env.FAILURE)&&args[0]==='${rel}/deploy/verify-release.mjs')process.exit(10);if(cmd==='node'&&process.env.FAILURE==='precut-verification'&&args[2]==='${'b'.repeat(40)}')process.exit(12);if(cmd==='node'&&process.env.FAILURE==='workspace-preflight'&&args[0]?.endsWith('/verify-workspace-contract.mjs'))process.exit(13);if(cmd==='node'&&process.env.FAILURE==='started-role'&&args[0]?.endsWith('/verify-started-runtime-role.mjs'))process.exit(17);if(cmd==='node'&&process.env.FAILURE==='prune'&&args[0]?.endsWith('/prune-releases.mjs'))process.exit(11);if(cmd==='curl')console.log(JSON.stringify({ok:true,release:'${sha}'}));`;
   for(const cmd of ['npm','npx','sudo','curl','sleep','find','mv','crontab','install','flock','node','systemctl']){writeFileSync(path.join(bin,cmd),dispatcher,{mode:0o755});}
+  if(failure==='signal-restart')writeFileSync(path.join(bin,'sudo'),'#!/bin/sh\nif [ ! -e "$CALL_LOG.signaled" ]; then : > "$CALL_LOG.signaled"; kill -TERM "$PPID"; fi\nexit 0\n',{mode:0o755});
   writeFileSync(path.join(bin,'df'),`#!/bin/sh\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/test 10000000 0 ${failure==='headroom'?6291455:6291456} 0%% /\\n'\n`,{mode:0o755});
   const meminfo=path.join(dir,'meminfo');
   writeFileSync(meminfo,`MemTotal:       16377028 kB\n${failure==='memory-unknown'?'':`MemAvailable:  ${failure==='memory-headroom'?4194303:4194304} kB\n`}`);
@@ -148,6 +149,10 @@ for(const failure of ['candidate-symlink','candidate-verifier-symlink','candidat
 test('restart failure restores previous pointer and restarts it',()=>{
  const r=exercise('restart');assert.equal(r.status,9,r.output);assert.equal(r.current,r.previous);
  assert.equal(r.calls.filter(c=>c.cmd==='sudo').length,2);assert.match(r.output,/rollback verified/);
+});
+test('SIGTERM during candidate restart restores the previous release',()=>{
+ const r=exercise('signal-restart');assert.equal(r.status,143,r.output);assert.equal(r.current,r.previous);
+ assert.match(r.output,/rollback verified/);
 });
 test('failed rollback is explicit, never reported as release success',()=>{
  const r=exercise('rollback');assert.equal(r.status,9,r.output);assert.equal(r.current,r.previous);

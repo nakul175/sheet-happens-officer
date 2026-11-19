@@ -14,6 +14,7 @@ PORT=3000
 KEEP=3
 PREV=""
 PREV_VERIFIER=""
+CUT_VERIFIED=0
 # Serialize the entire build/switch/recovery path; never race another app cut.
 exec 9>"$ROOT/.release.lock"
 flock -n 9 || { echo "Another app release holds the deployment lock"; exit 1; }
@@ -32,8 +33,13 @@ switch() { ln -sfn "$1" "$CUR.new" && mv -T "$CUR.new" "$CUR"; }
 
 recover() {
   local status="$?"
-  trap - ERR
+  trap - EXIT INT TERM
+  [ "$status" -ne 0 ] || return 0
   set +e
+  if [ "$CUT_VERIFIED" = 1 ]; then
+    log "release was verified before interruption; leaving the healthy candidate selected"
+    exit "$status"
+  fi
   if [ "$(readlink -f "$CUR" 2>/dev/null)" = "$REL" ] && [ -n "$PREV" ] && [ -d "$PREV" ] && [ "$PREV" != "$REL" ]; then
     log "release failed; restoring previous release"
     if switch "$PREV" && sudo -n systemctl restart sho && healthy "$PREV" "$PREV_SHA" "$PREV_VERIFIER"; then
@@ -46,7 +52,9 @@ recover() {
   fi
   exit "$status"
 }
-trap recover ERR
+trap recover EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 [ -d "$ROOT/releases" ] && [ ! -L "$ROOT/releases" ] || { echo "Release parent is missing or symlinked"; exit 1; }
 [ -d "$REL" ] && [ ! -L "$REL" ] && [ "$(readlink -f "$REL")" = "$REL" ] || { echo "Release folder is missing or resolves outside its reserved path"; exit 1; }
@@ -122,6 +130,7 @@ sudo -n systemctl restart sho
 healthy "$REL" "$SHA" "$REL/deploy/verify-release.mjs" || { log "health check failed"; false; }
 pid="$(systemctl show sho -p MainPID --value)"
 node "$REL/deploy/verify-started-runtime-role.mjs" "$REL" "$pid"
+CUT_VERIFIED=1
 log "healthy: $SHA is live"
 # Retention is best effort after a verified cut. A cleanup failure must not
 # roll back a healthy release; incomplete or unknown directories are preserved.
