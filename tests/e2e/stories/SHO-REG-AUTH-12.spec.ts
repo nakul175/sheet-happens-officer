@@ -60,8 +60,16 @@ test('SHO-REG-AUTH-12: profile forms and session controls affect only the signed
     const nextPassword = 'zz-updated-profile-pass-9';
     await page.getByLabel('Current password', { exact: true }).fill(PW);
     await page.getByLabel('New password', { exact: true }).fill(nextPassword);
-    await page.getByLabel('Confirm new password', { exact: true }).fill(nextPassword);
-    await page.getByRole('button', { name: 'Change password' }).click();
+    const confirmation = page.getByLabel('Confirm new password', { exact: true });
+    await confirmation.fill('zz-mismatched-profile-pass-9');
+    await confirmation.press('Enter');
+    await expect(page.getByRole('status').filter({ hasText: 'Passwords do not match.' })).toBeVisible();
+    await expect(confirmation).toBeFocused();
+    await expect(page.getByLabel('Current password', { exact: true })).toHaveValue(PW);
+    await expect(page.getByLabel('New password', { exact: true })).toHaveValue(nextPassword);
+    expect((await second.request.get('/api/auth/me')).status()).toBe(200);
+    await confirmation.fill(nextPassword);
+    await confirmation.press('Enter');
     await expect(page.getByRole('status').filter({ hasText: 'Password changed.' })).toBeVisible();
     expect((await second.request.get('/api/auth/me')).status()).toBe(401);
     expect((await first.request.get('/api/auth/me')).status()).toBe(200);
@@ -83,7 +91,7 @@ test('SHO-REG-AUTH-12: profile forms and session controls affect only the signed
       density: (await bystander.c.get('/api/profile/density')).json,
     });
     expect(bystanderAfter).toBe(bystanderBefore);
-    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ verifiedMember: true, nameAndDensityPersisted: true, otherSessionRevoked: true, passwordRevokedOtherSession: true, newPasswordAllowed: true, signOutAllRevokedBoth: true, unrelatedAccountFingerprint: bystanderBefore, unrelatedAccountPreserved: true }, null, 2));
+    writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ verifiedMember: true, nameAndDensityPersisted: true, otherSessionRevoked: true, invalidPasswordConfirmationPreservedFocusFieldsAndOtherSession: true, passwordRevokedOtherSession: true, newPasswordAllowed: true, signOutAllRevokedBoth: true, unrelatedAccountFingerprint: bystanderBefore, unrelatedAccountPreserved: true }, null, 2));
   } finally {
     for (const context of contexts) await context.close();
     const problems = await fixture.cleanUp();
