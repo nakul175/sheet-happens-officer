@@ -61,13 +61,13 @@ try {
   // actions with Prisma's ordinary composite SET NULL on every child column.
   const catalog = await client.query(`
     SELECT c.conname, c.contype, c.convalidated, c.confdeltype,
-      (SELECT array_agg(a.attname ORDER BY u.ord)
+      (SELECT array_agg(a.attname::text ORDER BY u.ord)
          FROM unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum) AS child_cols,
-      (SELECT array_agg(a.attname ORDER BY u.ord)
+      (SELECT array_agg(a.attname::text ORDER BY u.ord)
          FROM unnest(c.confkey) WITH ORDINALITY AS u(attnum, ord)
          JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = u.attnum) AS parent_cols,
-      (SELECT array_agg(a.attname ORDER BY u.ord)
+      (SELECT array_agg(a.attname::text ORDER BY u.ord)
          FROM unnest(c.confdelsetcols) WITH ORDINALITY AS u(attnum, ord)
          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum) AS set_null_cols
     FROM pg_constraint c
@@ -95,7 +95,11 @@ try {
         (want.parent && JSON.stringify(constraint.parent_cols) !== JSON.stringify(want.parent)) ||
         (want.setNull && (constraint.confdeltype !== "n" ||
           JSON.stringify(constraint.set_null_cols) !== JSON.stringify(want.setNull)))) {
-      throw new Error(`HR106_CATALOG_DRIFT:${constraint.conname}`);
+      throw new Error(`HR106_CATALOG_DRIFT:${constraint.conname}:${JSON.stringify({
+        type: constraint.contype, validated: constraint.convalidated,
+        child: constraint.child_cols, parent: constraint.parent_cols,
+        deleteAction: constraint.confdeltype, setNull: constraint.set_null_cols,
+      })}`);
     }
     cases++;
   }
