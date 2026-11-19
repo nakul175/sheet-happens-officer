@@ -42,6 +42,23 @@ try {
   await attempt("existing stage-needs-pipeline check", project("no-pipeline", "wst_deal", null, "st_pro_lead"), "23514");
 
   const draft = readFileSync("deploy/drafts/hr106-project-stage-invariant.sql", "utf8");
+  const competingWriter = new Client({ connectionString: url.toString() });
+  await competingWriter.connect();
+  try {
+    await competingWriter.query("BEGIN");
+    await competingWriter.query('LOCK TABLE "Project" IN ROW EXCLUSIVE MODE');
+    await client.query("SAVEPOINT hr106_writer_lock");
+    await client.query("SET LOCAL lock_timeout = '250ms'");
+    let lockCode = null;
+    try { await client.query(draft); } catch (error) { lockCode = error.code; }
+    await client.query("ROLLBACK TO SAVEPOINT hr106_writer_lock");
+    await client.query("RELEASE SAVEPOINT hr106_writer_lock");
+    if (lockCode !== "55P03") throw new Error(`draft did not refuse competing writer: ${lockCode || "success"}`);
+    cases++;
+  } finally {
+    await competingWriter.query("ROLLBACK").catch(() => {});
+    await competingWriter.end();
+  }
   for (const [label, insert, marker] of [
     ["wrong pipeline type", project("dirty-type", "wst_project", "pl_proactive", null), "HR106_PIPELINE_TYPE_MISMATCH"],
     ["wrong stage pipeline", project("dirty-stage", "wst_deal", "pl_bid", "st_pro_lead"), "HR106_STAGE_PIPELINE_MISMATCH"],

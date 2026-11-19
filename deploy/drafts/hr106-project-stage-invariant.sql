@@ -1,6 +1,9 @@
 -- HR-106 review draft. NOT a Prisma migration and NOT approved for shared databases.
 -- The caller must run this in a bounded transaction after a fresh data inventory.
 -- PostgreSQL 16 column-specific SET NULL preserves Project.typeId and pipelineId.
+-- Freeze writers before the authoritative scan; the caller sets lock_timeout and
+-- statement_timeout and aborts the entire transaction if this lock cannot be held.
+LOCK TABLE "Project", "Pipeline", "Stage" IN SHARE ROW EXCLUSIVE MODE;
 
 DO $$
 BEGIN
