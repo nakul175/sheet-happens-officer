@@ -15,10 +15,16 @@ function exercise(failure='') {
   mkdirSync(path.join(rel,'deploy'));writeFileSync(path.join(rel,'deploy','verify-previous-release.mjs'),'// synthetic fallback verifier\n');
   writeFileSync(path.join(rel,'deploy','verify-release.mjs'),'// synthetic candidate verifier\n');
   writeFileSync(path.join(rel,'deploy','verify-workspace-contract.mjs'),'// synthetic workspace preflight\n');
+  writeFileSync(path.join(rel,'deploy','verify-started-runtime-role.mjs'),'// synthetic started runtime verifier\n');
   if(failure==='workspace-preflight-missing')unlinkSync(path.join(rel,'deploy','verify-workspace-contract.mjs'));
   if(failure==='workspace-preflight-symlink'){
    unlinkSync(path.join(rel,'deploy','verify-workspace-contract.mjs'));
    symlinkSync(path.join(prev,'COMMIT'),path.join(rel,'deploy','verify-workspace-contract.mjs'));
+  }
+  if(failure==='started-role-verifier-missing')unlinkSync(path.join(rel,'deploy','verify-started-runtime-role.mjs'));
+  if(failure==='started-role-verifier-symlink'){
+   unlinkSync(path.join(rel,'deploy','verify-started-runtime-role.mjs'));
+   symlinkSync(path.join(prev,'COMMIT'),path.join(rel,'deploy','verify-started-runtime-role.mjs'));
   }
   writeFileSync(path.join(rel,'deploy','prune-releases.mjs'),'// synthetic retention script\n');
   if(failure==='candidate-symlink'){rmSync(rel,{recursive:true});symlinkSync(prev,rel);}
@@ -60,7 +66,7 @@ function exercise(failure='') {
    symlinkSync(outside,path.join(rel,'deploy','prune-releases.mjs'));
   }
   writeFileSync(path.join(dir,'app.env'),'DATABASE_URL=postgresql://synthetic@127.0.0.1:1/unused\nDIRECT_DATABASE_URL=postgresql://synthetic-admin@127.0.0.1:1/unused\nUNKNOWN_SENTINEL=preserve-me\n');
-  const dispatcher=`#!${process.execPath}\nconst fs=require('fs'),path=require('path');const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);fs.appendFileSync(process.env.CALL_LOG,JSON.stringify({cmd,args})+'\\n');if(cmd==='mv'){const a=args.filter(x=>x!=='-T');fs.renameSync(a[0],a[1]);}if(cmd==='npx'&&args.includes('status')&&process.env.FAILURE==='migration')process.exit(7);if(cmd==='npx'&&args.includes('build')&&process.env.FAILURE==='build')process.exit(8);if(cmd==='flock'&&process.env.FAILURE==='lock')process.exit(1);if(cmd==='sudo'&&(process.env.FAILURE==='rollback'||(process.env.FAILURE==='restart'&&fs.readFileSync(process.env.CALL_LOG,'utf8').split('\"cmd\":\"sudo\"').length===2)))process.exit(9);if(cmd==='systemctl')console.log('123');if(cmd==='node'&&process.env.FAILURE==='verify'&&args[2]==='${sha}')process.exit(10);if(cmd==='node'&&['candidate-verifier','legacy-candidate-verifier'].includes(process.env.FAILURE)&&args[0]==='${rel}/deploy/verify-release.mjs')process.exit(10);if(cmd==='node'&&process.env.FAILURE==='precut-verification'&&args[2]==='${'b'.repeat(40)}')process.exit(12);if(cmd==='node'&&process.env.FAILURE==='workspace-preflight'&&args[0]?.endsWith('/verify-workspace-contract.mjs'))process.exit(13);if(cmd==='node'&&process.env.FAILURE==='prune'&&args[0]?.endsWith('/prune-releases.mjs'))process.exit(11);if(cmd==='curl')console.log(JSON.stringify({ok:true,release:'${sha}'}));`;
+  const dispatcher=`#!${process.execPath}\nconst fs=require('fs'),path=require('path');const cmd=path.basename(process.argv[1]),args=process.argv.slice(2);fs.appendFileSync(process.env.CALL_LOG,JSON.stringify({cmd,args})+'\\n');if(cmd==='mv'){const a=args.filter(x=>x!=='-T');fs.renameSync(a[0],a[1]);}if(cmd==='npx'&&args.includes('status')&&process.env.FAILURE==='migration')process.exit(7);if(cmd==='npx'&&args.includes('build')&&process.env.FAILURE==='build')process.exit(8);if(cmd==='flock'&&process.env.FAILURE==='lock')process.exit(1);if(cmd==='sudo'&&(process.env.FAILURE==='rollback'||(process.env.FAILURE==='restart'&&fs.readFileSync(process.env.CALL_LOG,'utf8').split('\"cmd\":\"sudo\"').length===2)))process.exit(9);if(cmd==='systemctl')console.log('123');if(cmd==='node'&&process.env.FAILURE==='verify'&&args[2]==='${sha}')process.exit(10);if(cmd==='node'&&['candidate-verifier','legacy-candidate-verifier'].includes(process.env.FAILURE)&&args[0]==='${rel}/deploy/verify-release.mjs')process.exit(10);if(cmd==='node'&&process.env.FAILURE==='precut-verification'&&args[2]==='${'b'.repeat(40)}')process.exit(12);if(cmd==='node'&&process.env.FAILURE==='workspace-preflight'&&args[0]?.endsWith('/verify-workspace-contract.mjs'))process.exit(13);if(cmd==='node'&&process.env.FAILURE==='started-role'&&args[0]?.endsWith('/verify-started-runtime-role.mjs'))process.exit(17);if(cmd==='node'&&process.env.FAILURE==='prune'&&args[0]?.endsWith('/prune-releases.mjs'))process.exit(11);if(cmd==='curl')console.log(JSON.stringify({ok:true,release:'${sha}'}));`;
   for(const cmd of ['npm','npx','sudo','curl','sleep','find','mv','crontab','install','flock','node','systemctl']){writeFileSync(path.join(bin,cmd),dispatcher,{mode:0o755});}
   writeFileSync(path.join(bin,'df'),`#!/bin/sh\nprintf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/test 10000000 0 ${failure==='headroom'?6291455:6291456} 0%% /\\n'\n`,{mode:0o755});
   let source=readFileSync(new URL('../../deploy/release.sh',import.meta.url),'utf8');
@@ -118,7 +124,7 @@ test('low release headroom refuses before install, build, switch or restart',()=
  assert.equal(r.calls.some(c=>['npm','npx','sudo','mv'].includes(c.cmd)),false,r.output);
 });
 
-for(const failure of ['candidate-symlink','candidate-verifier-symlink','candidate-deploy-symlink','workspace-preflight-missing','workspace-preflight-symlink','previous-outside','previous-mismatch','previous-verifier-symlink','previous-deploy-symlink','fallback-missing','fallback-symlink','fallback-deploy-symlink','precut-verification']){
+for(const failure of ['candidate-symlink','candidate-verifier-symlink','candidate-deploy-symlink','workspace-preflight-missing','workspace-preflight-symlink','started-role-verifier-missing','started-role-verifier-symlink','previous-outside','previous-mismatch','previous-verifier-symlink','previous-deploy-symlink','fallback-missing','fallback-symlink','fallback-deploy-symlink','precut-verification']){
  test(`${failure} refuses build and service changes before switch`,()=>{
   const r=exercise(failure);assert.equal(r.status,1,r.output);
   assert.equal(r.calls.some(c=>['npm','npx','sudo','mv'].includes(c.cmd)),false,r.output);
@@ -143,6 +149,12 @@ test('busy deployment lock refuses install and switch',()=>{
 
 test('failed post-switch verification restores baseline',()=>{
  const r=exercise('verify');assert.equal(r.status,1,r.output);assert.equal(r.current,r.previous);assert.match(r.output,/rollback verified/);
+});
+
+test('started runtime role failure restores baseline after health succeeds',()=>{
+ const r=exercise('started-role');assert.equal(r.status,17,r.output);assert.equal(r.current,r.previous);
+ assert.match(r.output,/rollback verified/);assert.doesNotMatch(r.output,/is live/);
+ assert.equal(r.calls.filter(c=>c.cmd==='sudo').length,2);
 });
 
 test('rollback verification uses the previous release verifier when the candidate verifier is faulty',()=>{

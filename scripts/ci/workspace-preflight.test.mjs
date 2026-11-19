@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { assessFunctionSearchPaths, assessRuntimeRole, assessWorkspaceContract, runtimeConnectionString, runtimeDatabaseUrl } from '../../deploy/verify-workspace-contract.mjs';
+import { assessStartedEnvironment, parseProcessEnvironment } from '../../deploy/verify-started-runtime-role.mjs';
 
 test('release refuses ambiguous or unapproved workspace state', () => {
   assert.equal(assessWorkspaceContract({ mode: undefined, workspaces: 0, foreignUsers: 0 }), 'WORKSPACE_COUNT_INVALID');
@@ -48,6 +49,17 @@ test('preflight preserves the declared libpq TLS mode without changing the targe
   assert.equal(runtimeConnectionString('postgresql://sho_app:synthetic@db.example.test/defaultdb?sslmode=verify-full').includes('uselibpqcompat'), false);
 });
 
+test('started process must use the exact runtime and direct URLs that passed preflight', () => {
+  const expected = { DATABASE_URL: 'postgresql://sho_app:synthetic@db/one',
+    DIRECT_DATABASE_URL: 'postgresql://doadmin:synthetic@db/one' };
+  const actual = parseProcessEnvironment(Buffer.from(`OTHER=value\0DATABASE_URL=${expected.DATABASE_URL}\0DIRECT_DATABASE_URL=${expected.DIRECT_DATABASE_URL}\0`));
+  assert.equal(assessStartedEnvironment(actual, expected), null);
+  assert.equal(assessStartedEnvironment({ ...actual, DATABASE_URL: expected.DIRECT_DATABASE_URL }, expected), 'STARTED_RUNTIME_ENV_MISMATCH');
+  assert.equal(assessStartedEnvironment({ ...actual, DIRECT_DATABASE_URL: '' }, expected), 'STARTED_RUNTIME_ENV_MISMATCH');
+  assert.equal(assessStartedEnvironment(actual, { ...expected, DIRECT_DATABASE_URL: undefined }), 'STARTED_RUNTIME_ENV_MISMATCH');
+  assert.throws(() => parseProcessEnvironment(Buffer.from('DATABASE_URL=one\0DATABASE_URL=two\0')), /STARTED_RUNTIME_ENV_INVALID/);
+});
+
 test('release refuses missing, duplicate, or drifted trigger function search paths', () => {
   const clean = ['enforce_max_sections', 'enforce_task_section_in_project', 'holy_sheet_task_move']
     .map((name) => ({ name, config: 'search_path=public' }));
@@ -64,6 +76,9 @@ test('read-only workspace preflight runs before migration check, build and switc
   assert.ok(preflight < release.indexOf('prisma migrate status'));
   assert.ok(preflight < release.indexOf('npx next build'));
   assert.ok(preflight < release.indexOf('switch "$REL"'));
+  const postStart = release.indexOf('node "$REL/deploy/verify-started-runtime-role.mjs"');
+  assert.ok(postStart > release.indexOf('healthy "$REL"'));
+  assert.ok(postStart < release.indexOf('log "healthy: $SHA is live"'));
   const source = readFileSync(new URL('../../deploy/verify-workspace-contract.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /\b(UPDATE|DELETE|INSERT|ALTER|DROP|CREATE)\b/);
 });

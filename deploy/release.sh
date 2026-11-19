@@ -54,6 +54,8 @@ trap recover ERR
   [ "$(readlink -f "$REL/deploy/verify-release.mjs")" = "$REL/deploy/verify-release.mjs" ] || { echo "Candidate release verifier is missing or outside its release"; exit 1; }
 [ -f "$REL/deploy/verify-workspace-contract.mjs" ] && [ ! -L "$REL/deploy/verify-workspace-contract.mjs" ] &&
   [ "$(readlink -f "$REL/deploy/verify-workspace-contract.mjs")" = "$REL/deploy/verify-workspace-contract.mjs" ] || { echo "Workspace preflight is missing or outside its release"; exit 1; }
+[ -f "$REL/deploy/verify-started-runtime-role.mjs" ] && [ ! -L "$REL/deploy/verify-started-runtime-role.mjs" ] &&
+  [ "$(readlink -f "$REL/deploy/verify-started-runtime-role.mjs")" = "$REL/deploy/verify-started-runtime-role.mjs" ] || { echo "Started runtime role verifier is missing or outside its release"; exit 1; }
 [ -f /etc/sho/app.env ] || { echo "/etc/sho/app.env is missing"; exit 1; }
 PREV="$(readlink -f "$CUR" 2>/dev/null || true)"
 [ "$PREV" != "$REL" ] || { echo "Refusing to rebuild the active release"; exit 1; }
@@ -112,6 +114,8 @@ switch "$REL"
 log "restarting the app"
 sudo -n systemctl restart sho
 healthy "$REL" "$SHA" "$REL/deploy/verify-release.mjs" || { log "health check failed"; false; }
+pid="$(systemctl show sho -p MainPID --value)"
+node "$REL/deploy/verify-started-runtime-role.mjs" "$REL" "$pid"
 log "healthy: $SHA is live"
 # Retention is best effort after a verified cut. A cleanup failure must not
 # roll back a healthy release; incomplete or unknown directories are preserved.

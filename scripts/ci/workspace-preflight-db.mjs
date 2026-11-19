@@ -3,8 +3,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import pg from 'pg';
 import { assessFunctionSearchPaths, assessWorkspaceContract, readFunctionSearchPaths, readWorkspaceCounts } from '../../deploy/verify-workspace-contract.mjs';
+import { verifyStartedRuntimeRole } from '../../deploy/verify-started-runtime-role.mjs';
 
 const url = process.env.DATABASE_URL;
 assert.ok(url, 'CI database URL required');
@@ -43,6 +47,21 @@ try {
   });
   assert.equal(privileged.status, 1);
   assert.match(privileged.stderr, /^RUNTIME_ROLE_IDENTITY_INVALID\s*$/);
+  const procRoot = mkdtempSync(path.join(tmpdir(), 'sho-started-role-ci-'));
+  try {
+    const pid = '42';
+    mkdirSync(path.join(procRoot, pid));
+    symlinkSync(process.cwd(), path.join(procRoot, pid, 'cwd'));
+    writeFileSync(path.join(procRoot, pid, 'environ'), Buffer.from(
+      `DATABASE_URL=${url}\0DIRECT_DATABASE_URL=${process.env.DIRECT_DATABASE_URL}\0`,
+    ));
+    await assert.rejects(
+      verifyStartedRuntimeRole({ pid, releaseRoot: process.cwd(), procRoot }),
+      /RUNTIME_ROLE_IDENTITY_INVALID/,
+    );
+  } finally {
+    rmSync(procRoot, { recursive: true, force: true });
+  }
   console.log('WORKSPACE_SQL_ZERO_ONE_TWO_PASS');
 } finally {
   if (transactionOpen) await client.query('ROLLBACK').catch(() => {});
