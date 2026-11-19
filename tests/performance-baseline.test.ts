@@ -10,7 +10,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
  if(![database,base].every(u=>['localhost','127.0.0.1'].includes(u.hostname))||database.pathname!='/sho_test')throw Error('DISPOSABLE_LOOPBACK_FIXTURE_REQUIRED');
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
  const raw=randomBytes(32).toString('base64url');
- const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
+ const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;concurrentEdits?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
  let created=false;
  const originalProjects=await db.project.count(),originalUsers=await db.user.count();
  const read=async(route:string)=>{
@@ -36,7 +36,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
   await db.project.createMany({data:dealIds.map((dealId,n)=>({id:dealId,workspaceId:workspaces[0].id,name:`${id} deal ${n}`,typeId:'wst_deal',pipelineId:workingStage!.pipelineId,stageId:workingStage!.id}))});
   await db.projectMember.createMany({data:dealIds.map(dealId=>({projectId:dealId,userId:id,role:'LEADER'}))});
   expect(await db.project.count({where:{id:{in:dealIds}}})).toBe(1000);
-  for(const route of ['/api/projects','/api/my-tasks','/api/my-tasks?v=2','/api/search?q='+id,'/api/projects/'+projectIds[0]]){
+  for(const route of ['/api/auth/me','/api/dashboard?panel=tasks','/api/projects','/api/my-tasks','/api/my-tasks?v=2','/api/search?q='+id,'/api/projects/'+projectIds[0]]){
    const first=await read(route),samples:Awaited<ReturnType<typeof read>>[]=[];
    if(route==='/api/my-tasks?v=2'){
     expect(first.groups?.next7.total).toBe(10000);
@@ -102,6 +102,22 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
   expect(owned).toHaveLength(1000);
   expect(owned.every(row=>row.nextStep?.id)).toBe(true);
   report.dealList={dealCount:owned.length,eligibleTasks:10000,firstRequestMs:Math.round(firstDeals.ms),p95Ms:Math.round(dealTimes[9]),maxBytes:Math.max(firstDeals.bytes,...dealSamples.map(x=>x.bytes))};
+  const raceTask=await db.task.findFirstOrThrow({where:{projectId:projectIds[0]},orderBy:{id:'asc'}});
+  const raceActionsBefore=await db.actionLog.count({where:{targetId:raceTask.id}});
+  const raceTitles=Array.from({length:20},(_,n)=>`${id} concurrent edit ${n}`);
+  const raceResponses=await Promise.all(raceTitles.map(async title=>{
+   const response=await fetch(new URL(`/api/tasks/${raceTask.id}`,base),{method:'PATCH',headers:{cookie:'sho_session='+raw,'content-type':'application/json'},body:JSON.stringify({title,expectedUpdatedAt:raceTask.updatedAt.toISOString()}),signal:AbortSignal.timeout(20000)});
+   return{title,status:response.status};
+  }));
+  const accepted=raceResponses.filter(row=>row.status===200);
+  const refused=raceResponses.filter(row=>row.status===409);
+  expect(accepted,'exactly one edit may consume the original version').toHaveLength(1);
+  expect(refused,'every other edit must get a conflict').toHaveLength(19);
+  const afterRace=await db.task.findUniqueOrThrow({where:{id:raceTask.id}});
+  expect(afterRace.title).toBe(accepted[0].title);
+  expect(afterRace.updatedAt.getTime()).toBeGreaterThan(raceTask.updatedAt.getTime());
+  expect(await db.actionLog.count({where:{targetId:raceTask.id}})).toBe(raceActionsBefore+1);
+  report.concurrentEdits={requests:20,accepted:accepted.length,conflicts:refused.length,lostUpdates:0};
   report.status='MY_TASKS_TARGET_PASS';
  }finally{
   try{
