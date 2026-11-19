@@ -121,11 +121,23 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
   report.status='MY_TASKS_TARGET_PASS';
  }finally{
   try{
-   if(created){await db.task.deleteMany({where:{projectId:{in:[...projectIds,...dealIds]}}});await db.section.deleteMany({where:{projectId:{in:dealIds}}});await db.project.deleteMany({where:{id:{in:[...projectIds,...dealIds]}}});await db.user.delete({where:{id}});}
+   if(created){
+    const ownedProjects=[...projectIds,...dealIds];
+    await db.notification.deleteMany({where:{OR:[{projectId:{in:ownedProjects}},{actorId:id},{recipientId:id}]}});
+    await db.actionLog.deleteMany({where:{OR:[{projectId:{in:ownedProjects}},{actorId:id}]}});
+    await db.auditLog.deleteMany({where:{actorId:id}});
+    await db.task.deleteMany({where:{projectId:{in:ownedProjects}}});
+    await db.section.deleteMany({where:{projectId:{in:dealIds}}});
+    await db.project.deleteMany({where:{id:{in:ownedProjects}}});
+    await db.user.delete({where:{id}});
+   }
    expect(await db.project.count({where:{id:{in:projectIds}}})).toBe(0);
    expect(await db.task.count({where:{projectId:{in:projectIds}}})).toBe(0);
    expect(await db.project.count({where:{id:{in:dealIds}}})).toBe(0);
    expect(await db.task.count({where:{projectId:{in:dealIds}}})).toBe(0);
+   expect(await db.actionLog.count({where:{actorId:id}})).toBe(0);
+   expect(await db.notification.count({where:{OR:[{actorId:id},{recipientId:id}]}})).toBe(0);
+   expect(await db.auditLog.count({where:{actorId:id}})).toBe(0);
    expect(await db.project.count()).toBe(originalProjects);
    expect(await db.user.count()).toBe(originalUsers);
    report.cleanup=true;
