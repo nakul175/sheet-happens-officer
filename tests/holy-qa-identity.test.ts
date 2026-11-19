@@ -9,11 +9,13 @@ it('binds Holy Sheet document writes to the exact canonical or legacy public hos
  const request=(host:string,origin:string)=>new Request(`https://${host}/api/projects/p/documents`,{headers:{host,origin}});
  const prod={SHO_HOLY_QA:'0'};
  expect(holySheetHostOrigin(prod)).toBe('https://tasks.aplyd.org');
- for(const host of ['tasks.aplyd.org','sheethappensofficer.aplyd.org'])
+ expect(holySheetHostOrigin({...prod,APP_URL:'https://staging.tasks.aplyd.org'})).toBe('https://staging.tasks.aplyd.org');
+ for(const host of ['tasks.aplyd.org','staging.tasks.aplyd.org','sheethappensofficer.aplyd.org'])
   expect(holySheetSameOrigin(request(host,`https://${host}`),prod)).toBe(true);
  for(const [host,origin] of [
   ['tasks.aplyd.org','https://sheethappensofficer.aplyd.org'],
   ['sheethappensofficer.aplyd.org','https://tasks.aplyd.org'],
+  ['staging.tasks.aplyd.org','https://tasks.aplyd.org'],
   ['tasks.aplyd.org','http://tasks.aplyd.org'],
   ['tasks.aplyd.org','https://tasks.aplyd.org.evil.invalid'],
   ['evil.invalid','https://evil.invalid'],

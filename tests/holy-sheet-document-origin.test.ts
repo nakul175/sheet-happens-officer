@@ -44,16 +44,18 @@ it.each([
   expect(allowed.status).toBe(200);
   const legacy = await post(request('sheethappensofficer.aplyd.org', 'https://sheethappensofficer.aplyd.org'), context);
   expect(legacy.status).toBe(200);
-  expect(mocks.changeDocument).toHaveBeenCalledTimes(2);
+  const staging = await post(request('staging.tasks.aplyd.org', 'https://staging.tasks.aplyd.org'), context);
+  expect(staging.status).toBe(200);
+  expect(mocks.changeDocument).toHaveBeenCalledTimes(3);
 
   const crossHost = await post(request('tasks.aplyd.org', 'https://sheethappensofficer.aplyd.org'), context);
   expect(crossHost.status).toBe(403);
   const foreign = await post(request('evil.invalid', 'https://evil.invalid'), context);
   expect(foreign.status).toBe(403);
-  expect(mocks.changeDocument).toHaveBeenCalledTimes(2);
+  expect(mocks.changeDocument).toHaveBeenCalledTimes(3);
 
   vi.stubEnv('FF_HOLY_SHEET', '0');
   const off = await post(request('tasks.aplyd.org', 'https://sheethappensofficer.aplyd.org'), context);
   expect(off.status).toBe(404);
-  expect(mocks.changeDocument).toHaveBeenCalledTimes(2);
+  expect(mocks.changeDocument).toHaveBeenCalledTimes(3);
 });
