@@ -49,6 +49,8 @@ jobs:
       - name: Reproduce the pinned native shutdown binary
         run: node scripts/ci/reproduce-native.mjs
       - run: npm ci
+      - name: Hand-maintained source import cycles
+        run: node --test scripts/ci/source-import-cycles.spec.mjs && node scripts/ci/source-import-cycles.mjs
       - name: Native suite logout guard tests
         run: node --test scripts/native-logout/*.test.mjs
       - name: Synthetic backup recovery rehearsal
