@@ -417,6 +417,14 @@ describe("flag on (AC1–AC8)", () => {
       posted.push(row.text);
       expect((await listComments(actor(who), t1)).comments.some((c) => c.id === row.id)).toBe(true);
     }
+    const writeState = async () => ({
+      task: await db.task.findUniqueOrThrow({ where: { id: t1 } }),
+      comments: await db.comment.findMany({ where: { taskId: t1 }, orderBy: { id: "asc" } }),
+      actions: await db.actionLog.findMany({ where: { projectId: p.id, targetId: t1 }, orderBy: { id: "asc" } }),
+      notifications: await db.notification.findMany({ where: { taskId: t1 }, orderBy: { id: "asc" } }),
+      audit: await db.auditLog.findMany({ where: { targetId: t1 }, orderBy: { id: "asc" } }),
+    });
+    const beforeDeniedWrites = await writeState();
     await expect(addComment(actor(viewer), t1, { text: "ZZ-TEST v" })).rejects.toMatchObject({ status: 403 });
     const viewerList = await listComments(actor(viewer), t1);
     expect(viewerList.comments.map((c) => c.text)).toEqual(posted);
@@ -424,6 +432,7 @@ describe("flag on (AC1–AC8)", () => {
     const ok = viewerList.comments[0];
     await expect(editComment(actor(viewer), t1, ok.id, { text: "ZZ-TEST v" })).rejects.toMatchObject({ status: 403 });
     await expect(removeComment(actor(viewer), t1, ok.id)).rejects.toMatchObject({ status: 403 });
+    expect(await writeState()).toEqual(beforeDeniedWrites);
     await expect(editComment(actor(outsider), t1, ok.id, { text: "ZZ-TEST o" })).rejects.toMatchObject({ status: 404, message: absent.message });
     await expect(removeComment(actor(outsider), t1, ok.id)).rejects.toMatchObject({ status: 404, message: absent.message });
     const other = await project(outsider, outsider);
