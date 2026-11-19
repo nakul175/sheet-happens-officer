@@ -19,7 +19,7 @@ export async function verifyRelease({root,expected,origin,pid,procRoot='/proc'})
   const callback=client==='accounts'?'https://accounts.aplyd.org/bridge/callback':'https://bugoff.aplyd.org/api/auth/callback/aplyd';
   const q=new URLSearchParams({client_id:client,redirect_uri:callback,response_type:'code',code_challenge_method:'S256',code_challenge:'c'.repeat(43),state:'s'.repeat(32)});
   const auth=await request('/api/suite/authorize?'+q);check(auth.status===302,'AUTHORIZE_STATUS');
-  const location=new URL(auth.headers.get('location')??'',url);check(location.origin==='https://sheethappensofficer.aplyd.org'&&location.pathname==='/signin','AUTHORIZE_REDIRECT');
+  const location=new URL(auth.headers.get('location')??'',url);check(location.origin==='https://tasks.aplyd.org'&&location.pathname==='/signin','AUTHORIZE_REDIRECT');
  }
  check((await request('/api/suite/userinfo')).status===401,'USERINFO_STATUS');
  check((await request('/api/suite/token',{method:'POST',body:new URLSearchParams({client_id:'accounts',client_secret:'invalid-audit-secret'})})).status===401,'TOKEN_STATUS');

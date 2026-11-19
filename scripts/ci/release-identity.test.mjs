@@ -19,7 +19,11 @@ async function exercise(change='',verify=verifyRelease){
   globalThis.fetch=async(raw)=>{
    const u=new URL(raw),p=u.pathname;
    if(p==='/api/health')return Response.json({ok:true,release:change==='health'?'wrong':expected});
-   if(p==='/api/suite/authorize')return new Response(null,{status:302,headers:{location:change==='redirect'?'https://evil.invalid/signin':'https://sheethappensofficer.aplyd.org/signin'}});
+   if(p==='/api/suite/authorize'){
+    const fallback=verify===verifyPreviousRelease?'https://sheethappensofficer.aplyd.org/signin':'https://tasks.aplyd.org/signin';
+    const location=change==='redirect'?'https://evil.invalid/signin':change==='legacyRedirect'?'https://sheethappensofficer.aplyd.org/signin':fallback;
+    return new Response(null,{status:302,headers:{location}});
+   }
    if(p.startsWith('/api/suite/'))return new Response(null,{status:change==='suite401'?404:401});
    if(p==='/signin')return new Response(change==='assets'?'': '<script src="/_next/static/app.js"></script><link href="/_next/static/app.css">');
    if(p.startsWith('/_next/static/'))return new Response(change==='asset404'?'':change==='assetHash'?'wrong':'synthetic-'+p.split('.').pop(),{status:change==='asset404'?404:200});
@@ -29,6 +33,7 @@ async function exercise(change='',verify=verifyRelease){
  }finally{globalThis.fetch=original;await rm(dir,{recursive:true,force:true});}
 }
 test('matching process, source, manifest, public assets and suite checks pass',async()=>{const r=await exercise();assert.equal(r.sha,expected);assert.equal(r.assets,2);assert.equal(r.suiteRoutes,4);});
+test('candidate rejects a legacy-host sign-in redirect after Tasks cut',async()=>assert.rejects(exercise('legacyRedirect'),/AUTHORIZE_REDIRECT/));
 for(const [change,code] of [['commit','COMMIT_MISMATCH'],['process','PROCESS_CWD_MISMATCH'],['manifest','SUITE_STATUS_MISSING'],['health','HEALTH_IDENTITY'],['redirect','AUTHORIZE_REDIRECT'],['suite401','USERINFO_STATUS'],['assets','ASSETS_MISSING'],['asset404','ASSET_STATUS'],['assetHash','ASSET_MISMATCH']])test(`refuses ${change}`,async()=>assert.rejects(exercise(change),new RegExp(code)));
 
 test('independent previous-release verifier accepts matching baseline identity and assets',async()=>{const r=await exercise('',verifyPreviousRelease);assert.equal(r.sha,expected);assert.equal(r.assets,2);assert.equal(r.suiteRoutes,4);});

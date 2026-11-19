@@ -48,7 +48,7 @@ it('preserves all four suite routes and denies unauthenticated requests without 
  const signedOut=await fetch(BASE+'/api/suite/authorize?'+params,{redirect:'manual'});
  expect(signedOut.status).toBe(302);
  const signin=new URL(signedOut.headers.get('location')!);
- expect(signin.origin+signin.pathname).toBe('https://sheethappensofficer.aplyd.org/signin');
+ expect(signin.origin+signin.pathname).toBe('https://tasks.aplyd.org/signin');
  expect(signin.searchParams.get('returnTo')).toContain('client_id=accounts');
  const denied=[
   await fetch(BASE+'/api/suite/authorize?client_id=unknown-client',{redirect:'manual'}),

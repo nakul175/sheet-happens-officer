@@ -51,17 +51,19 @@ describe("first-party suite authorize route preservation", () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it("redirects a signed-out user to the fixed SHO origin and preserves the bounded return path", async () => {
+  it("redirects a signed-out user to the canonical Tasks origin and preserves the bounded return path", async () => {
     vi.stubEnv("SUITE_ACCOUNTS_CLIENT_SECRET", "test-only-accounts-client-secret-000000000000");
     mocks.currentUser.mockRejectedValue(new ApiError(401, "Sign in required"));
-    const response = await GET(new Request(authorizeUrl()));
-    expect(response.status).toBe(302);
-    const location = new URL(response.headers.get("location")!);
-    expect(location.origin).toBe("https://sheethappensofficer.aplyd.org");
-    expect(location.pathname).toBe("/signin");
-    expect(location.searchParams.get("returnTo")).toContain("/api/suite/authorize?");
-    expect(location.searchParams.get("returnTo")).toContain("client_id=accounts");
-    expect(response.headers.get("cache-control")).toBe("no-store");
+    for (const incoming of [authorizeUrl(), authorizeUrl().replace("https://sheethappensofficer.aplyd.org", "https://tasks.aplyd.org")]) {
+      const response = await GET(new Request(incoming));
+      expect(response.status).toBe(302);
+      const location = new URL(response.headers.get("location")!);
+      expect(location.origin).toBe("https://tasks.aplyd.org");
+      expect(location.pathname).toBe("/signin");
+      expect(location.searchParams.get("returnTo")).toContain("/api/suite/authorize?");
+      expect(location.searchParams.get("returnTo")).toContain("client_id=accounts");
+      expect(response.headers.get("cache-control")).toBe("no-store");
+    }
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
