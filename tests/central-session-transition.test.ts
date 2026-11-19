@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHmac } from "node:crypto";
 
 const m = vi.hoisted(() => ({
   transaction: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn(), upsert: vi.fn(),
@@ -31,6 +32,9 @@ describe("central session host transition", () => {
     await attachCentralSession("source", "user", "subject", "uid-1");
     const token = m.set.mock.calls[0][1];
     const hash = m.updateMany.mock.calls[0][0].data.tokenHash;
+    expect(token).toBe(createHmac("sha256", "test-only-central-identity-secret")
+      .update(JSON.stringify(["tasks-source-session-v1", "source", "user", "subject", "uid-1"]))
+      .digest("base64url"));
     await attachCentralSession("source", "user", "subject", "uid-1");
     expect(m.set.mock.calls[1][1]).toBe(token);
     expect(m.updateMany.mock.calls[1][0].data.tokenHash).toBe(hash);

@@ -7,8 +7,11 @@ import { centralSessionActive } from "@/lib/central-status";
 import { holyQaIdentity, centralIdentitySecret } from "@/lib/holy-qa-identity";
 import { db } from "@/lib/db";
 export async function attachCentralSession(sourceSessionId: string, userId: string, subject: string, sessionUid: string) {
-    // Stable across the legacy and Tasks hosts while bound to this central login session.
-    const token = createHmac("sha256", centralIdentitySecret()).update(JSON.stringify([sourceSessionId, userId, subject, sessionUid])).digest("base64url");
+    // Preserve the live token derivation during the legacy-to-Tasks host transition.
+    // Both hosts must attach the same Accounts session without rotating either cookie.
+    const token = createHmac("sha256", centralIdentitySecret())
+        .update(JSON.stringify(["tasks-source-session-v1", sourceSessionId, userId, subject, sessionUid]))
+        .digest("base64url");
     const expires = await db.$transaction(async (tx) => {
         const session = await tx.session.findUnique({ where: { id: sourceSessionId }, include: { user: true, centralLink: true } });
         const user = session?.user;
