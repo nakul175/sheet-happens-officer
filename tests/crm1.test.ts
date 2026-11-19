@@ -358,6 +358,8 @@ describe("deal details (12.3)", () => {
     const viewer = await account("detviewer");
     await lead.c.post(`/api/projects/${id}/members`, { userId: viewer.id, role: "VIEWER" });
     expect((await lead.c.post(`/api/projects/${id}/parties`, { organisationId: orgId, role: "PARTNER" })).status).toBe(201);
+    const replacementOrgId = await org(lead, `Viewer-boundary replacement ${Date.now()}-${seq++}`);
+    const buyer = await db.dealParty.findFirstOrThrow({ where: { projectId: id, role: "BUYER" } });
     const party = await db.dealParty.findFirstOrThrow({ where: { projectId: id, role: "PARTNER" } });
     const stored = async () => ({
       project: await db.project.findUniqueOrThrow({ where: { id } }),
@@ -375,6 +377,7 @@ describe("deal details (12.3)", () => {
       ["POST", `/api/projects/${id}/stage`, { stageId: pipes.proactive.stages[1].id }],
       ["POST", `/api/projects/${id}/parties`, { organisationId: orgId, role: "FUNDER" }],
       ["DELETE", `/api/projects/${id}/parties/${party.id}`],
+      ["PATCH", `/api/projects/${id}/parties/buyer`, { organisationId: replacementOrgId, expectedPartyId: buyer.id, expectedOrganisationId: orgId }],
     ];
     for (const [method, path, body] of denied) {
       expect((await viewer.c.call(method, path, body)).status, `${method} ${path}`).toBe(403);
