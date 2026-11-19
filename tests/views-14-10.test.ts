@@ -22,6 +22,24 @@ describe("saved views (14.10)", () => {
     expect((await lead.c.get(`/api/projects/${p.id}/views`)).json.views).toEqual([]);
   });
 
+  it("lets a Viewer manage only their personal saved view", async () => {
+    const lead = await account("lead");
+    const viewer = await account("viewer");
+    const p = await project(lead, lead, [{ who: viewer, role: "VIEWER" }]);
+    const path = `/api/projects/${p.id}/views`;
+    const leaderView = await lead.c.post(path, { name: "Leader view", state: state() });
+    expect(leaderView.status).toBe(201);
+    const ownView = await viewer.c.post(path, { name: "My view", state: state() });
+    expect(ownView.status).toBe(201);
+    expect((await viewer.c.get(path)).json.views.map((v: { id: string }) => v.id)).toEqual([ownView.json.view.id]);
+    expect((await viewer.c.patch(`/api/views/${leaderView.json.view.id}`, { name: "Taken" })).status).toBe(404);
+    expect((await viewer.c.del(`/api/views/${leaderView.json.view.id}`)).status).toBe(404);
+    expect((await viewer.c.patch(`/api/views/${ownView.json.view.id}`, { name: "Renamed" })).json.view.name).toBe("Renamed");
+    expect((await viewer.c.del(`/api/views/${ownView.json.view.id}`)).status).toBe(204);
+    expect((await viewer.c.get(path)).json.views).toEqual([]);
+    expect((await lead.c.get(path)).json.views.map((v: { id: string }) => v.id)).toEqual([leaderView.json.view.id]);
+  });
+
   it("stops at 10 per project with a clear message, and another project is separate", async () => {
     const lead = await account("lead");
     const p = await project(lead, lead);

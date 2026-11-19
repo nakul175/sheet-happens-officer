@@ -73,7 +73,7 @@ async function fixture() {
 async function snapshot(id: string) {
   // Stable ordered snapshots include versions and full stored activity/notices.
   // Session lastSeenAt is intentionally outside the project-mutation boundary.
-  const [project, members, sections, tasks, collaborators, comments, taskLinks, actions, notifications, audit] = await Promise.all([
+  const [project, members, sections, tasks, collaborators, comments, taskLinks, views, actions, notifications, audit] = await Promise.all([
     db.project.findUniqueOrThrow({ where: { id } }),
     db.projectMember.findMany({ where: { projectId: id }, orderBy: { userId: 'asc' } }),
     db.section.findMany({ where: { projectId: id }, orderBy: { id: 'asc' } }),
@@ -81,11 +81,12 @@ async function snapshot(id: string) {
     db.taskCollaborator.findMany({ where: { task: { projectId: id } }, orderBy: [{ taskId: 'asc' }, { userId: 'asc' }] }),
     db.comment.findMany({ where: { task: { projectId: id } }, orderBy: { id: 'asc' } }),
     db.taskLink.findMany({ where: { task: { projectId: id } }, orderBy: { id: 'asc' } }),
+    db.savedView.findMany({ where: { projectId: id }, orderBy: { id: 'asc' } }),
     db.actionLog.findMany({ where: { projectId: id }, orderBy: { id: 'asc' } }),
     db.notification.findMany({ where: { projectId: id }, orderBy: { id: 'asc' } }),
     db.auditLog.findMany({ where: { targetId: id }, orderBy: { id: 'asc' } }),
   ]);
-  return { project, members, sections, tasks, collaborators, comments, taskLinks, actions, notifications, audit };
+  return { project, members, sections, tasks, collaborators, comments, taskLinks, views, actions, notifications, audit };
 }
 
 it('task creation validates actor, assignee and title without side effects, then persists one eligible assignment', async () => {
@@ -170,6 +171,8 @@ for (const scenario of ['editor', 'viewer', 'outsider', 'removed-creator'] as co
       expect((await who.c.get(taskPath)).status).toBe(200);
       expect((await who.c.get(path + '/tasks')).status).toBe(200);
       calls.push(
+        ['POST', path + '/classification', { isVertical: true }],
+        ['POST', path + '/tasks/bulk', { taskIds: [f.task.id], action: 'complete', versions: { [f.task.id]: f.task.updatedAt.toISOString() } }],
         ['POST', path + '/tasks', { title: 'Denied task', dueDate: '2026-11-30' }],
         ['PATCH', taskPath, { title: 'Denied task edit', expectedUpdatedAt: f.task.updatedAt.toISOString() }],
         ['DELETE', taskPath],
