@@ -1,13 +1,14 @@
 import { invitedNativeId, invitedSessionsEnabled } from "@/lib/invited-central-identity";
 import { assertWorkspaceUser } from "@/lib/workspace";
 import { multiWorkspaceEnabled } from "@/lib/workspace-authority";
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, createHmac } from "node:crypto";
 import { cookies } from "next/headers";
 import { centralSessionActive } from "@/lib/central-status";
-import { holyQaIdentity } from "@/lib/holy-qa-identity";
+import { holyQaIdentity, centralIdentitySecret } from "@/lib/holy-qa-identity";
 import { db } from "@/lib/db";
 export async function attachCentralSession(sourceSessionId: string, userId: string, subject: string, sessionUid: string) {
-    const token = randomBytes(32).toString("base64url");
+    // Stable across the legacy and Tasks hosts while bound to this central login session.
+    const token = createHmac("sha256", centralIdentitySecret()).update(JSON.stringify([sourceSessionId, userId, subject, sessionUid])).digest("base64url");
     const expires = await db.$transaction(async (tx) => {
         const session = await tx.session.findUnique({ where: { id: sourceSessionId }, include: { user: true, centralLink: true } });
         const user = session?.user;

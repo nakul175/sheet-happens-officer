@@ -4,7 +4,7 @@ const m = vi.hoisted(() => ({
   cookies: vi.fn(), get: vi.fn(), set: vi.fn(),
   holyQaIdentity: vi.fn(), grant: vi.fn(), findUnique: vi.fn(), audit: vi.fn(),
   attach: vi.fn(), attachQa: vi.fn(), centralSessionActive: vi.fn(), centralIdentity: vi.fn(),
-  centralClient: vi.fn(), readFlow: vi.fn(), returnToEnabled: vi.fn(), safeReturnPath: vi.fn(),
+  centralClient: vi.fn(), centralRequestOrigin: vi.fn(), readFlow: vi.fn(), returnToEnabled: vi.fn(), safeReturnPath: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({ cookies: m.cookies }));
@@ -16,6 +16,7 @@ vi.mock("@/lib/attach-central-session", () => ({ attachCentralSession: m.attach,
 vi.mock("@/lib/central-status", () => ({ centralSessionActive: m.centralSessionActive, centralIdentity: m.centralIdentity }));
 vi.mock("@/lib/central-client", () => ({
   centralClient: m.centralClient, SHO_ORIGIN: "https://sheethappensofficer.aplyd.org",
+  centralRequestOrigin: m.centralRequestOrigin,
   FLOW_COOKIE: "__Host-sho_oidc_flow", flowCookieOptions: { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 600 },
   readFlow: m.readFlow,
 }));
@@ -42,6 +43,7 @@ beforeEach(() => {
   m.get.mockReturnValue({ value: "sealed-flow" });
   m.readFlow.mockReturnValue({ state: "state", nonce: "nonce", verifier: "verifier", expires: Date.now() + 60_000, returnPath: "/work" });
   m.centralClient.mockResolvedValue({});
+  m.centralRequestOrigin.mockReturnValue("https://sheethappensofficer.aplyd.org");
   m.grant.mockResolvedValue({ claims: () => valid });
   m.holyQaIdentity.mockReturnValue(null);
   m.findUnique.mockResolvedValue(user);
@@ -113,6 +115,23 @@ describe("central callback fail-closed boundary", () => {
     expect(m.attach).toHaveBeenCalledWith("source-session", "local-user", "central-subject", "central-session");
     expect(m.attachQa).not.toHaveBeenCalled();
     expect(m.audit).toHaveBeenCalledWith("CENTRAL_SIGN_IN", { actorId: "local-user" });
+  });
+
+  it("keeps a Tasks callback and redirect on the sealed Tasks origin", async () => {
+    m.centralRequestOrigin.mockReturnValue("https://tasks.aplyd.org");
+    m.readFlow.mockReturnValue({ state: "state", nonce: "nonce", verifier: "verifier", expires: Date.now() + 60_000, origin: "https://tasks.aplyd.org", returnPath: "/work" });
+    const response = await GET(new Request("https://tasks.aplyd.org/api/auth/aplyd/callback?code=synthetic&state=synthetic"));
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://tasks.aplyd.org/work");
+    expect((m.grant.mock.calls[0][1] as URL).origin).toBe("https://tasks.aplyd.org");
+  });
+
+  it("rejects a changed callback host before contacting the authority", async () => {
+    m.centralRequestOrigin.mockReturnValue("https://tasks.aplyd.org");
+    const response = await GET(new Request("https://tasks.aplyd.org/api/auth/aplyd/callback?code=synthetic&state=synthetic"));
+    expect(response.status).toBe(400);
+    expect(m.centralClient).not.toHaveBeenCalled();
+    noSession();
   });
 
   it("falls back to the SHO root for an unsafe or disabled return path", async () => {
