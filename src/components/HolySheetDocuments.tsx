@@ -143,7 +143,7 @@ export function HolySheetDocuments({ kind, id }: {
         if (!context) return;
         const nextChannel = crypto.randomUUID();
         channel.current = nextChannel;
-        const hash = new URLSearchParams({ 'hs-user': context.subject, 'hs-channel': nextChannel, 'hs-mode': mode, 'hs-host': context.hostOrigin ?? 'https://sheethappensofficer.aplyd.org' });
+        const hash = new URLSearchParams({ 'hs-user': context.subject, 'hs-channel': nextChannel, 'hs-mode': mode, 'hs-host': context.hostOrigin ?? 'https://tasks.aplyd.org' });
         if (context.defaultSpaceId) hash.set('hs-space', context.defaultSpaceId);
         setFrame('');
         setPicker(`${context.origin}/embed/picker#${hash}`);

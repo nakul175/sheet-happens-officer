@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { holySheetHostOrigin } from '@/lib/holy-qa-identity';
+import { holySheetSameOrigin } from '@/lib/holy-qa-identity';
 import { currentUser } from '@/lib/auth';
 import { handle, parseBody, ApiError } from '@/lib/http';
 import { documents, changeDocument } from '@/lib/holy-sheet-links';
@@ -15,7 +15,7 @@ async function mutate(req: Request, ctx: Context, remove: boolean) {
     return privateResponse(async () => {
         const actor = await currentUser();
         // Cookie-authenticated mutations require explicit same-origin browser intent.
-        if (req.headers.get('origin') !== holySheetHostOrigin())
+        if (!holySheetSameOrigin(req))
             throw new ApiError(403, 'Same-origin request required');
         const input = await parseBody(req, schema);
         return Response.json(await changeDocument(actor, { kind: 'projects', id: (await ctx.params).id }, { ...input, remove }));

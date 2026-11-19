@@ -1,5 +1,5 @@
 import { scopedUser, multiWorkspaceEnabled } from '@/lib/workspace-authority';
-import { holyQaIdentity } from "@/lib/holy-qa-identity";
+import { holySheetHostOrigin } from "@/lib/holy-qa-identity";
 import { Prisma } from '@/generated/prisma/client';
 import { currentSessionId } from '@/lib/auth';
 import { db } from '@/lib/db';
@@ -33,7 +33,7 @@ export async function documentContext(actor: Actor, origin: DocumentOrigin, writ
     const link = session?.centralLink;
     if (!session || session.userId !== actor.id || session.revokedAt || session.expiresAt <= new Date() || !link || !link.subject || link.subject.length > 200 || /[\u0000-\u0020\u007f]/.test(link.subject) || !await centralSessionActive(link.subject, link.sessionUid, actor.id))
         throw new ApiError(401, 'Sign in with Aplyd to open Holy Sheet.');
-    return { hostOrigin: holyQaIdentity()?.origin ?? "https://sheethappensofficer.aplyd.org", origin: hsOrigin, subject: link.subject, projectId, originKey: origin.kind === 'tasks' ? `task:${origin.id}` : 'project', canWrite: access.role !== 'VIEWER' && !access.project.archivedAt };
+    return { hostOrigin: holySheetHostOrigin(), origin: hsOrigin, subject: link.subject, projectId, originKey: origin.kind === 'tasks' ? `task:${origin.id}` : 'project', canWrite: access.role !== 'VIEWER' && !access.project.archivedAt };
 }
 export async function documents(actor: Actor, origin: DocumentOrigin) {
     const c = await documentContext(actor, origin);
