@@ -75,12 +75,14 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   const firstStage=page.locator('section[aria-label="RFP/RFA + OTC sales"] .dcol').filter({has:page.locator('header b').getByText(firstName,{exact:true})});
   const visibleOwnedCards=async()=>firstStage.locator('a[href^="/projects/"]').evaluateAll((links,owned)=>
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
-  const expectedStageOrder=[...ids].sort((a,b)=>
+  // EOI is rendered in its own opportunity group; this selector covers RFP/RFA + OTC.
+  const expectedStageOrder=[...ids.slice(0,5)].sort((a,b)=>
    (stageOrder.get(stageByDeal.get(a)!)??Number.MAX_SAFE_INTEGER)-(stageOrder.get(stageByDeal.get(b)!)??Number.MAX_SAFE_INTEGER)||(a<b?-1:a>b?1:0));
   const visibleOwnedBoard=async()=>page.locator('section[aria-label="RFP/RFA + OTC sales"] .dcol a[href^="/projects/"]').evaluateAll((links,owned)=>
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
   await sortControl.selectOption('stage');
   await expect.poll(visibleOwnedBoard).toEqual(expectedStageOrder);
+  await expect.poll(()=>page.locator(`a[href="/projects/${ids[5]}"]`).count()).toBe(1);
   await sortControl.selectOption('name-desc');
   await expect.poll(visibleOwnedCards).toEqual([ids[2],ids[0]]);
   await sortControl.selectOption('name-asc');
@@ -125,6 +127,7 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
   await sortControl.selectOption('stage');
   await expect.poll(visibleOwnedRows).toEqual(expectedStageOrder);
+  await expect.poll(()=>page.locator(`a[href="/projects/${ids[5]}"]`).count()).toBe(1);
   const tiedDates=[ids[0],ids[2]].sort();
   const undated=[ids[1],ids[4]].sort();
   await sortControl.selectOption('date-asc');
