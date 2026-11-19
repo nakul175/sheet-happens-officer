@@ -5,6 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { db } from "@/lib/db";
 import { account, BASE, cleanupZz, project, PW, superAdmin, task, type Account } from "../helpers";
 import { requireLocalFixtures } from "./screen-ready";
 
@@ -198,10 +199,19 @@ describe("phone comments", () => {
       expect(before.status()).toBe(200);
       const list = await before.json();
       expect(list.comments.some((comment: { id: string }) => comment.id === id)).toBe(true);
+      const stored = async () => ({
+        task: await db.task.findUniqueOrThrow({ where: { id: taskId } }),
+        comments: await db.comment.findMany({ where: { taskId }, orderBy: { id: "asc" } }),
+        actions: await db.actionLog.findMany({ where: { projectId, targetId: taskId }, orderBy: { id: "asc" } }),
+        notifications: await db.notification.findMany({ where: { taskId }, orderBy: { id: "asc" } }),
+        audit: await db.auditLog.findMany({ where: { targetId: taskId }, orderBy: { id: "asc" } }),
+      });
+      const beforeDeniedWrites = await stored();
       expect((await viewer.request.post(url, { data: { text: "ZZ-TEST denied" } })).status()).toBe(403);
       expect((await viewer.request.patch(`${url}/${id}`, { data: { text: "ZZ-TEST denied edit" } })).status()).toBe(403);
       expect((await viewer.request.delete(`${url}/${id}`)).status()).toBe(403);
       expect(await (await viewer.request.get(url)).json()).toEqual(list);
+      expect(await stored()).toEqual(beforeDeniedWrites);
     } finally {
       await writer.close();
       await viewer.close();
