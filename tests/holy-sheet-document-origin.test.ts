@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/auth', () => ({ currentUser: mocks.currentUser }));
 vi.mock('@/lib/http', () => ({
   ApiError: class ApiError extends Error { constructor(public status: number, message: string) { super(message); } },
+  notFound: () => Object.assign(new Error('Not found'), { status: 404 }),
   parseBody: async (request: Request) => request.json(),
   handle: (fn: () => Promise<Response>) => async () => {
     try { return await fn(); }
@@ -36,6 +37,8 @@ it.each([
   ['task', taskRoute.POST],
 ] as const)('%s document route accepts canonical same-origin writes and denies cross-host writes', async (_, post) => {
   vi.stubEnv('SHO_HOLY_QA', '0');
+  vi.stubEnv('FF_HOLY_SHEET', '1');
+  vi.stubEnv('HOLY_SHEET_ORIGIN', 'https://holysheet.aplyd.org');
   const context = { params: Promise.resolve({ id: 'source-id' }) };
   const allowed = await post(request('tasks.aplyd.org', 'https://tasks.aplyd.org'), context);
   expect(allowed.status).toBe(200);
@@ -47,5 +50,10 @@ it.each([
   expect(crossHost.status).toBe(403);
   const foreign = await post(request('evil.invalid', 'https://evil.invalid'), context);
   expect(foreign.status).toBe(403);
+  expect(mocks.changeDocument).toHaveBeenCalledTimes(2);
+
+  vi.stubEnv('FF_HOLY_SHEET', '0');
+  const off = await post(request('tasks.aplyd.org', 'https://sheethappensofficer.aplyd.org'), context);
+  expect(off.status).toBe(404);
   expect(mocks.changeDocument).toHaveBeenCalledTimes(2);
 });
