@@ -1,6 +1,7 @@
 // Audit-only characterization. Transactional DDL/data on disposable CI PostgreSQL.
 import { Client } from "pg";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 const url = new URL(process.env.DATABASE_URL || "");
 if (process.env.CI !== "true" || !["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/sho_test") {
@@ -40,10 +41,21 @@ try {
   await attempt("baseline wrong stage pipeline is accepted", project("wrong-stage-before", "wst_deal", "pl_bid", "st_pro_lead"), null);
   await attempt("existing stage-needs-pipeline check", project("no-pipeline", "wst_deal", null, "st_pro_lead"), "23514");
 
-  await client.query('ALTER TABLE "Pipeline" ADD CONSTRAINT "hr106_pipeline_id_type_key" UNIQUE ("id","typeId")');
-  await client.query('ALTER TABLE "Stage" ADD CONSTRAINT "hr106_stage_id_pipeline_key" UNIQUE ("id","pipelineId")');
-  await client.query('ALTER TABLE "Project" ADD CONSTRAINT "hr106_project_pipeline_type_fkey" FOREIGN KEY ("pipelineId","typeId") REFERENCES "Pipeline"("id","typeId") ON DELETE SET NULL ("pipelineId")');
-  await client.query('ALTER TABLE "Project" ADD CONSTRAINT "hr106_project_stage_pipeline_fkey" FOREIGN KEY ("stageId","pipelineId") REFERENCES "Stage"("id","pipelineId") ON DELETE SET NULL ("stageId")');
+  const draft = readFileSync("deploy/drafts/hr106-project-stage-invariant.sql", "utf8");
+  for (const [label, insert, marker] of [
+    ["wrong pipeline type", project("dirty-type", "wst_project", "pl_proactive", null), "HR106_PIPELINE_TYPE_MISMATCH"],
+    ["wrong stage pipeline", project("dirty-stage", "wst_deal", "pl_bid", "st_pro_lead"), "HR106_STAGE_PIPELINE_MISMATCH"],
+  ]) {
+    await client.query("SAVEPOINT hr106_preflight");
+    await client.query(insert);
+    let failure;
+    try { await client.query(draft); } catch (error) { failure = error; }
+    await client.query("ROLLBACK TO SAVEPOINT hr106_preflight");
+    await client.query("RELEASE SAVEPOINT hr106_preflight");
+    if (failure?.code !== "P0001" || !failure.message.includes(marker)) throw new Error(`${label}: draft preflight did not stop safely`);
+    cases++;
+  }
+  await client.query(draft);
 
   await attempt("matching stage pipeline and type", project("valid", "wst_deal", "pl_proactive", "st_pro_lead"), null);
   await attempt("plain project remains valid", project("plain", "wst_project", null, null), null);
