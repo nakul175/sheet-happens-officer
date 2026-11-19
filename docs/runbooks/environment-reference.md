@@ -13,6 +13,11 @@ Never copy live values into chat, test fixtures, evidence or repository files. R
 | JOB_SECRET | Secret for job endpoint; minimum 16 chars | No production fallback; setting it does not authorize enabling schedules |
 | SUITE_ACCOUNTS_CLIENT_SECRET / SUITE_BUGOFF_CLIENT_SECRET | Required secrets for enabled Suite4 clients | No default; do not rotate or omit during app cuts |
 | APLYD_ACCOUNTS_SSO / APLYD_ACCOUNTS_ISSUER / APLYD_ACCOUNTS_CLIENT_SECRET | Central-login flag, fixed approved issuer, secret | SSO requires exactly true and matching issuer; provision all together; no automatic Accounts restart |
+| APLYD_APEX_LOGIN_ONLY | Central-only sign-in page redirect | Default off; exactly `true` redirects `/signin` to `/api/auth/aplyd/start`. Qualify return paths and the central flow before enabling; this does not provision Accounts. |
+| APLYD_APEX_PASSWORD_BRIDGE | First-party password proof endpoint for the central account bridge | Default off; exactly `true` exposes `/api/suite/password` only to the configured Accounts client secret. Coordinate with the Accounts owner; do not enable merely because SSO is configured. |
+| APLYD_NATIVE_LOGOUT_ENABLED | Verify legacy native-session activity with Accounts | Default off; exactly `true` makes unavailable/invalid central status deny the session. Requires the approved `APLYD_ACCOUNTS_ISSUER` and `APLYD_ACCOUNTS_CLIENT_SECRET`; qualify outage and logout behavior before enabling. |
+| APLYD_SHO_INVITED_SESSIONS_ENABLED | Central invited-user session attachment | Default off; exactly `1` allows the separate invited-session path. Requires the approved central identity contract and explicit rollout; existing native identities retain their own session flow. |
+| APLYD_SHO_INVITATION_TEST | Disposable invitation test realm | Test-only `1`, additionally gated by `NODE_ENV=test`, exact loopback origins and a named disposable database. Never set on a deployed host. |
 | FF_HOLY_SHEET / HOLY_SHEET_ORIGIN | Optional document integration | Flag exactly 1, origin must be an approved Holy Sheet origin; a link is not permission |
 | FF_TASK_COMMENTS / FEATURE_COMMENTS | Optional aliases for comments | Off; accepts true/1/on/yes; first alias takes precedence |
 | CRM_VISIBLE | Optional CRM audience | all by default; admins/off supported |
