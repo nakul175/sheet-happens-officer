@@ -9,6 +9,8 @@ type Pipeline={id:string;key:string;name:string;stages:Stage[]};
 const base=process.env.TASKBOARD_URL!;
 let sa:Account,browser:Browser,org='',pipeName='',firstName='',pausedName='';
 const ids:string[]=[],names:string[]=[];
+const stageByDeal=new Map<string,string>();
+let stageOrder=new Map<string,number>();
 const tag=`ZZ-TEST 3134 ${Date.now()}`;
 beforeAll(async()=>{
  expect(['127.0.0.1','localhost','[::1]'].includes(new URL(base).hostname)).toBe(true);
@@ -24,6 +26,7 @@ beforeAll(async()=>{
  const paused=p.stages.find((s)=>s.category==='PAUSED'&&!s.isRetired);
  const active=p.stages.find((s)=>s.category==='ACTIVE'&&!s.isRetired&&s.id!==first?.id);
  if(!first||!paused||!active)throw new Error('The isolated fixture requires distinct first/paused/active stages.');
+ stageOrder=new Map(p.stages.map((stage,index)=>[stage.id,index]));
  firstName=first.name;pausedName=paused.name;
  const o=await sa.c.post('/api/orgs',{name:tag+' Buyer'});expect(o.status).toBe(201);org=o.json.organisation.id;
  const fixtures=[['RFP_RFA',first],['OTC',paused],['RFP_RFA',first],['RFP_RFA',active],['OTC',active],['EOI',paused]] as const;
@@ -33,6 +36,7 @@ beforeAll(async()=>{
   const submissionDeadline=i===0||i===2?earlyDeadline:i===3?lateDeadline:null;
   const r=await sa.c.post('/api/deals',{name,organisationId:org,pipelineId:p.id,leaderId:sa.id,whyPursue:'ZZ-TEST filter acceptance',opportunityType:type,submissionDeadline,nextStep:{title:'ZZ-TEST follow up',dueDate:istDate(3)}});
   expect(r.status,`create fixture${i}`).toBe(201);const id=r.json.deal.id;ids.push(id);
+  stageByDeal.set(id,stage.id);
   if(stage.id!==first.id)expect((await sa.c.post(`/api/projects/${id}/stage`,{stageId:stage.id,reason:'ZZ-TEST filter fixture'})).status).toBe(200);
  }
  mkdirSync('test-results/deal-filters',{recursive:true});
@@ -71,6 +75,12 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   const firstStage=page.locator('section[aria-label="RFP/RFA + OTC sales"] .dcol').filter({has:page.locator('header b').getByText(firstName,{exact:true})});
   const visibleOwnedCards=async()=>firstStage.locator('a[href^="/projects/"]').evaluateAll((links,owned)=>
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
+  const expectedStageOrder=[...ids].sort((a,b)=>
+   (stageOrder.get(stageByDeal.get(a)!)??Number.MAX_SAFE_INTEGER)-(stageOrder.get(stageByDeal.get(b)!)??Number.MAX_SAFE_INTEGER)||a.localeCompare(b));
+  const visibleOwnedBoard=async()=>page.locator('section[aria-label="RFP/RFA + OTC sales"] .dcol a[href^="/projects/"]').evaluateAll((links,owned)=>
+   links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
+  await sortControl.selectOption('stage');
+  await expect.poll(visibleOwnedBoard).toEqual(expectedStageOrder);
   await sortControl.selectOption('name-desc');
   await expect.poll(visibleOwnedCards).toEqual([ids[2],ids[0]]);
   await sortControl.selectOption('name-asc');
@@ -113,6 +123,8 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   expect(ascending).toEqual([...ascending].sort((a,b)=>a.localeCompare(b,'en',{sensitivity:'base'})));
   const visibleOwnedRows=async()=>rows.evaluateAll((links,owned)=>
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
+  await sortControl.selectOption('stage');
+  await expect.poll(visibleOwnedRows).toEqual(expectedStageOrder);
   const tiedDates=[ids[0],ids[2]].sort();
   const undated=[ids[1],ids[4]].sort();
   await sortControl.selectOption('date-asc');
@@ -128,6 +140,6 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   await page.getByRole('tab',{name:pipeName,exact:true}).click();
   await waitIds(ids);
   expect(await results.innerText()).toContain(`${baselineCount} deals`);
-  writeFileSync(`test-results/deal-filters/verification-${width}.json`,JSON.stringify({width,ownedDeals:ids.length,baselineCount,typeStageIntersection:true,dateEmptyAndRecovery:true,nameSortBothDirections:true,dateSortBothDirectionsWithNullsAndTies:true,reloadAndBackRecovery:true},null,2));
+  writeFileSync(`test-results/deal-filters/verification-${width}.json`,JSON.stringify({width,ownedDeals:ids.length,baselineCount,typeStageIntersection:true,dateEmptyAndRecovery:true,stageSortBoardAndList:true,nameSortBothDirections:true,dateSortBothDirectionsWithNullsAndTies:true,reloadAndBackRecovery:true},null,2));
  }catch(error){await page.screenshot({path:`test-results/deal-filters/failure-${width}.png`,fullPage:true});throw error;}finally{await ctx.close();}
 });
