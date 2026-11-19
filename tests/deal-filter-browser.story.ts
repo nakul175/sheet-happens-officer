@@ -76,7 +76,7 @@ for(const width of [390,1280])it(`Existing opportunity/stage multi-select filter
   const visibleOwnedCards=async()=>firstStage.locator('a[href^="/projects/"]').evaluateAll((links,owned)=>
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
   const expectedStageOrder=[...ids].sort((a,b)=>
-   (stageOrder.get(stageByDeal.get(a)!)??Number.MAX_SAFE_INTEGER)-(stageOrder.get(stageByDeal.get(b)!)??Number.MAX_SAFE_INTEGER)||a.localeCompare(b));
+   (stageOrder.get(stageByDeal.get(a)!)??Number.MAX_SAFE_INTEGER)-(stageOrder.get(stageByDeal.get(b)!)??Number.MAX_SAFE_INTEGER)||(a<b?-1:a>b?1:0));
   const visibleOwnedBoard=async()=>page.locator('section[aria-label="RFP/RFA + OTC sales"] .dcol a[href^="/projects/"]').evaluateAll((links,owned)=>
    links.map(link=>link.getAttribute('href')?.split('/').pop()).filter((id):id is string=>Boolean(id&&owned.includes(id))),ids);
   await sortControl.selectOption('stage');
