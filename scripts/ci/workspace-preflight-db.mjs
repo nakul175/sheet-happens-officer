@@ -38,6 +38,11 @@ try {
   });
   assert.equal(cli.status, 1);
   assert.match(cli.stderr, /^WORKSPACE_COUNT_INVALID\s*$/);
+  const privileged = spawnSync(process.execPath, ['deploy/verify-workspace-contract.mjs'], {
+    env: { ...process.env, NODE_ENV: 'production' }, encoding: 'utf8', timeout: 10_000,
+  });
+  assert.equal(privileged.status, 1);
+  assert.match(privileged.stderr, /^RUNTIME_ROLE_IDENTITY_INVALID\s*$/);
   console.log('WORKSPACE_SQL_ZERO_ONE_TWO_PASS');
 } finally {
   if (transactionOpen) await client.query('ROLLBACK').catch(() => {});

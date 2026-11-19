@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { assessFunctionSearchPaths, assessWorkspaceContract, runtimeDatabaseUrl } from '../../deploy/verify-workspace-contract.mjs';
+import { assessFunctionSearchPaths, assessRuntimeRole, assessWorkspaceContract, runtimeConnectionString, runtimeDatabaseUrl } from '../../deploy/verify-workspace-contract.mjs';
 
 test('release refuses ambiguous or unapproved workspace state', () => {
   assert.equal(assessWorkspaceContract({ mode: undefined, workspaces: 0, foreignUsers: 0 }), 'WORKSPACE_COUNT_INVALID');
@@ -14,6 +14,38 @@ test('release refuses ambiguous or unapproved workspace state', () => {
 test('release guard selects the runtime database, not the admin migration database', () => {
   assert.equal(runtimeDatabaseUrl({ DATABASE_URL: 'runtime', DIRECT_DATABASE_URL: 'admin' }), 'runtime');
   assert.equal(runtimeDatabaseUrl({ DIRECT_DATABASE_URL: 'admin' }), null);
+});
+
+test('production preflight refuses admin identity and elevated runtime rights before a cut', () => {
+  const valid = {
+    runtimeUrl: 'postgresql://sho_app:synthetic@db.example.test/defaultdb?sslmode=require',
+    directUrl: 'postgresql://doadmin:synthetic@db.example.test/defaultdb?sslmode=require',
+    role: { connectedUser: 'sho_app', privilegedAttributes: false, databaseCreate: false,
+      schemaUsage: true, schemaCreate: false, roleMemberships: 0, tablesTotal: 37,
+      ownedTables: 0, tablesMissingDml: 0, tablesWithDdlLikeRights: 0 },
+  };
+  assert.equal(assessRuntimeRole(valid), null);
+  assert.equal(assessRuntimeRole({ ...valid, runtimeUrl: valid.directUrl }), 'RUNTIME_ROLE_IDENTITY_INVALID');
+  assert.equal(assessRuntimeRole({ ...valid, directUrl: valid.runtimeUrl }), 'RUNTIME_ROLE_IDENTITY_INVALID');
+  assert.equal(assessRuntimeRole({ ...valid, role: { ...valid.role, connectedUser: 'doadmin' } }), 'RUNTIME_ROLE_IDENTITY_INVALID');
+  for (const changed of [
+    { databaseCreate: true }, { schemaCreate: true }, { privilegedAttributes: true },
+    { roleMemberships: 1 }, { ownedTables: 1 }, { tablesWithDdlLikeRights: 1 },
+  ]) assert.equal(assessRuntimeRole({ ...valid, role: { ...valid.role, ...changed } }), 'RUNTIME_ROLE_PRIVILEGED');
+  for (const changed of [{ schemaUsage: false }, { tablesTotal: 0 }, { tablesMissingDml: 1 }])
+    assert.equal(assessRuntimeRole({ ...valid, role: { ...valid.role, ...changed } }), 'RUNTIME_ROLE_GRANTS_INCOMPLETE');
+  assert.equal(assessRuntimeRole({ ...valid, directUrl: undefined }), 'RUNTIME_ROLE_URL_INVALID');
+});
+
+test('preflight preserves the declared libpq TLS mode without changing the target', () => {
+  const raw = 'postgresql://sho_app:synthetic@db.example.test/defaultdb?sslmode=require&sslrootcert=%2Ftmp%2Fca.pem';
+  const parsed = new URL(runtimeConnectionString(raw));
+  assert.equal(parsed.username, 'sho_app');
+  assert.equal(parsed.pathname, '/defaultdb');
+  assert.equal(parsed.searchParams.get('sslmode'), 'require');
+  assert.equal(parsed.searchParams.get('sslrootcert'), '/tmp/ca.pem');
+  assert.equal(parsed.searchParams.get('uselibpqcompat'), 'true');
+  assert.equal(runtimeConnectionString('postgresql://sho_app:synthetic@db.example.test/defaultdb?sslmode=verify-full').includes('uselibpqcompat'), false);
 });
 
 test('release refuses missing, duplicate, or drifted trigger function search paths', () => {
