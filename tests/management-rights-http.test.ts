@@ -73,16 +73,19 @@ async function fixture() {
 async function snapshot(id: string) {
   // Stable ordered snapshots include versions and full stored activity/notices.
   // Session lastSeenAt is intentionally outside the project-mutation boundary.
-  const [project, members, sections, tasks, actions, notifications, audit] = await Promise.all([
+  const [project, members, sections, tasks, collaborators, comments, taskLinks, actions, notifications, audit] = await Promise.all([
     db.project.findUniqueOrThrow({ where: { id } }),
     db.projectMember.findMany({ where: { projectId: id }, orderBy: { userId: 'asc' } }),
     db.section.findMany({ where: { projectId: id }, orderBy: { id: 'asc' } }),
     db.task.findMany({ where: { projectId: id }, orderBy: { id: 'asc' } }),
+    db.taskCollaborator.findMany({ where: { task: { projectId: id } }, orderBy: [{ taskId: 'asc' }, { userId: 'asc' }] }),
+    db.comment.findMany({ where: { task: { projectId: id } }, orderBy: { id: 'asc' } }),
+    db.taskLink.findMany({ where: { task: { projectId: id } }, orderBy: { id: 'asc' } }),
     db.actionLog.findMany({ where: { projectId: id }, orderBy: { id: 'asc' } }),
     db.notification.findMany({ where: { projectId: id }, orderBy: { id: 'asc' } }),
     db.auditLog.findMany({ where: { targetId: id }, orderBy: { id: 'asc' } }),
   ]);
-  return { project, members, sections, tasks, actions, notifications, audit };
+  return { project, members, sections, tasks, collaborators, comments, taskLinks, actions, notifications, audit };
 }
 
 it('task creation validates actor, assignee and title without side effects, then persists one eligible assignment', async () => {
@@ -170,6 +173,16 @@ for (const scenario of ['editor', 'viewer', 'outsider', 'removed-creator'] as co
         ['POST', path + '/tasks', { title: 'Denied task', dueDate: '2026-11-30' }],
         ['PATCH', taskPath, { title: 'Denied task edit', expectedUpdatedAt: f.task.updatedAt.toISOString() }],
         ['DELETE', taskPath],
+        ['POST', taskPath + '/assign', { assigneeId: people.target.id, expectedUpdatedAt: f.task.updatedAt.toISOString() }],
+        ['PUT', taskPath + '/approver', { approverId: people.target.id, expectedUpdatedAt: f.task.updatedAt.toISOString() }],
+        ['POST', taskPath + '/complete', { expectedUpdatedAt: f.task.updatedAt.toISOString() }],
+        ['POST', taskPath + '/move', { sectionId: f.second, expectedUpdatedAt: f.task.updatedAt.toISOString() }],
+        ['POST', taskPath + '/idea', { isIdea: true }],
+        ['POST', taskPath + '/send-for-approval', {}],
+        ['POST', taskPath + '/send-back', {}],
+        ['POST', taskPath + '/reopen', {}],
+        ['POST', taskPath + '/collaborators', { userId: people.target.id, expectedUpdatedAt: f.task.updatedAt.toISOString() }],
+        ['DELETE', taskPath + '/collaborators/' + people.target.id],
       );
     }
     for (const [method, url, body] of calls) {
@@ -192,7 +205,7 @@ for (const scenario of ['editor', 'viewer', 'outsider', 'removed-creator'] as co
       probes.push({ scenario, operation: method + ' ' + path + suffix + ' (deleted)', status: r.status, state: 'UNCHANGED' });
     }
     completed.push(scenario);
-  }, 30_000);
+  }, scenario === 'viewer' ? 60_000 : 30_000);
 }
 
 for (const scenario of ['leader', 'creator', 'admin'] as const) {
