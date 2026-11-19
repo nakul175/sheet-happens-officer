@@ -1,5 +1,5 @@
 [Unit]
-Description=Sheet Happens Officer
+Description=Tasks by aplyd
 After=network-online.target
 Wants=network-online.target
 
