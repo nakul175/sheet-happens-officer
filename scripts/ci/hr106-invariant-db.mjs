@@ -78,6 +78,36 @@ try {
   if (verifiedCatalog.status !== "VALIDATED" || verifiedCatalog.count !== 4) {
     throw new Error("HR106_CATALOG_ASSERTION_MISSING");
   }
+  await client.query("SAVEPOINT hr106_guard_partial");
+  try {
+    await client.query('ALTER TABLE "Project" DROP CONSTRAINT "hr106_project_stage_pipeline_fkey"');
+    let failure;
+    try { await checkHr106Catalog(client, { required: true }); } catch (error) { failure = error; }
+    if (!failure?.message.startsWith("HR106_CATALOG_CONSTRAINT_COUNT")) {
+      throw new Error("HR106_PARTIAL_CATALOG_GUARD_MISSED");
+    }
+    cases++;
+  } finally {
+    await client.query("ROLLBACK TO SAVEPOINT hr106_guard_partial");
+    await client.query("RELEASE SAVEPOINT hr106_guard_partial");
+  }
+  await client.query("SAVEPOINT hr106_guard_delete_action");
+  try {
+    await client.query('ALTER TABLE "Project" DROP CONSTRAINT "hr106_project_stage_pipeline_fkey"');
+    await client.query(`ALTER TABLE "Project" ADD CONSTRAINT "hr106_project_stage_pipeline_fkey"
+      FOREIGN KEY ("stageId", "pipelineId") REFERENCES "Stage" ("id", "pipelineId")
+      ON DELETE SET NULL NOT VALID`);
+    await client.query('ALTER TABLE "Project" VALIDATE CONSTRAINT "hr106_project_stage_pipeline_fkey"');
+    let failure;
+    try { await checkHr106Catalog(client, { required: true }); } catch (error) { failure = error; }
+    if (!failure?.message.startsWith("HR106_CATALOG_DRIFT:hr106_project_stage_pipeline_fkey")) {
+      throw new Error("HR106_BROAD_SET_NULL_GUARD_MISSED");
+    }
+    cases++;
+  } finally {
+    await client.query("ROLLBACK TO SAVEPOINT hr106_guard_delete_action");
+    await client.query("RELEASE SAVEPOINT hr106_guard_delete_action");
+  }
 
   // A future migration must not silently replace the column-specific SET NULL
   // actions with Prisma's ordinary composite SET NULL on every child column.
