@@ -88,10 +88,16 @@ describe("SHO-3053 one-way Proactive to Bid", () => {
   });
   it("denies Viewers and outsiders on preview and commit, and rechecks withdrawn membership", async () => {
     const id = await fixture("access"), b = await body(id), before = await snapshot(id);
+    const sideEffects = async () => ({
+      notifications: await db.notification.findMany({ where: { projectId: id }, orderBy: { id: "asc" } }),
+      audit: await db.auditLog.findMany({ where: { targetId: id }, orderBy: { id: "asc" } }),
+    });
+    const beforeSideEffects = await sideEffects();
     for (const [who, status] of [[viewer, 403], [outsider, 404]] as const) {
       expect((await who.c.get(url(id))).status).toBe(status); expect((await who.c.post(url(id), b)).status).toBe(status);
+      expect(await snapshot(id)).toEqual(before);
+      expect(await sideEffects()).toEqual(beforeSideEffects);
     }
-    expect(await snapshot(id)).toEqual(before);
     expect((await leader.c.patch(`/api/projects/${id}/members/${editor.id}`, { role: "VIEWER" })).status).toBe(200);
     const revoked = await snapshot(id); expect((await editor.c.post(url(id), b)).status).toBe(403); expect(await snapshot(id)).toEqual(revoked);
   });
