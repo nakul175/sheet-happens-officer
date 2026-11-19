@@ -103,10 +103,11 @@ async function setup() {
 async function snapshot(ids: string[]) {
   const rows = await db.task.findMany({ where: { id: { in: ids } }, orderBy: { id: "asc" } });
   return {
-    rows: rows.map((t) => ({ id: t.id, updatedAt: t.updatedAt.toISOString(), assigneeId: t.assigneeId, deletedAt: t.deletedAt?.toISOString() ?? null, isIdea: t.isIdea })),
-    actions: await db.actionLog.count({ where: { targetId: { in: ids } } }),
-    links: await db.taskLink.count({ where: { taskId: { in: ids } } }),
-    audits: await db.auditLog.count({ where: { targetId: { in: ids } } }),
+    rows,
+    actions: await db.actionLog.findMany({ where: { targetId: { in: ids } }, orderBy: { id: "asc" } }),
+    links: await db.taskLink.findMany({ where: { taskId: { in: ids } }, orderBy: { id: "asc" } }),
+    notifications: await db.notification.findMany({ where: { taskId: { in: ids } }, orderBy: { id: "asc" } }),
+    audits: await db.auditLog.findMany({ where: { targetId: { in: ids } }, orderBy: { id: "asc" } }),
   };
 }
 
@@ -117,6 +118,19 @@ afterAll(async () => {
 });
 
 describe("qa:TC missing APL-2875 a caller who cannot see a task gets the missing-id answer", () => {
+  it("Viewer direct link add/remove and task restore leave all stored task state unchanged", async () => {
+    const s = await setup();
+    expect((await s.viewer.c.get(`/api/tasks/${s.t1}`)).status).toBe(200);
+    const before = await snapshot([s.t1, s.t2]);
+    const denied = { status: 403, body: JSON.stringify({ error: "Viewers cannot make changes." }) };
+    expect(await send(s.viewer.c.cookie, "POST", `/api/tasks/${s.t1}/links`, JSON.stringify({ organisationId: s.orgId }))).toEqual(denied);
+    expect(await snapshot([s.t1, s.t2])).toEqual(before);
+    expect(await send(s.viewer.c.cookie, "DELETE", `/api/tasks/${s.t1}/links/${s.linkId}`)).toEqual(denied);
+    expect(await snapshot([s.t1, s.t2])).toEqual(before);
+    expect(await send(s.viewer.c.cookie, "POST", `/api/tasks/${s.t2}/restore`, "{}")).toEqual(denied);
+    expect(await snapshot([s.t1, s.t2])).toEqual(before);
+  });
+
   it("qa:TC missing AC1: an outsider and a removed member get the missing-id answer for a live task on every task route, and nothing is stored", async () => {
     const s = await setup();
     const before = await snapshot([s.t1, s.t2]);
