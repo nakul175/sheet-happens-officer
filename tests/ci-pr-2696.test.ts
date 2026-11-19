@@ -85,6 +85,41 @@ it("the measured build wrapper propagates a command failure", () => {
   }
 });
 
+it("the measured build wrapper records available memory and tolerates missing proc data", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ci-build-memory-"));
+  try {
+    const meminfo = path.join(dir, "meminfo");
+    const receipt = path.join(dir, "receipt.json");
+    writeFileSync(meminfo, "MemTotal: 8192000 kB\nMemAvailable: 4194304 kB\n");
+    const command = ["scripts/ci/measure-command.mjs", receipt, "--", process.execPath, "-e", "process.exit(0)"];
+    const measured = spawnSync(process.execPath, command, {
+      encoding: "utf8", env: { ...process.env, BUILD_CAPACITY_MEMINFO_PATH: meminfo },
+    });
+    expect(measured.status).toBe(0);
+    const first = JSON.parse(readFileSync(receipt, "utf8"));
+    expect(first.memoryAvailableKiBBefore).toBe("4194304");
+    expect(first.minimumMemoryAvailableKiB).toBe("4194304");
+    expect(first.memoryAvailableKiBAfter).toBe("4194304");
+    const lowering = spawnSync(process.execPath, ["scripts/ci/measure-command.mjs", receipt, "--", process.execPath,
+      "-e", 'setTimeout(() => require("fs").writeFileSync(process.env.BUILD_CAPACITY_MEMINFO_PATH, "MemAvailable: 3000000 kB\\n"), 100); setTimeout(() => process.exit(0), 650)'], {
+      encoding: "utf8", env: { ...process.env, BUILD_CAPACITY_MEMINFO_PATH: meminfo },
+    });
+    expect(lowering.status).toBe(0);
+    const low = JSON.parse(readFileSync(receipt, "utf8"));
+    expect(low.memoryAvailableKiBBefore).toBe("4194304");
+    expect(low.minimumMemoryAvailableKiB).toBe("3000000");
+    expect(low.memoryAvailableKiBAfter).toBe("3000000");
+    const missing = spawnSync(process.execPath, command, {
+      encoding: "utf8", env: { ...process.env, BUILD_CAPACITY_MEMINFO_PATH: path.join(dir, "missing") },
+    });
+    expect(missing.status).toBe(0);
+    const second = JSON.parse(readFileSync(receipt, "utf8"));
+    expect(second.memoryAvailableKiBBefore).toBeNull();
+    expect(second.minimumMemoryAvailableKiB).toBeNull();
+    expect(second.memoryAvailableKiBAfter).toBeNull();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 it("AC3 the health check fails the job when the app never answers", () => {
   const script = startScript();
   const failAt = script.indexOf("echo 'The app did not come up' >&2");

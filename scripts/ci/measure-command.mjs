@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, statfsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statfsSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const separator = process.argv.indexOf('--');
@@ -14,10 +14,23 @@ const available = () => {
   const { bsize, bavail } = statfsSync(process.cwd(), { bigint: true });
   return bsize * bavail;
 };
+const memoryAvailableKiB = () => {
+  try {
+    const source = readFileSync(process.env.BUILD_CAPACITY_MEMINFO_PATH || '/proc/meminfo', 'utf8');
+    const match = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(source);
+    return match ? BigInt(match[1]) : null;
+  } catch { return null; }
+};
 const before = available();
 let minimum = before;
+const memoryBefore = memoryAvailableKiB();
+let minimumMemory = memoryBefore;
 const started = Date.now();
-const sample = () => { const value = available(); if (value < minimum) minimum = value; };
+const sample = () => {
+  const value = available(); if (value < minimum) minimum = value;
+  const memory = memoryAvailableKiB();
+  if (memory !== null && (minimumMemory === null || memory < minimumMemory)) minimumMemory = memory;
+};
 const timer = setInterval(sample, 250);
 const child = spawn(command, args, { stdio: 'inherit', env: process.env });
 child.on('error', (error) => {
@@ -32,6 +45,7 @@ function finish(exitCode) {
   clearInterval(timer);
   sample();
   const after = available();
+  const memoryAfter = memoryAvailableKiB();
   const receipt = {
     command: [command, ...args],
     durationMs: Date.now() - started,
@@ -39,6 +53,9 @@ function finish(exitCode) {
     minimumAvailableBytes: minimum.toString(),
     availableBytesAfter: after.toString(),
     peakTemporaryBytes: (before - minimum).toString(),
+    memoryAvailableKiBBefore: memoryBefore?.toString() ?? null,
+    minimumMemoryAvailableKiB: minimumMemory?.toString() ?? null,
+    memoryAvailableKiBAfter: memoryAfter?.toString() ?? null,
     exitCode,
   };
   mkdirSync(dirname(receiptPath), { recursive: true });
