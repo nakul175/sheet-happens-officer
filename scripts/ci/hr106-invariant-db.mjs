@@ -183,6 +183,26 @@ try {
     throw new Error("HR106_PIPELINE_DELETE_SEMANTICS");
   }
   cases++;
+  const dataBeforeRollback = await client.query(
+    'SELECT "id","typeId","pipelineId","stageId" FROM "Project" WHERE "workspaceId"=$1 ORDER BY "id"', [id]);
+  const down = readFileSync("deploy/drafts/hr106-project-stage-invariant-down.sql", "utf8");
+  await client.query(down);
+  const removed = await checkHr106Catalog(client, { required: false });
+  if (removed.status !== "NOT_INSTALLED" || removed.count !== 0) throw new Error("HR106_ROLLBACK_CONSTRAINT_RESIDUE");
+  cases++;
+  const dataAfterRollback = await client.query(
+    'SELECT "id","typeId","pipelineId","stageId" FROM "Project" WHERE "workspaceId"=$1 ORDER BY "id"', [id]);
+  if (JSON.stringify(dataAfterRollback.rows) !== JSON.stringify(dataBeforeRollback.rows)) {
+    throw new Error("HR106_ROLLBACK_DATA_CHANGED");
+  }
+  cases++;
+  const existingCheck = await client.query(`SELECT convalidated FROM pg_constraint
+    WHERE connamespace='public'::regnamespace AND conname='Project_stage_needs_pipeline'`);
+  if (existingCheck.rows.length !== 1 || !existingCheck.rows[0].convalidated) {
+    throw new Error("HR106_ROLLBACK_EXISTING_CHECK_LOST");
+  }
+  await attempt("existing stage rule survives rollback", project("no-pipeline-rollback", "wst_deal", null, "st_pro_lead"), "23514");
+  await attempt("rollback removes only HR106 enforcement", project("wrong-type-rollback", "wst_project", "pl_proactive", null), null);
   passed = true;
 } finally {
   if (connected) {
