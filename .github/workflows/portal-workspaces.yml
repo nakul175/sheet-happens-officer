@@ -4,6 +4,7 @@ permissions:
   contents: read
 jobs:
   postgres:
+    name: Portal workspace foundation
     runs-on: ubuntu-latest
     services:
       postgres:
