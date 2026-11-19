@@ -156,6 +156,17 @@ describe("APL-2660 approver edge cases", () => {
       expect((await taskOf(creator, t)).approver?.id).toBe(next);
     }
 
+    // Two valid writers may read the same version. Exactly one may commit;
+    // the loser must receive a version conflict rather than an unexplained 500.
+    const concurrentBody = await withVersion(creator, t, { approverId: editor.id });
+    const concurrent = await Promise.all([
+      creator.c.put(`/api/tasks/${t}/approver`, concurrentBody),
+      creator.c.put(`/api/tasks/${t}/approver`, concurrentBody),
+    ]);
+    expect(concurrent.map((reply) => reply.status).sort()).toEqual([200, 409]);
+    expect((await taskOf(creator, t)).approver?.id).toBe(editor.id);
+    expect((await put(lead.id)).status).toBe(200);
+
     expect((await sa.c.post(`/api/team/${gone.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
     for (const id of [viewer.id, outsider.id, gone.id, worker.id]) {
       expect((await put(id)).status).toBe(400);
