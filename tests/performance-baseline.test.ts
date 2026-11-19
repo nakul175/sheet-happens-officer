@@ -143,6 +143,9 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
    report.cleanup=true;
   }finally{
    mkdirSync('test-results/performance',{recursive:true});writeFileSync('test-results/performance/baseline.json',JSON.stringify(report,null,2)+'\n');
+   // CI's retained artifact is not always reachable from the audit workspace.
+   // This aggregate contains no fixture id, email, token or record content.
+   console.log('PERFORMANCE_BASELINE '+JSON.stringify(report));
   }
  }
 },240000);
