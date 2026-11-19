@@ -57,6 +57,49 @@ try {
   }
   await client.query(draft);
 
+  // A future migration must not silently replace the column-specific SET NULL
+  // actions with Prisma's ordinary composite SET NULL on every child column.
+  const catalog = await client.query(`
+    SELECT c.conname, c.contype, c.convalidated, c.confdeltype,
+      (SELECT array_agg(a.attname ORDER BY u.ord)
+         FROM unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum) AS child_cols,
+      (SELECT array_agg(a.attname ORDER BY u.ord)
+         FROM unnest(c.confkey) WITH ORDINALITY AS u(attnum, ord)
+         JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = u.attnum) AS parent_cols,
+      (SELECT array_agg(a.attname ORDER BY u.ord)
+         FROM unnest(c.confdelsetcols) WITH ORDINALITY AS u(attnum, ord)
+         JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = u.attnum) AS set_null_cols
+    FROM pg_constraint c
+    WHERE c.connamespace = 'public'::regnamespace
+      AND c.conname = ANY($1::text[])
+  `, [[
+    "hr106_pipeline_id_type_key", "hr106_stage_id_pipeline_key",
+    "hr106_project_pipeline_type_fkey", "hr106_project_stage_pipeline_fkey",
+  ]]);
+  const expected = new Map([
+    ["hr106_pipeline_id_type_key", { type: "u", child: ["id", "typeId"] }],
+    ["hr106_stage_id_pipeline_key", { type: "u", child: ["id", "pipelineId"] }],
+    ["hr106_project_pipeline_type_fkey", {
+      type: "f", child: ["pipelineId", "typeId"], parent: ["id", "typeId"], setNull: ["pipelineId"],
+    }],
+    ["hr106_project_stage_pipeline_fkey", {
+      type: "f", child: ["stageId", "pipelineId"], parent: ["id", "pipelineId"], setNull: ["stageId"],
+    }],
+  ]);
+  if (catalog.rows.length !== expected.size) throw new Error("HR106_CATALOG_CONSTRAINT_COUNT");
+  for (const constraint of catalog.rows) {
+    const want = expected.get(constraint.conname);
+    if (!want || constraint.contype !== want.type || !constraint.convalidated ||
+        JSON.stringify(constraint.child_cols) !== JSON.stringify(want.child) ||
+        (want.parent && JSON.stringify(constraint.parent_cols) !== JSON.stringify(want.parent)) ||
+        (want.setNull && (constraint.confdeltype !== "n" ||
+          JSON.stringify(constraint.set_null_cols) !== JSON.stringify(want.setNull)))) {
+      throw new Error(`HR106_CATALOG_DRIFT:${constraint.conname}`);
+    }
+    cases++;
+  }
+
   await attempt("matching stage pipeline and type", project("valid", "wst_deal", "pl_proactive", "st_pro_lead"), null);
   await attempt("plain project remains valid", project("plain", "wst_project", null, null), null);
   await attempt("wrong pipeline type rejected", project("wrong-type-after", "wst_project", "pl_proactive", null), "23503");
