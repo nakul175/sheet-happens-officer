@@ -1,5 +1,5 @@
 #cloud-config
-# Sheet Happens Officer: droplet bootstrap (SHO-US-9.3).
+# Tasks by aplyd: droplet bootstrap (SHO-US-9.3).
 # Paste this whole file into "User data" when creating the droplet (Ubuntu 24.04 LTS, BLR1).
 # Choose the sho_deploy SSH key in the same form; its public key is copied to the "deploy"
 # user below, which is the account GitHub Actions uses to release. Nothing here needs
@@ -32,12 +32,22 @@ write_files:
       APT::Periodic::Update-Package-Lists "1";
       APT::Periodic::Unattended-Upgrade "1";
 
-  # HTTPS in front of the app. Caddy fetches and renews the certificate itself once the
-  # A record for this name points at the droplet.
+  # HTTPS in front of the app. Caddy fetches and renews certificates once both
+  # A records point at the droplet. Legacy API and cached assets remain proxied;
+  # website GET/HEAD pages redirect to the canonical Tasks host.
   - path: /etc/sho/Caddyfile
     content: |
-      sheethappensofficer.aplyd.org {
+      tasks.aplyd.org {
         encode gzip
+        reverse_proxy 127.0.0.1:3000
+      }
+
+      sheethappensofficer.aplyd.org {
+        @legacy_pages {
+          method GET HEAD
+          not path /api /api/* /_next /_next/*
+        }
+        redir @legacy_pages https://tasks.aplyd.org{uri} permanent
         reverse_proxy 127.0.0.1:3000
       }
 
@@ -46,7 +56,7 @@ write_files:
   - path: /etc/systemd/system/sho.service
     content: |
       [Unit]
-      Description=Sheet Happens Officer
+      Description=Tasks by aplyd
       After=network-online.target
       Wants=network-online.target
 
