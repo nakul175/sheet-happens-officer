@@ -211,9 +211,15 @@ for (const width of WIDTHS) {
       await dialog.getByLabel("Title").fill("Viewport form check");
       await dialog.getByLabel("Due date").fill("not a date");
       expect(await dialog.getByLabel("Due date").getAttribute("aria-invalid")).toBe("true");
+      expect(await dialog.getByLabel("Due date").getAttribute("aria-describedby")).toBe("qa-date-note");
+      const dateNote = dialog.locator("#qa-date-note");
+      expect(await dateNote.getAttribute("role")).toBe("status");
+      expect(await dateNote.innerText()).toContain("Not a date I know");
       expect(await dialog.getByRole("button", { name: "Add task" }).isEnabled()).toBe(false);
       await dialog.getByLabel("Due date").fill("tomorrow");
       expect(await dialog.getByLabel("Due date").getAttribute("aria-invalid")).toBe("false");
+      expect(await dateNote.innerText()).toMatch(/^Due /);
+      expect(await dateNote.getAttribute("class")).not.toContain("bad");
       expect(await dialog.getByRole("button", { name: "Add task" }).isEnabled()).toBe(true);
       const found: Finding[] = await page.evaluate(collect, { phone: width < PHONE_MAX, width });
       if (found.length) {
