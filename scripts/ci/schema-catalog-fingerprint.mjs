@@ -2,7 +2,9 @@
 // Outputs names and digests only; no database rows or connection details.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
 import pg from 'pg';
+import { checkHr106Catalog } from './hr106-catalog-guard.mjs';
 
 const expected = {
   index: ['DealParty_one_buyer_per_deal', 'ProjectMember_one_leader_per_project', 'Project_live_vertical_name_idx', 'Section_one_done_per_project', 'TaskLink_unique_contact', 'TaskLink_unique_org'],
@@ -47,6 +49,15 @@ try {
       for (const row of rows) console.log(`SCHEMA_CATALOG_FUNCTION_OBJECT ${row.name} ${row.digest} ${row.body_digest} ${row.config_digest}`);
     }
   }
+  // Once a reviewed HR-106 migration is checked in, every clean replay must
+  // retain the four exact manual constraints. Until then, absence is expected;
+  // a partial installation is never accepted.
+  const packaged = readdirSync('prisma/migrations', { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .some((entry) => readFileSync(`prisma/migrations/${entry.name}/migration.sql`, 'utf8')
+      .includes('hr106_project_pipeline_type_fkey'));
+  const hr106 = await checkHr106Catalog(client, { required: packaged });
+  console.log(`SCHEMA_CATALOG_HR106 ${hr106.status} ${hr106.count}/4 packaged=${packaged}`);
 } finally {
   await client.end().catch(() => {});
 }

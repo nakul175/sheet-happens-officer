@@ -2,6 +2,7 @@
 import { Client } from "pg";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { checkHr106Catalog } from "./hr106-catalog-guard.mjs";
 
 const url = new URL(process.env.DATABASE_URL || "");
 if (process.env.CI !== "true" || !["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/sho_test") {
@@ -73,6 +74,10 @@ try {
     cases++;
   }
   await client.query(draft);
+  const verifiedCatalog = await checkHr106Catalog(client, { required: true });
+  if (verifiedCatalog.status !== "VALIDATED" || verifiedCatalog.count !== 4) {
+    throw new Error("HR106_CATALOG_ASSERTION_MISSING");
+  }
 
   // A future migration must not silently replace the column-specific SET NULL
   // actions with Prisma's ordinary composite SET NULL on every child column.
