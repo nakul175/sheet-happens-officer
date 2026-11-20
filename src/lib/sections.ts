@@ -12,6 +12,30 @@ async function sectionIn(projectId: string, sectionId: string) {
   return s;
 }
 
+/** Keep section writes behind current project, member and actor state. Additions wait for the
+ * project lock so a competing add can return the section-cap message after recounting. */
+async function sectionWriteAccess(tx: Tx, user: Actor, projectId: string, waitForProjectLock = false) {
+  try {
+    const [locked] = waitForProjectLock
+      ? await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`
+      : await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+    if (!locked) throw notFound("Project");
+    await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+  } catch (error) {
+    const failure = error as { code?: string; meta?: { code?: string } } | null;
+    if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+      throw new ApiError(409, "Project or membership is changing. Reload and try again.");
+    }
+    throw error;
+  }
+  const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
+  if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
+  const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
+  if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+  requireManage(fresh);
+}
+
 /**
  * A parent closed by a Section change takes its open subtasks with it, one log row each, exactly as
  * completeTask does (SHO-BUG-3): a complete parent never has an open subtask. Returns the subtask ids.
@@ -34,8 +58,11 @@ export async function addSection(user: Actor, projectId: string, name: string) {
   const existing = await db.section.count({ where: { projectId } });
   if (existing >= MAX_SECTIONS) throw new ApiError(409, "A project can have up to 8 sections.");
   return db.$transaction(async (tx) => {
-    const s = await tx.section.create({ data: { projectId, name, position: existing } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.added", after: { name, position: existing } });
+    await sectionWriteAccess(tx, user, projectId, true);
+    const position = await tx.section.count({ where: { projectId } });
+    if (position >= MAX_SECTIONS) throw new ApiError(409, "A project can have up to 8 sections.");
+    const s = await tx.section.create({ data: { projectId, name, position } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "section", targetId: s.id, action: "section.added", after: { name, position } });
     return s;
   });
 }
@@ -54,23 +81,7 @@ export async function updateSection(
     throw new ApiError(409, "Mark another section as the done section first.");
   }
   await db.$transaction(async (tx) => {
-    try {
-      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
-      if (!locked) throw notFound("Project");
-      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
-      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
-    } catch (error) {
-      const failure = error as { code?: string; meta?: { code?: string } } | null;
-      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
-        throw new ApiError(409, "Project or membership is changing. Reload and try again.");
-      }
-      throw error;
-    }
-    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, workspaceId: true, deactivatedAt: true, emailVerifiedAt: true } });
-    if (!actor || actor.deactivatedAt || !actor.emailVerifiedAt) throw notFound("Project");
-    const fresh = await projectAccess({ ...user, orgRole: actor.orgRole }, projectId, { write: true, tx });
-    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
-    requireManage(fresh);
+    await sectionWriteAccess(tx, user, projectId);
     const current = await tx.section.findFirst({ where: { id: sectionId, projectId } });
     if (!current) throw notFound("Section");
     if (input.isDone === false && current.isDone) throw new ApiError(409, "Mark another section as the done section first.");
@@ -143,8 +154,16 @@ export async function deleteSection(user: Actor, projectId: string, sectionId: s
   if (s.isDone) throw new ApiError(409, "Mark another section as the done section before deleting this one.");
   if ((await db.section.count({ where: { projectId } })) <= 1) throw new ApiError(409, "The last section cannot be deleted.");
   if (!moveTo || moveTo === sectionId) throw new ApiError(400, "Choose another section to receive this section's tasks.");
-  const dest = await sectionIn(projectId, moveTo);
+  await sectionIn(projectId, moveTo);
   await db.$transaction(async (tx) => {
+    await sectionWriteAccess(tx, user, projectId);
+    const current = await tx.section.findFirst({ where: { id: sectionId, projectId } });
+    if (!current) throw notFound("Section");
+    if (current.isDone) throw new ApiError(409, "Mark another section as the done section before deleting this one.");
+    if ((await tx.section.count({ where: { projectId } })) <= 1) throw new ApiError(409, "The last section cannot be deleted.");
+    const destination = await tx.section.findFirst({ where: { id: moveTo, projectId } });
+    if (!destination) throw notFound("Section");
+    const s = current, dest = destination;
     const tasks = await tx.task.findMany({ where: { sectionId } });
     if (dest.isDone && tasks.some((t) => t.approverId && !t.completedAt && !t.deletedAt && !t.parentId)) {
       throw new ApiError(409, "Some tasks wait on an approver. Choose a section that is not the done section.");
