@@ -1,6 +1,7 @@
 // Disposable synthetic acceptance fixture; never a production load test or live SLA claim.
 import { expect,it } from 'vitest';
 import { randomUUID,createHash,randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { existsSync,mkdirSync,readFileSync,writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { db } from '@/lib/db';
@@ -29,9 +30,11 @@ function serverResource(): ServerResource | null {
 it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans its exact fixture',async()=>{
  const database=new URL(process.env.DATABASE_URL??''),base=new URL(process.env.TASKBOARD_URL??'');
  if(![database,base].every(u=>['localhost','127.0.0.1'].includes(u.hostname))||database.pathname!='/sho_test')throw Error('DISPOSABLE_LOOPBACK_FIXTURE_REQUIRED');
+ const clockTicksPerSecond=process.platform==='linux'?Number(execFileSync('getconf',['CLK_TCK'],{encoding:'utf8'}).trim()):null;
+ if(clockTicksPerSecond!==null&&(!Number.isFinite(clockTicksPerSecond)||clockTicksPerSecond<=0))throw Error('AUDIT_SERVER_CLOCK_UNAVAILABLE');
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
  const raw=randomBytes(32).toString('base64url');
- const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;concurrentEdits?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch},measurements:[],cleanup:false,status:'INCOMPLETE'};
+ const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;concurrentEdits?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch,clockTicksPerSecond},measurements:[],cleanup:false,status:'INCOMPLETE'};
  let created=false;
  const originalProjects=await db.project.count(),originalUsers=await db.user.count();
  const read=async(route:string)=>{
@@ -57,7 +60,8 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
   await db.project.createMany({data:dealIds.map((dealId,n)=>({id:dealId,workspaceId:workspaces[0].id,name:`${id} deal ${n}`,typeId:'wst_deal',pipelineId:workingStage!.pipelineId,stageId:workingStage!.id}))});
   await db.projectMember.createMany({data:dealIds.map(dealId=>({projectId:dealId,userId:id,role:'LEADER'}))});
   expect(await db.project.count({where:{id:{in:dealIds}}})).toBe(1000);
-  for(const route of ['/api/auth/me','/api/dashboard?panel=tasks','/api/projects','/api/my-tasks','/api/my-tasks?v=2','/api/search?q='+id,'/api/projects/'+projectIds[0]]){
+  // Measure v2 before the legacy endpoint's large response inflates process RSS.
+  for(const route of ['/api/auth/me','/api/dashboard?panel=tasks','/api/projects','/api/my-tasks?v=2','/api/my-tasks','/api/search?q='+id,'/api/projects/'+projectIds[0]]){
    const first=await read(route),samples:Awaited<ReturnType<typeof read>>[]=[];
    if(route==='/api/my-tasks?v=2'){
     expect(first.groups?.next7.total).toBe(10000);
@@ -69,7 +73,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
    for(let batch=0;batch<2;batch++)samples.push(...await Promise.all(Array.from({length:5},()=>read(route))));
    const after=serverResource();
    const sorted=samples.map(x=>x.ms).sort((a,b)=>a-b);
-   const measurement={route:route.startsWith('/api/search')?'/api/search?q=<fixture>':route.startsWith('/api/projects/')?'/api/projects/<fixture>':route,concurrency:5,samples:sorted.length,firstRequestMs:Math.round(first.ms),p50Ms:Math.round(sorted[4]),p95Ms:Math.round(sorted[9]),maxBytes:Math.max(first.bytes,...samples.map(x=>x.bytes)),serverResource:before&&after?{cpuTicks:after.cpuTicks-before.cpuTicks,rssBeforeKiB:before.rssKiB,rssAfterKiB:after.rssKiB,highWaterKiB:after.highWaterKiB}:null};
+   const measurement={route:route.startsWith('/api/search')?'/api/search?q=<fixture>':route.startsWith('/api/projects/')?'/api/projects/<fixture>':route,concurrency:5,samples:sorted.length,firstRequestMs:Math.round(first.ms),p50Ms:Math.round(sorted[4]),p95Ms:Math.round(sorted[9]),maxBytes:Math.max(first.bytes,...samples.map(x=>x.bytes)),serverResource:before&&after&&clockTicksPerSecond?{cpuMs:Math.round((after.cpuTicks-before.cpuTicks)*1000/clockTicksPerSecond),rssBeforeKiB:before.rssKiB,rssAfterKiB:after.rssKiB,highWaterKiB:after.highWaterKiB}:null};
    report.measurements.push(measurement);
    if(route==='/api/my-tasks?v=2'){
     expect(measurement.maxBytes,'approved My Tasks initial response budget').toBeLessThanOrEqual(512*1024);
