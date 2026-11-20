@@ -40,5 +40,5 @@ it("rolls back on an observation error and does not return partial counts", asyn
 it("ships the observation helper with the manual restore workflow", () => {
   const workflow = readFileSync(".github/workflows/restore-check.yml", "utf8");
   expect(workflow).toContain("deploy/restore-observation.cjs");
-  expect(workflow).toContain("cp /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs /tmp/restore-target.cjs /tmp/restore-observation.cjs");
+  expect(workflow).toContain("NODE_PATH=/opt/sho/current/node_modules node restore-check.cjs");
 });

@@ -28,10 +28,17 @@ jobs:
         env:
           RESTORE_DATABASE_URL: ${{ secrets.RESTORE_DATABASE_URL }}
         run: |
+          set -euo pipefail
           [ -n "$RESTORE_DATABASE_URL" ] || { echo "RESTORE_DATABASE_URL secret is missing"; exit 1; }
-          printf '%s\n' "$RESTORE_DATABASE_URL" | ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'umask 077; cat > /tmp/rc.url'
-          scp -o StrictHostKeyChecking=yes deploy/restore-check.cjs deploy/restore-assessment.cjs deploy/restore-connection.cjs deploy/restore-target.cjs deploy/restore-observation.cjs "deploy@$HOST:/tmp/"
-          ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'rm -rf /tmp/rc && mkdir /tmp/rc && cd /tmp/rc && npm init -y >/dev/null && npm i pg --no-audit --no-fund --loglevel=error && cp /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs /tmp/restore-target.cjs /tmp/restore-observation.cjs . && node restore-check.cjs'
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || { echo "Invalid run identity"; exit 1; }
+          remote_dir="/tmp/sho-restore-check-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() { ssh -o StrictHostKeyChecking=yes "deploy@$HOST" "rm -rf -- '$remote_dir'" || true; }
+          trap cleanup EXIT
+          ssh -o StrictHostKeyChecking=yes "deploy@$HOST" "test -r /opt/sho/current/node_modules/pg/package.json && umask 077 && mkdir -m 700 -- '$remote_dir'"
+          scp -o StrictHostKeyChecking=yes deploy/restore-check.cjs deploy/restore-assessment.cjs deploy/restore-connection.cjs deploy/restore-target.cjs deploy/restore-observation.cjs "deploy@$HOST:$remote_dir/"
+          printf '%s\n' "$RESTORE_DATABASE_URL" | ssh -o StrictHostKeyChecking=yes "deploy@$HOST" "cd '$remote_dir' && NODE_PATH=/opt/sho/current/node_modules node restore-check.cjs"
       - name: Clean up
         if: always()
-        run: ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'rm -rf /tmp/rc /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs /tmp/restore-target.cjs /tmp/restore-observation.cjs /tmp/rc.url'
+        run: |
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 0
+          ssh -o StrictHostKeyChecking=yes "deploy@$HOST" "rm -rf -- '/tmp/sho-restore-check-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}'" || true

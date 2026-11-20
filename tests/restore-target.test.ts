@@ -35,5 +35,5 @@ it("accepts a distinct restore host and rejects malformed URLs without exposing 
 it("ships the identity guard with the manual restore workflow", () => {
   const workflow = readFileSync(".github/workflows/restore-check.yml", "utf8");
   expect(workflow).toContain("deploy/restore-target.cjs");
-  expect(workflow).toContain("cp /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs /tmp/restore-target.cjs");
+  expect(workflow).toContain('"deploy@$HOST:$remote_dir/"');
 });

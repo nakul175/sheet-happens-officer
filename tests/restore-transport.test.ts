@@ -46,3 +46,13 @@ it('production SSH paths require a preverified pin and strict host checking',()=
   expect(source).toContain('StrictHostKeyChecking=yes');expect(source).toContain('ssh-keygen -F');
  }
 });
+it('manual restore check streams its secret and isolates temporary code by run',()=>{
+ const workflow=readFileSync('.github/workflows/restore-check.yml','utf8');
+ const checker=readFileSync('deploy/restore-check.cjs','utf8');
+ expect(checker).toContain('fs.readFileSync(0, "utf8")');
+ expect(workflow).toContain('remote_dir="/tmp/sho-restore-check-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"');
+ expect(workflow).toContain('trap cleanup EXIT');
+ expect(workflow).toContain('printf \'%s\\n\' "$RESTORE_DATABASE_URL" | ssh');
+ expect(workflow).not.toContain('/tmp/rc.url');
+ expect(workflow).not.toContain('npm i pg');
+});
