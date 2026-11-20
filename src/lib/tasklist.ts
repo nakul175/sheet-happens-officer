@@ -5,7 +5,7 @@ import { projectAccess, type Actor } from "@/lib/access";
 import { blockingTaskWhere } from "@/lib/deal-task-rules";
 import { startOfTodayIST } from "@/lib/dates";
 import { attachCommentCounts } from "@/lib/comments";
-import { ORDER, awaiting, present, taskInclude } from "@/lib/tasks";
+import { ORDER, awaiting, present, taskInclude } from "@/lib/task-read-model";
 
 export const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const;
 export const FLAGS = ["overdue", "blocked", "awaiting", "nodate"] as const;

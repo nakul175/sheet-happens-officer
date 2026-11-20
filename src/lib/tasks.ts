@@ -17,56 +17,12 @@ import { reqCtx } from "@/lib/reqctx";
 import { attachCommentCounts, commentCount, purgeExpiredComments } from "@/lib/comments";
 import { commentsEnabled } from "@/lib/flags";
 import { classifyExpectedUpdatedAt } from "@/lib/task-version";
+import { ORDER, awaiting, canClose, present, taskInclude, type TaskRow } from "@/lib/task-read-model";
+export { ORDER, awaiting, canClose, present, taskInclude } from "@/lib/task-read-model";
 import { trashPurgeBefore } from "@/lib/undoable";
 import { VERSION_CONFLICT, versionConflictMessage } from "@/lib/version-error";
 
-export const taskInclude = {
-  assignee: { select: { id: true, name: true } },
-  approver: { select: { id: true, name: true } },
-  collaborators: { select: { user: { select: { id: true, name: true } } } },
-  subtasks: { where: { deletedAt: null }, select: { id: true, completedAt: true } },
-} as const;
-
-type TaskRow = NonNullable<Awaited<ReturnType<typeof loadRow>>>;
 const loadRow = (id: string, tx?: Tx) => (tx ?? db).task.findUnique({ where: { id }, include: taskInclude });
-
-/** SHO-US-14.1: a task waits for approval only while it is open; a closed task keeps its approver but is no longer waiting. */
-export const awaiting = (t: { approverId: string | null; assigneeId: string; completedAt?: Date | null }) =>
-  !!t.approverId && t.assigneeId === t.approverId && !t.completedAt;
-
-/** Who may close a task (SHO-US-4.3 AC6, 4.6 AC4). With an approver only the approver, Leader or Admin. */
-export function canClose(userId: string, role: Role, t: { approverId: string | null; assigneeId: string }) {
-  if (role === "VIEWER") return false;
-  if (t.approverId) return userId === t.approverId || role === "LEADER";
-  return true;
-}
-
-export function present(t: TaskRow, viewer?: { id: string; role: Role }) {
-  return {
-    id: t.id,
-    projectId: t.projectId,
-    sectionId: t.sectionId,
-    parentId: t.parentId,
-    title: t.title,
-    description: t.description,
-    priority: t.priority,
-    dueDate: formatDueDate(t.dueDate),
-    blocked: t.blocked,
-    blockedReason: t.blockedReason,
-    isIdea: t.isIdea,
-    completedAt: t.completedAt,
-    assignee: t.assignee,
-    approver: t.approver,
-    collaborators: t.collaborators.map((c) => c.user),
-    awaitingApproval: awaiting(t),
-    previousAssigneeId: t.previousAssigneeId,
-    createdById: t.createdById,
-    subtasks: { total: t.subtasks.length, open: t.subtasks.filter((s) => !s.completedAt).length },
-    updatedAt: t.updatedAt,
-    ...(viewer ? { canClose: canClose(viewer.id, viewer.role, t) } : {}),
-  };
-}
-
 
 async function loadTask(user: Actor, id: string, o: { write?: boolean; deleted?: boolean; holderCanDo?: boolean; tx?: Tx } = {}) {
   const t = await loadRow(id, o.tx);
@@ -93,8 +49,6 @@ export const assertCanUpdateTask = (user: Actor, id: string, o: { holderCanDo?: 
 export async function visibleTask(user: Actor, id: string) {
   await assertTaskReadable(user, id);
 }
-
-export const ORDER = [{ dueDate: { sort: "asc", nulls: "last" } }, { createdAt: "asc" }, { id: "asc" }] as const;
 
 async function requireWorker(tx: Tx, projectId: string, userId: string, what: string) {
   const m = await activeMember(tx, projectId, userId, WORKERS);

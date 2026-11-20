@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { WORKSTREAM_DEAL, crmProjectWhere, crmVisible } from "@/lib/crm";
 import { addDays, formatDueDate, startOfTodayIST } from "@/lib/dates";
 import { type Actor, type Role, type Tx } from "@/lib/access";
-import { canClose } from "@/lib/tasks";
+import { canClose } from "@/lib/task-read-model";
 import { ApiError } from "@/lib/http";
 
 const GROUPS = ["waitingOnMe", "overdue", "next7", "later", "waitingOnOthers", "needsNextStep"] as const;
