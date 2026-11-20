@@ -30,8 +30,8 @@ jobs:
         run: |
           [ -n "$RESTORE_DATABASE_URL" ] || { echo "RESTORE_DATABASE_URL secret is missing"; exit 1; }
           printf '%s\n' "$RESTORE_DATABASE_URL" | ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'umask 077; cat > /tmp/rc.url'
-          scp -o StrictHostKeyChecking=yes deploy/restore-check.cjs deploy/restore-assessment.cjs deploy/restore-connection.cjs "deploy@$HOST:/tmp/"
-          ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'rm -rf /tmp/rc && mkdir /tmp/rc && cd /tmp/rc && npm init -y >/dev/null && npm i pg --no-audit --no-fund --loglevel=error && cp /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs . && node restore-check.cjs'
+          scp -o StrictHostKeyChecking=yes deploy/restore-check.cjs deploy/restore-assessment.cjs deploy/restore-connection.cjs deploy/restore-target.cjs "deploy@$HOST:/tmp/"
+          ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'rm -rf /tmp/rc && mkdir /tmp/rc && cd /tmp/rc && npm init -y >/dev/null && npm i pg --no-audit --no-fund --loglevel=error && cp /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs /tmp/restore-target.cjs . && node restore-check.cjs'
       - name: Clean up
         if: always()
-        run: ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'rm -rf /tmp/rc /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs /tmp/rc.url'
+        run: ssh -o StrictHostKeyChecking=yes "deploy@$HOST" 'rm -rf /tmp/rc /tmp/restore-check.cjs /tmp/restore-assessment.cjs /tmp/restore-connection.cjs /tmp/restore-target.cjs /tmp/rc.url'

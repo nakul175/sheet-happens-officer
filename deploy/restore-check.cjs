@@ -5,6 +5,7 @@ const { Client } = require("pg");
 const fs = require("node:fs");
 const { assessPresence } = require("./restore-assessment.cjs");
 const { restoreConnectionOptions } = require("./restore-connection.cjs");
+const { assertIsolatedRestoreTarget } = require("./restore-target.cjs");
 
 async function counts(url) {
   const c = new Client(restoreConnectionOptions(url));
@@ -22,6 +23,7 @@ async function counts(url) {
   }));
   const restoreUrl = fs.readFileSync("/tmp/rc.url", "utf8").trim();
   if (!restoreUrl || !env.DATABASE_URL) throw new Error("missing a connection string");
+  assertIsolatedRestoreTarget(env.DATABASE_URL, restoreUrl);
   const [prod, rest] = [await counts(env.DATABASE_URL), await counts(restoreUrl)];
   let bad = 0;
   const names = [...new Set([...Object.keys(prod.out), ...Object.keys(rest.out)])].sort();
