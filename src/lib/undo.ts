@@ -32,6 +32,11 @@ const TRANSACTIONAL_TASK_UNDO = new Set([
 
 const TRANSACTIONAL_UNDO = new Set([...TRANSACTIONAL_TASK_UNDO, ...MANAGEMENT_UNDO, "deal.stage_changed", "deal.details_updated", "deal.converted"]);
 
+/** Project inverses must be revalidated after locking, inside the write transaction. */
+export function projectUndoIsTransactional(action: string) {
+  return TRANSACTIONAL_UNDO.has(action);
+}
+
 type Conflict = { field: string; before: unknown; after: unknown; now: unknown };
 type Plan = { conflicts: Conflict[]; apply: (tx: Tx) => Promise<void>; subject?: string; fields?: string };
 
@@ -569,12 +574,9 @@ export async function checkUndo(user: Actor, logId: string) {
 /** Persist the inverse and activity together; locked task inverses also claim the action atomically. */
 async function applyPreparedUndo(tx: Tx, user: Actor, prepared: Awaited<ReturnType<typeof prepare>>, anyway: boolean) {
   const { row, projectId, p } = prepared;
-  if (TRANSACTIONAL_UNDO.has(row.action)) {
-    const claimed = await tx.actionLog.updateMany({ where: { id: row.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
-    if (claimed.count !== 1) throw bad("This action was already undone.");
-  }
+  const claimed = await tx.actionLog.updateMany({ where: { id: row.id, undoneAt: null }, data: { undoneAt: new Date(), undoneById: user.id } });
+  if (claimed.count !== 1) throw bad("This action was already undone.");
   await p.apply(tx);
-  if (!TRANSACTIONAL_UNDO.has(row.action)) await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
   const commentId = (row.afterState as { commentId?: string } | null)?.commentId
     ?? (row.beforeState as { commentId?: string } | null)?.commentId;
   await logAction(tx, {
@@ -616,7 +618,7 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
   const { row, projectId, p } = await prepare(user, logId);
   if (p.conflicts.length && !anyway) throw await conflictError(row, p, user.id);
 
-  if (TRANSACTIONAL_UNDO.has(row.action)) {
+  if (projectUndoIsTransactional(row.action)) {
     return db.$transaction(async (tx) => {
       // Same task-first ordering as ordinary edits. Shared project/membership
       // locks preserve archive/access state; NOWAIT avoids reverse-order waits
@@ -692,5 +694,7 @@ export async function undoAction(user: Actor, logId: string, anyway = false) {
     }, { isolationLevel: "ReadCommitted" });
   }
 
-  return db.$transaction((tx) => applyPreparedUndo(tx, user, { row, projectId, p }, anyway));
+  // A future project action must not silently use a plan prepared before the
+  // transaction: membership or target state may have changed in that window.
+  throw bad("This action cannot be undone safely.");
 }
