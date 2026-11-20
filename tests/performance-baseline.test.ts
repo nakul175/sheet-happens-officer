@@ -7,6 +7,64 @@ import { performance } from 'node:perf_hooks';
 import { db } from '@/lib/db';
 
 type ServerResource = { cpuTicks: number; rssKiB: number; highWaterKiB: number };
+type CpuProfile = { nodes: { id: number; callFrame: { functionName: string; url: string; lineNumber: number } }[]; samples?: number[] };
+async function profileLegacyReads(pid: number, read: () => Promise<unknown>) {
+ if(process.platform!=='linux')throw Error('AUDIT_CPU_PROFILE_REQUIRES_LINUX');
+ // Node enables its inspector on loopback when signalled; this disposable CI
+ // process is never a shared staging or production runtime.
+ process.kill(pid,'SIGUSR1');
+ let debuggerUrl:string|undefined;
+ for(let attempt=0;attempt<30;attempt++){
+  try{
+   const response=await fetch('http://127.0.0.1:9229/json/list',{signal:AbortSignal.timeout(1000)});
+   if(response.ok){
+    const targets=await response.json() as {webSocketDebuggerUrl?:string}[];
+    debuggerUrl=targets[0]?.webSocketDebuggerUrl;
+    if(debuggerUrl)break;
+   }
+  }catch{/* Inspector has not opened yet. */}
+  await new Promise(resolve=>setTimeout(resolve,100));
+ }
+ if(!debuggerUrl||!debuggerUrl.startsWith('ws://127.0.0.1:9229/'))throw Error('AUDIT_LOOPBACK_INSPECTOR_UNAVAILABLE');
+ const socket=new WebSocket(debuggerUrl);
+ await new Promise<void>((resolve,reject)=>{
+  const timer=setTimeout(()=>reject(Error('AUDIT_INSPECTOR_CONNECT_TIMEOUT')),5000);
+  socket.addEventListener('open',()=>{clearTimeout(timer);resolve();},{once:true});
+  socket.addEventListener('error',()=>{clearTimeout(timer);reject(Error('AUDIT_INSPECTOR_CONNECT_ERROR'));},{once:true});
+ });
+ let nextId=0;
+ const pending=new Map<number,{resolve:(result:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
+ socket.addEventListener('message',(event)=>{
+  const message=JSON.parse(String(event.data)) as {id?:number;result?:unknown;error?:{message:string}};
+  if(message.id===undefined)return;
+  const request=pending.get(message.id);if(!request)return;
+  clearTimeout(request.timer);pending.delete(message.id);
+  if(message.error)request.reject(Error(`AUDIT_INSPECTOR_${message.error.message}`));else request.resolve(message.result);
+ });
+ const send=(method:string)=>new Promise<unknown>((resolve,reject)=>{
+  const id=++nextId;
+  const timer=setTimeout(()=>{pending.delete(id);reject(Error(`AUDIT_INSPECTOR_${method}_TIMEOUT`));},10000);
+  pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method}));
+ });
+ try{
+  await send('Profiler.enable');await send('Profiler.start');
+  let result:unknown;
+  try{await Promise.all(Array.from({length:5},read));}
+  finally{result=await send('Profiler.stop');}
+  const profile=(result as {profile:CpuProfile}).profile;
+  if(!profile?.samples?.length)throw Error('AUDIT_CPU_PROFILE_EMPTY');
+  const byId=new Map(profile.nodes.map(node=>[node.id,node.callFrame]));
+  const counts=new Map<string,{samples:number;functionName:string;file:string;line:number}>();
+  for(const sample of profile.samples){
+   const frame=byId.get(sample);if(!frame)continue;
+   const file=frame.url.split('/').at(-1)??'';
+   const key=`${frame.functionName}|${file}|${frame.lineNumber}`;
+   const row=counts.get(key)??{samples:0,functionName:frame.functionName||'(anonymous)',file,line:frame.lineNumber+1};
+   row.samples++;counts.set(key,row);
+  }
+  return{requests:5,sampleCount:profile.samples.length,topFrames:[...counts.values()].sort((a,b)=>b.samples-a.samples).slice(0,25)};
+ }finally{socket.close();}
+}
 function serverResource(): ServerResource | null {
  if(process.platform!=='linux')return null;
  const pidPath='test-results/performance/server.pid';
@@ -40,7 +98,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
  };
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
  const raw=randomBytes(32).toString('base64url');
- const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;concurrentEdits?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch,clockTicksPerSecond,queryStatsEnabled},measurements:[],cleanup:false,status:'INCOMPLETE'};
+ const report:{fixture:unknown;environment:unknown;measurements:unknown[];legacyCpuProfile?:unknown;dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;concurrentEdits?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch,clockTicksPerSecond,queryStatsEnabled},measurements:[],cleanup:false,status:'INCOMPLETE'};
  let created=false;
  const originalProjects=await db.project.count(),originalUsers=await db.user.count();
  const read=async(route:string)=>{
@@ -121,6 +179,11 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
     await db.project.update({where:{id:cursorRow},data:{archivedAt:null}});
     report.dealCursorAfterArchive=true;
    }
+  }
+  if(queryStatsEnabled){
+   const resource=serverResource();if(!resource)throw Error('AUDIT_SERVER_RESOURCE_UNAVAILABLE');
+   const pid=Number(readFileSync('test-results/performance/server.pid','utf8').trim());
+   report.legacyCpuProfile=await profileLegacyReads(pid,()=>read('/api/my-tasks'));
   }
   // Populate the previously empty deals only after the approved My Tasks gate.
   // This is a Deals measurement, with no owner-approved latency/size threshold yet.
