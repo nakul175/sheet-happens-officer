@@ -161,8 +161,12 @@ jobs:
             if [ "${total:-0}" -eq 0 ]; then echo "::error::Playwright collected 0 tests from $f."; exit 1; fi
           done
           npx playwright test "${specs[@]}"
-      - name: Qualification evidence
+      - name: Scan qualification evidence before upload
+        id: artifact_secret_scan
         if: always()
+        run: node scripts/ci/scan-artifact-values.mjs test-results playwright-report
+      - name: Qualification evidence
+        if: always() && steps.artifact_secret_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: qualification-results
