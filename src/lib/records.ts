@@ -12,6 +12,15 @@ import { assertSafeParentTx, orgOf, requireOrgEdit } from "@/lib/orgs";
 import { taskAccess } from "@/lib/task-access";
 import { UNDO_LABELS, isTooOldToUndo, isUndoable } from "@/lib/undoable";
 
+const NOTE_UNDO = new Set(["note.created", "note.removed"]);
+const CONTACT_UNDO = new Set(["contact.created", "contact.removed", "contact.updated"]);
+const ORGANISATION_UNDO = new Set(["organisation.created", "organisation.archived", "organisation.unarchived", "organisation.updated"]);
+
+/** Record inverses revalidate authority and state after locking, inside the write transaction. */
+export function recordUndoIsTransactional(action: string) {
+  return NOTE_UNDO.has(action) || CONTACT_UNDO.has(action) || ORGANISATION_UNDO.has(action);
+}
+
 const clean = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
 export type NoteKindName = "MEETING" | "CALL" | "INTRODUCTION" | "OTHER";
 const dayOf = (d: Date) => d.toISOString().slice(0, 10);
@@ -585,7 +594,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
   if (row.undoneAt) throw new ApiError(409, "This action was already undone.");
   if (!isUndoable(row.action)) throw new ApiError(409, "This kind of action cannot be undone.");
   if (isTooOldToUndo(row.createdAt)) throw new ApiError(409, "Too old to undo", { tooOld: true });
-  if (row.action === "note.created" || row.action === "note.removed") {
+  if (NOTE_UNDO.has(row.action)) {
     if (row.targetType !== "note") throw new ApiError(409, "This note action has changed. Reload before undoing it.");
     return db.$transaction(async (tx) => {
       let currentOrgRole = user.orgRole;
@@ -637,7 +646,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode: false };
     }, { isolationLevel: "ReadCommitted" });
   }
-  if (row.action === "contact.created" || row.action === "contact.removed" || row.action === "contact.updated") {
+  if (CONTACT_UNDO.has(row.action)) {
     if (row.targetType !== "contact") throw new ApiError(409, "This contact action has changed. Reload before undoing it.");
     return db.$transaction(async (tx) => {
       let contact;
@@ -679,7 +688,7 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode };
     }, { isolationLevel: "ReadCommitted" });
   }
-  if (row.action === "organisation.created" || row.action === "organisation.archived" || row.action === "organisation.unarchived" || row.action === "organisation.updated") {
+  if (ORGANISATION_UNDO.has(row.action)) {
     if (row.targetType !== "organisation") throw new ApiError(409, "This organisation action has changed. Reload before undoing it.");
     return db.$transaction(async (tx) => {
       let organisation;
@@ -719,15 +728,8 @@ export async function undoRecord(user: Actor, row: { id: string; action: string;
       return { label: UNDO_LABELS[fresh.action], noticesSent: false, overrode };
     }, { isolationLevel: "ReadCommitted" });
   }
-  const p = await planRecord(row, user);
-  if (p.conflicts.length && !anyway) {
-    throw new ApiError(409, "This changed after your action.", { needsConfirm: "conflict", label: UNDO_LABELS[row.action], changedBy: [], conflicts: p.conflicts.map((c) => ({ field: c.field, before: String(c.before ?? "none"), after: String(c.after ?? "none"), now: String(c.now ?? "none") })) });
-  }
-  await db.$transaction(async (tx) => {
-    await p.apply(tx);
-    await tx.actionLog.update({ where: { id: row.id }, data: { undoneAt: new Date(), undoneById: user.id } });
-    await logAction(tx, { actorId: user.id, projectId: null, targetType: row.targetType as "task", targetId: row.targetId, action: "undo", before: { undoes: row.id, action: row.action }, after: { undoes: row.id, label: UNDO_LABELS[row.action], anyway: anyway && p.conflicts.length > 0 } });
-  });
-  return { label: UNDO_LABELS[row.action], noticesSent: false, overrode: anyway && p.conflicts.length > 0 };
+  // Any future record action must be given its own locked, freshly authorized
+  // inverse before Undo can be offered. A pre-transaction plan is unsafe.
+  throw new ApiError(409, "This action cannot be undone safely.");
 }
 export { parseDueDate, isActive };
