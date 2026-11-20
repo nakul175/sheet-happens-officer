@@ -128,7 +128,8 @@ jobs:
       - name: Start the app
         run: |
           # APL-2652: RETURN_PATH_LOG=1 makes the proxy log the return path it forwards, for tests/return-to.test.ts.
-          (RETURN_PATH_LOG=1 NODE_ENV=production PORT=3100 node --import tsx server.js > server.log 2>&1 &)
+          mkdir -p test-results/performance
+          (RETURN_PATH_LOG=1 NODE_ENV=production PORT=3100 node --import tsx server.js > server.log 2>&1 & echo $! > test-results/performance/server.pid)
           url="${APP_HEALTH_URL:-http://localhost:3100/api/health}"
           attempts="${APP_HEALTH_ATTEMPTS:-30}"
           pause="${APP_HEALTH_PAUSE:-2}"

@@ -1,9 +1,30 @@
 // Disposable synthetic acceptance fixture; never a production load test or live SLA claim.
 import { expect,it } from 'vitest';
 import { randomUUID,createHash,randomBytes } from 'node:crypto';
-import { mkdirSync,writeFileSync } from 'node:fs';
+import { existsSync,mkdirSync,readFileSync,writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { db } from '@/lib/db';
+
+type ServerResource = { cpuTicks: number; rssKiB: number; highWaterKiB: number };
+function serverResource(): ServerResource | null {
+ if(process.platform!=='linux')return null;
+ const pidPath='test-results/performance/server.pid';
+ if(!existsSync(pidPath)){
+  if(process.env.CI)throw Error('AUDIT_SERVER_PID_MISSING');
+  return null;
+ }
+ const pid=Number(readFileSync(pidPath,'utf8').trim());
+ if(!Number.isSafeInteger(pid)||pid<=0)throw Error('AUDIT_SERVER_PID_INVALID');
+ const command=readFileSync(`/proc/${pid}/cmdline`,'utf8').replaceAll('\0',' ');
+ if(!/\bserver\.js\b/.test(command))throw Error('AUDIT_SERVER_PID_NOT_APP');
+ const stat=readFileSync(`/proc/${pid}/stat`,'utf8');
+ const fields=stat.slice(stat.lastIndexOf(')')+2).trim().split(/\s+/);
+ const status=readFileSync(`/proc/${pid}/status`,'utf8');
+ const kb=(label:string)=>Number(status.match(new RegExp(`^${label}:\\s+(\\d+) kB$`,'m'))?.[1]);
+ const sample={cpuTicks:Number(fields[11])+Number(fields[12]),rssKiB:kb('VmRSS'),highWaterKiB:kb('VmHWM')};
+ if(Object.values(sample).some(value=>!Number.isFinite(value)))throw Error('AUDIT_SERVER_RESOURCE_UNAVAILABLE');
+ return sample;
+}
 
 it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans its exact fixture',async()=>{
  const database=new URL(process.env.DATABASE_URL??''),base=new URL(process.env.TASKBOARD_URL??'');
@@ -44,9 +65,11 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
     expect(first.groups?.needsNextStep.total).toBe(1000);
     expect(first.groups?.needsNextStep.items).toHaveLength(25);
    }
+   const before=serverResource();
    for(let batch=0;batch<2;batch++)samples.push(...await Promise.all(Array.from({length:5},()=>read(route))));
+   const after=serverResource();
    const sorted=samples.map(x=>x.ms).sort((a,b)=>a-b);
-   const measurement={route:route.startsWith('/api/search')?'/api/search?q=<fixture>':route.startsWith('/api/projects/')?'/api/projects/<fixture>':route,concurrency:5,samples:sorted.length,firstRequestMs:Math.round(first.ms),p50Ms:Math.round(sorted[4]),p95Ms:Math.round(sorted[9]),maxBytes:Math.max(first.bytes,...samples.map(x=>x.bytes))};
+   const measurement={route:route.startsWith('/api/search')?'/api/search?q=<fixture>':route.startsWith('/api/projects/')?'/api/projects/<fixture>':route,concurrency:5,samples:sorted.length,firstRequestMs:Math.round(first.ms),p50Ms:Math.round(sorted[4]),p95Ms:Math.round(sorted[9]),maxBytes:Math.max(first.bytes,...samples.map(x=>x.bytes)),serverResource:before&&after?{cpuTicks:after.cpuTicks-before.cpuTicks,rssBeforeKiB:before.rssKiB,rssAfterKiB:after.rssKiB,highWaterKiB:after.highWaterKiB}:null};
    report.measurements.push(measurement);
    if(route==='/api/my-tasks?v=2'){
     expect(measurement.maxBytes,'approved My Tasks initial response budget').toBeLessThanOrEqual(512*1024);
