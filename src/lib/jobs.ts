@@ -2,7 +2,7 @@ import { crmRoleProjectWhere } from "@/lib/access";
 // Scheduled jobs (SHO-US-9.3 AC6). Each run is recorded in JobRun; a failure or a missed
 // day puts a notice in every Super Admin's bell. Jobs are triggered by the server's cron
 // through POST /api/jobs/<name> with the JOB_SECRET; nothing here is reachable from a session.
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
 import type { OrgRole } from "@/lib/access";
 import { db } from "@/lib/db";
@@ -13,6 +13,7 @@ import { notifyStalledDeals } from "@/lib/deals";
 import { purgeTrash } from "@/lib/tasks";
 import { startOfTodayIST } from "@/lib/dates";
 import { crmMode } from "@/lib/crm";
+import { displayedJobFailure, jobFailureCategory } from "@/lib/job-diagnostic";
 
 type Job = { name: string; about: string; run: (now?: Date) => Promise<unknown> };
 
@@ -24,6 +25,7 @@ export const JOBS: Job[] = [
   { name: "check", about: "Tells the Super Admin when a job failed or did not run", run: () => checkJobs() },
 ];
 const DAILY_GRACE_HOURS = 30;
+
 
 const DAY_MS = 86400_000;
 /** Which reminder, if any, a task due `due` gets on the day starting at `today` (SHO-US-7.4). */
@@ -129,10 +131,12 @@ export async function runJob(name: string, now?: Date) {
     await db.jobRun.update({ where: { job: name }, data: { lastFinishedAt: new Date(), lastStatus: "OK", lastError: null } });
     return { job: name, status: "OK", result };
   } catch (err) {
-    const error = String((err as Error)?.message ?? err).slice(0, 500);
+    const referenceId = randomUUID();
+    const error = `${jobFailureCategory(err)} (${referenceId})`;
+    console.error("job failed", name, error);
     await db.jobRun.update({ where: { job: name }, data: { lastFinishedAt: new Date(), lastStatus: "FAILED", lastError: error } });
     await tellSuperAdmins("JOB_FAILED", name, error);
-    throw new ApiError(500, `Job ${name} failed: ${error}`);
+    throw new ApiError(500, `Job ${name} failed. Reference ${referenceId}.`);
   }
 }
 
@@ -151,7 +155,7 @@ export async function jobStatus() {
   const runs = await db.jobRun.findMany();
   return JOBS.map((j) => {
     const r = runs.find((x) => x.job === j.name);
-    return { job: j.name, about: j.about, lastStartedAt: r?.lastStartedAt ?? null, lastFinishedAt: r?.lastFinishedAt ?? null, lastStatus: r?.lastStatus ?? null, lastError: r?.lastError ?? null };
+    return { job: j.name, about: j.about, lastStartedAt: r?.lastStartedAt ?? null, lastFinishedAt: r?.lastFinishedAt ?? null, lastStatus: r?.lastStatus ?? null, lastError: displayedJobFailure(r?.lastError) };
   });
 }
 

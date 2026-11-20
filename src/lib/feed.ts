@@ -12,6 +12,7 @@ import { purgeExpiredComments } from "@/lib/comments";
 import { COMMENT_ACTION_PREFIX, COMMENT_NOTICE_TYPES, commentsEnabled } from "@/lib/flags";
 import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
+import { displayedJobFailure } from "@/lib/job-diagnostic";
 
 const NOTE_DAYS = 90;
 const LOG_MONTHS = 12;
@@ -82,7 +83,7 @@ export function noticeText(n: N) {
     DEAL_STAGE_CHANGED: `${who} moved ${p} to ${d.stage ?? "another stage"}.`,
     DEAL_NEEDS_NEXT_STEP: `${p} needs a next step.`,
     DEAL_STALLED: `${p} has had no activity for 30 days.`,
-    JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${d.error}` : ""}.`,
+    JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${displayedJobFailure(d.error)}` : ""}.`,
     JOB_MISSED: `Scheduled job "${d.job}" did not run on its day.`,
   };
   // A deleted task cannot be opened, so its notice links to the project Trash (SHO-US-7.3 AC1).
