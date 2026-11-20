@@ -27,11 +27,13 @@ export function checkHr106Rows(rows, { required = false } = {}) {
   for (const constraint of rows) {
     const want = expected.get(constraint.conname);
     if (!want || names.has(constraint.conname) || constraint.contype !== want.type || !constraint.convalidated ||
+        constraint.condeferrable !== false || constraint.condeferred !== false ||
         constraint.child_table !== want.childTable ||
         (want.parentTable && constraint.parent_table !== want.parentTable) ||
         JSON.stringify(constraint.child_cols) !== JSON.stringify(want.child) ||
         (want.parent && JSON.stringify(constraint.parent_cols) !== JSON.stringify(want.parent)) ||
-        (want.setNull && (constraint.confdeltype !== 'n' ||
+        (want.setNull && (constraint.confdeltype !== 'n' || constraint.confupdtype !== 'a' ||
+          constraint.confmatchtype !== 's' ||
           JSON.stringify(constraint.set_null_cols) !== JSON.stringify(want.setNull)))) {
       throw new Error(`HR106_CATALOG_DRIFT:${constraint.conname}`);
     }
@@ -42,7 +44,8 @@ export function checkHr106Rows(rows, { required = false } = {}) {
 
 export async function checkHr106Catalog(client, options) {
   const { rows } = await client.query(`
-    SELECT c.conname, c.contype, c.convalidated, c.confdeltype,
+    SELECT c.conname, c.contype, c.convalidated, c.condeferrable, c.condeferred,
+      c.confdeltype, c.confupdtype, c.confmatchtype,
       child.relname AS child_table, parent.relname AS parent_table,
       (SELECT array_agg(a.attname::text ORDER BY u.ord)
          FROM unnest(c.conkey) WITH ORDINALITY AS u(attnum, ord)

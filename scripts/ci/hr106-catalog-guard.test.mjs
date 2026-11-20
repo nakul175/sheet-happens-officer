@@ -3,16 +3,16 @@ import assert from 'node:assert/strict';
 import { checkHr106Rows } from './hr106-catalog-guard.mjs';
 
 const valid = [
-  { conname: 'hr106_pipeline_id_type_key', contype: 'u', convalidated: true,
+  { conname: 'hr106_pipeline_id_type_key', contype: 'u', convalidated: true, condeferrable: false, condeferred: false,
     child_table: 'Pipeline', child_cols: ['id', 'typeId'] },
-  { conname: 'hr106_stage_id_pipeline_key', contype: 'u', convalidated: true,
+  { conname: 'hr106_stage_id_pipeline_key', contype: 'u', convalidated: true, condeferrable: false, condeferred: false,
     child_table: 'Stage', child_cols: ['id', 'pipelineId'] },
-  { conname: 'hr106_project_pipeline_type_fkey', contype: 'f', convalidated: true,
+  { conname: 'hr106_project_pipeline_type_fkey', contype: 'f', convalidated: true, condeferrable: false, condeferred: false,
     child_table: 'Project', parent_table: 'Pipeline',
-    child_cols: ['pipelineId', 'typeId'], parent_cols: ['id', 'typeId'], confdeltype: 'n', set_null_cols: ['pipelineId'] },
-  { conname: 'hr106_project_stage_pipeline_fkey', contype: 'f', convalidated: true,
+    child_cols: ['pipelineId', 'typeId'], parent_cols: ['id', 'typeId'], confdeltype: 'n', confupdtype: 'a', confmatchtype: 's', set_null_cols: ['pipelineId'] },
+  { conname: 'hr106_project_stage_pipeline_fkey', contype: 'f', convalidated: true, condeferrable: false, condeferred: false,
     child_table: 'Project', parent_table: 'Stage',
-    child_cols: ['stageId', 'pipelineId'], parent_cols: ['id', 'pipelineId'], confdeltype: 'n', set_null_cols: ['stageId'] },
+    child_cols: ['stageId', 'pipelineId'], parent_cols: ['id', 'pipelineId'], confdeltype: 'n', confupdtype: 'a', confmatchtype: 's', set_null_cols: ['stageId'] },
 ];
 
 test('an unapplied draft allows a clean catalog but rejects partial installation', () => {
@@ -36,4 +36,15 @@ test('rejects Prisma-style composite SET NULL and changed key order', () => {
   const wrongTable = valid.map((row) => ({ ...row }));
   wrongTable[3].parent_table = 'Pipeline';
   assert.throws(() => checkHr106Rows(wrongTable, { required: true }), /HR106_CATALOG_DRIFT/);
+});
+
+test('rejects changed update, match and deferrability semantics', () => {
+  for (const [field, value] of [['confupdtype', 'c'], ['confmatchtype', 'f'], ['condeferrable', true], ['condeferred', true]]) {
+    const changed = valid.map((row) => ({ ...row }));
+    changed[2][field] = value;
+    assert.throws(() => checkHr106Rows(changed, { required: true }), /HR106_CATALOG_DRIFT/, field);
+  }
+  const changedUnique = valid.map((row) => ({ ...row }));
+  changedUnique[0].condeferrable = true;
+  assert.throws(() => checkHr106Rows(changedUnique, { required: true }), /HR106_CATALOG_DRIFT/);
 });
