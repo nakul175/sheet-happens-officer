@@ -73,7 +73,8 @@ it('accepts one overlapping eighth section and rejects the ninth without changin
     expect(outcomes.filter(result => result.status === 'fulfilled')).toHaveLength(1);
     const rejected = outcomes.filter(result => result.status === 'rejected');
     expect(rejected).toHaveLength(1);
-    expect(String(rejected[0].reason?.message)).toContain('A project has at most 8 sections');
+    // The in-transaction recount now returns the same cap message as the ordinary preflight.
+    expect(String(rejected[0].reason?.message)).toBe('A project can have up to 8 sections.');
     const sections = await db.section.findMany({ where: { projectId }, orderBy: { position: 'asc' } });
     expect(sections).toHaveLength(8);
     expect(sections.map(section => section.position)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
