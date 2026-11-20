@@ -2,7 +2,7 @@
 // gives the same list. Grouping by person or week is only a layout and happens in the browser.
 import { db } from "@/lib/db";
 import { projectAccess, type Actor } from "@/lib/access";
-import { blockingTaskWhere } from "@/lib/deals";
+import { blockingTaskWhere } from "@/lib/deal-task-rules";
 import { startOfTodayIST } from "@/lib/dates";
 import { attachCommentCounts } from "@/lib/comments";
 import { ORDER, awaiting, present, taskInclude } from "@/lib/tasks";

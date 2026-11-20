@@ -15,7 +15,9 @@ import { taskAccess } from "@/lib/task-access";
 
 import { dealClassificationFields, type DealClassificationInput } from "@/lib/deal-classification";
 import { isWorking, WORKING_CATEGORIES } from "@/lib/deal-next-step";
+import { blockingTaskWhere } from "@/lib/deal-task-rules";
 export { isWorking, ensureNextStep } from "@/lib/deal-next-step";
+export { blockingTaskWhere } from "@/lib/deal-task-rules";
 
 export const STALL_DAYS = 30;
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
@@ -175,11 +177,6 @@ export async function createDeal(
 }
 
 // ---- stages (SHO-US-10.3) ----
-
-/** Tasks still open on a deal, including subtasks. Lost refuses while any of these remain; Won retains follow-up work. */
-export function blockingTaskWhere(projectId: string) {
-  return { projectId, deletedAt: null, completedAt: null };
-}
 
 async function openTasks(projectId: string) {
   return db.task.findMany({ where: blockingTaskWhere(projectId), select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
