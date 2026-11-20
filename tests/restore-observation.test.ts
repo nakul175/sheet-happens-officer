@@ -20,6 +20,7 @@ it("counts tables inside one repeatable-read, read-only transaction", async () =
   } };
   expect(await observeRestoreCounts(client)).toEqual({ out: { Task: 2, User: 1 }, newestUser: date });
   expect(calls[0]).toBe("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  expect(calls.slice(1, 3)).toEqual(["SET LOCAL statement_timeout = '30s'", "SET LOCAL lock_timeout = '5s'"]);
   expect(calls.at(-1)).toBe("COMMIT");
   expect(calls).not.toContain("ROLLBACK");
 });
@@ -35,6 +36,17 @@ it("rolls back on an observation error and does not return partial counts", asyn
   await expect(observeRestoreCounts(client)).rejects.toThrow("synthetic query failure");
   expect(calls.at(-1)).toBe("ROLLBACK");
   expect(calls).not.toContain("COMMIT");
+});
+
+it("rolls back if the transaction limits cannot be set", async () => {
+  const calls: string[] = [];
+  const client = { query: async (sql: string) => {
+    calls.push(sql);
+    if (sql.startsWith("SET LOCAL")) throw new Error("synthetic timeout-setting failure");
+    return { rows: [] };
+  } };
+  await expect(observeRestoreCounts(client)).rejects.toThrow("synthetic timeout-setting failure");
+  expect(calls).toEqual(["BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", "SET LOCAL statement_timeout = '30s'", "ROLLBACK"]);
 });
 
 it("ships the observation helper with the manual restore workflow", () => {

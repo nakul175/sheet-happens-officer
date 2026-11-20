@@ -3,6 +3,10 @@
 async function observeRestoreCounts(client) {
   await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
   try {
+    // A manual backup check must not leave a long-running snapshot on the live DB.
+    // These limits apply only inside this transaction and fail the check closed.
+    await client.query("SET LOCAL statement_timeout = '30s'");
+    await client.query("SET LOCAL lock_timeout = '5s'");
     const tables = await client.query("select tablename from pg_tables where schemaname='public' order by 1");
     const out = {};
     for (const { tablename } of tables.rows) {

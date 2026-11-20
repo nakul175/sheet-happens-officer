@@ -19,6 +19,10 @@ it("uses a real PostgreSQL read-only snapshot on the disposable CI database", as
       if (sql.includes("from pg_tables")) {
         const state = await client.query("show transaction_read_only");
         expect(state.rows[0].transaction_read_only).toBe("on");
+        const statementTimeout = await client.query("show statement_timeout");
+        const lockTimeout = await client.query("show lock_timeout");
+        expect(statementTimeout.rows[0].statement_timeout).toBe("30s");
+        expect(lockTimeout.rows[0].lock_timeout).toBe("5s");
         sawReadOnly = true;
       }
       return client.query(sql);
