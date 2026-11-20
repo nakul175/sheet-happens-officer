@@ -34,9 +34,9 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
  if(clockTicksPerSecond!==null&&(!Number.isFinite(clockTicksPerSecond)||clockTicksPerSecond<=0))throw Error('AUDIT_SERVER_CLOCK_UNAVAILABLE');
  const queryStatsEnabled=process.env.SHO_AUDIT_QUERY_STATS==='1';
  const resetQueryStats=async()=>{await db.$queryRaw`SELECT pg_stat_statements_reset()::text`;};
- const queryCalls=async()=>{
-  const rows=await db.$queryRaw<{calls:bigint}[]>`SELECT COALESCE(SUM(calls),0)::bigint AS calls FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query ~* '^[[:space:]]*(SELECT|INSERT|UPDATE|DELETE|MERGE|WITH)[[:space:]]' AND query NOT ILIKE '%pg_stat_statements%'`;
-  return Number(rows[0]?.calls??BigInt(0));
+ const queryStats=async()=>{
+  const rows=await db.$queryRaw<{calls:bigint;totalExecMs:number}[]>`SELECT COALESCE(SUM(calls),0)::bigint AS calls, COALESCE(SUM(total_exec_time),0)::double precision AS "totalExecMs" FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query ~* '^[[:space:]]*(SELECT|INSERT|UPDATE|DELETE|MERGE|WITH)[[:space:]]' AND query NOT ILIKE '%pg_stat_statements%'`;
+  return {calls:Number(rows[0]?.calls??BigInt(0)),totalExecMs:rows[0]?.totalExecMs??0};
  };
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
  const raw=randomBytes(32).toString('base64url');
@@ -79,10 +79,13 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
    const before=serverResource();
    for(let batch=0;batch<2;batch++)samples.push(...await Promise.all(Array.from({length:5},()=>read(route))));
    const after=serverResource();
-   const databaseStatements=queryStatsEnabled?await queryCalls():null;
+   const databaseStats=queryStatsEnabled?await queryStats():null;
+   const databaseStatements=databaseStats?.calls??null;
+   const databaseExecMs=databaseStats?Math.round(databaseStats.totalExecMs):null;
    if(queryStatsEnabled)expect(databaseStatements,`database statements for ${route}`).toBeGreaterThan(0);
+   if(queryStatsEnabled)expect(databaseExecMs,`database execution time for ${route}`).toBeGreaterThanOrEqual(0);
    const sorted=samples.map(x=>x.ms).sort((a,b)=>a-b);
-   const measurement={route:route.startsWith('/api/search')?'/api/search?q=<fixture>':route.startsWith('/api/projects/')?'/api/projects/<fixture>':route,concurrency:5,samples:sorted.length,firstRequestMs:Math.round(first.ms),p50Ms:Math.round(sorted[4]),p95Ms:Math.round(sorted[9]),maxBytes:Math.max(first.bytes,...samples.map(x=>x.bytes)),databaseStatements,serverResource:before&&after&&clockTicksPerSecond?{cpuMs:Math.round((after.cpuTicks-before.cpuTicks)*1000/clockTicksPerSecond),rssBeforeKiB:before.rssKiB,rssAfterKiB:after.rssKiB,highWaterKiB:after.highWaterKiB}:null};
+   const measurement={route:route.startsWith('/api/search')?'/api/search?q=<fixture>':route.startsWith('/api/projects/')?'/api/projects/<fixture>':route,concurrency:5,samples:sorted.length,firstRequestMs:Math.round(first.ms),p50Ms:Math.round(sorted[4]),p95Ms:Math.round(sorted[9]),maxBytes:Math.max(first.bytes,...samples.map(x=>x.bytes)),databaseStatements,databaseExecMs,serverResource:before&&after&&clockTicksPerSecond?{cpuMs:Math.round((after.cpuTicks-before.cpuTicks)*1000/clockTicksPerSecond),rssBeforeKiB:before.rssKiB,rssAfterKiB:after.rssKiB,highWaterKiB:after.highWaterKiB}:null};
    report.measurements.push(measurement);
    if(route==='/api/my-tasks?v=2'){
     expect(measurement.maxBytes,'approved My Tasks initial response budget').toBeLessThanOrEqual(512*1024);
