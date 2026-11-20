@@ -89,3 +89,19 @@ it('rejects a former Leader after preflight without a section write or action ro
     completed.push('revoked-leader-no-write');
   } finally { pause.release(); await pending; }
 });
+
+it('does not write a duplicate done-section change after the same change wins the race', async () => {
+  const f = await fixture();
+  const pause = pauseBeforeTransaction();
+  const pending = updateSection(leader, f.project.id, f.section.id, { isDone: true });
+  try {
+    await pause.ready();
+    await updateSection(leader, f.project.id, f.section.id, { isDone: true });
+    pause.release();
+    await pending;
+    expect((await db.section.findUniqueOrThrow({ where: { id: f.section.id } })).isDone).toBe(true);
+    expect((await db.section.findUniqueOrThrow({ where: { id: f.done.id } })).isDone).toBe(false);
+    expect(await db.actionLog.count({ where: { projectId: f.project.id, action: 'section.done_changed' } })).toBe(1);
+    completed.push('duplicate-done-change-no-write');
+  } finally { pause.release(); await pending; }
+});
