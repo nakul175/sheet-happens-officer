@@ -10,7 +10,7 @@
     "sourceDirectory": "packages/editor",
     "build": "npm run build:editor; cd packages/editor; npm pack",
     "declaredLicense": "UNLICENSED",
-    "verification": "All 51 manifest source hashes matched immutable source commit; binary rebuild not performed."
+    "verification": "All 51 manifest source hashes matched immutable source commit; two isolated npm ci/build/pack runs from that commit on 2026-11-20 produced the pinned archive SHA256 byte for byte. CI pins the archive but does not rebuild cross-repository source."
   },
   "nativeShutdown": {
     "source": "src/lib/sho-accept.c",
