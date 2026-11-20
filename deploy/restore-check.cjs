@@ -6,16 +6,16 @@ const fs = require("node:fs");
 const { assessPresence } = require("./restore-assessment.cjs");
 const { restoreConnectionOptions } = require("./restore-connection.cjs");
 const { assertIsolatedRestoreTarget } = require("./restore-target.cjs");
+const { observeRestoreCounts } = require("./restore-observation.cjs");
 
 async function counts(url) {
   const c = new Client(restoreConnectionOptions(url));
-  await c.connect();
-  const t = await c.query("select tablename from pg_tables where schemaname='public' order by 1");
-  const out = {};
-  for (const { tablename } of t.rows) out[tablename] = Number((await c.query(`select count(*) n from "${tablename.replaceAll('"', '""')}"`)).rows[0].n);
-  const u = await c.query(`select max("createdAt") m from "User"`).catch(() => ({ rows: [{}] }));
-  await c.end();
-  return { out, newestUser: u.rows[0].m };
+  try {
+    await c.connect();
+    return await observeRestoreCounts(c);
+  } finally {
+    await c.end().catch(() => {});
+  }
 }
 (async () => {
   const env = Object.fromEntries(fs.readFileSync("/etc/sho/app.env", "utf8").split("\n").filter(Boolean).map((l) => {
