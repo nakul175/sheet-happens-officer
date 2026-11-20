@@ -49,6 +49,10 @@ jobs:
       - name: Reproduce the pinned native shutdown binary
         run: node scripts/ci/reproduce-native.mjs
       - run: npm ci
+      - name: Production dependency advisory gate
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: Build dependency advisory gate
+        run: npm audit --audit-level=high
       - name: Hand-maintained source import cycles
         run: node --test scripts/ci/source-import-cycles.spec.mjs && node scripts/ci/source-import-cycles.mjs
       - name: Native suite logout guard tests
