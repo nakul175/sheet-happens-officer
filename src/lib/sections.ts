@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { projectAccess, requireManage, type Actor, type Tx } from "@/lib/access";
 import { logAction } from "@/lib/notify";
-import { cascadedSubtaskIds } from "@/lib/tasks";
+import { cascadedSubtaskIds } from "@/lib/task-cascade";
 
 const MAX_SECTIONS = 8;
 
