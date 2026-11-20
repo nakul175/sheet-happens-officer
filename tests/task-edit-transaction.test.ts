@@ -11,7 +11,7 @@ const m = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/db', () => ({ db: m.db }));
 vi.mock('@/lib/notify', () => ({ notify: vi.fn(), logAction: m.log, auditTx: vi.fn() }));
-vi.mock('@/lib/deals', () => ({ ensureNextStep: vi.fn() }));
+vi.mock('@/lib/deal-next-step', () => ({ ensureNextStep: vi.fn() }));
 vi.mock('@/lib/records', () => ({ linksOfTask: vi.fn() }));
 import { updateTask } from '@/lib/tasks';
 

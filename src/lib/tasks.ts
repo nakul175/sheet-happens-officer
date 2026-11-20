@@ -3,7 +3,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { taskAccess } from "@/lib/task-access";
 export { taskAccess, recordAccess } from "@/lib/task-access";
 import { assertTaskReadable } from "@/lib/task-access";
-import { ensureNextStep } from "@/lib/deals";
+import { ensureNextStep } from "@/lib/deal-next-step";
 import { crmProjectWhere } from "@/lib/crm";
 import { linksOfTask } from "@/lib/records";
 import { db } from "@/lib/db";

@@ -3,7 +3,7 @@ const m=vi.hoisted(()=>({ access:vi.fn(), db:{user:{findUnique:vi.fn(),findMany:
 vi.mock("@/lib/db",()=>({db:m.db}));
 vi.mock("@/lib/access",async original=>({...await original<typeof import("@/lib/access")>(),projectAccess:m.access}));
 vi.mock("@/lib/notify",()=>({notify:m.notify,logAction:m.log,auditTx:vi.fn()}));
-vi.mock("@/lib/deals",()=>({ensureNextStep:vi.fn()}));
+vi.mock("@/lib/deal-next-step",()=>({ensureNextStep:vi.fn()}));
 vi.mock("@/lib/records",()=>({linksOfTask:vi.fn()}));
 import { addWorkspaceTaskMember, workspaceTaskPeople } from "@/lib/project-task-membership";
 import { assignTask, addCollaborator, createTask } from "@/lib/tasks";

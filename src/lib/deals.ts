@@ -14,11 +14,12 @@ import { orgOf } from "@/lib/orgs";
 import { taskAccess } from "@/lib/task-access";
 
 import { dealClassificationFields, type DealClassificationInput } from "@/lib/deal-classification";
+import { isWorking, WORKING_CATEGORIES } from "@/lib/deal-next-step";
+export { isWorking, ensureNextStep } from "@/lib/deal-next-step";
 
 export const STALL_DAYS = 30;
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 export const OPEN_CATEGORIES = ["NOT_STARTED", "ACTIVE", "PAUSED"] as const;
-const WORKING_CATEGORIES = ["NOT_STARTED", "ACTIVE"] as const; // "Needs a next step" and "Stalled" apply to these only
 
 export type Currency = "INR" | "USD" | "EUR";
 export type DealDetailsInput = DealClassificationInput & {
@@ -472,7 +473,6 @@ export async function dealSignals(projects: SummaryProject[]) {
   return none;
 }
 
-export const isWorking = (category: string | null | undefined) => !!category && (WORKING_CATEGORIES as readonly string[]).includes(category);
 export const isStalled = (category: string | null | undefined, lastActivity: Date, now = Date.now()) =>
   isWorking(category) && now - lastActivity.getTime() > STALL_DAYS * 86400_000;
 
@@ -553,20 +553,6 @@ export async function dealBlock(projectId: string, now = Date.now()) {
   };
 }
 
-
-/** SHO-US-12.5 AC2: when a working deal is left with no dated open task, the Leader gets one notice (none while an unread one stands). */
-export async function ensureNextStep(tx: Prisma.TransactionClient, projectId: string, actorId: string | null) {
-  // project-lookup-ok: Internal transaction invariant for an already-authorized task mutation or scheduled reminder.
-  const p = await tx.project.findUnique({ where: { id: projectId }, select: { name: true, typeId: true, archivedAt: true, stage: { select: { category: true } } } });
-  if (!p || p.typeId !== WORKSTREAM_DEAL || p.archivedAt || !isWorking(p.stage?.category)) return;
-  const open = await tx.task.count({ where: { projectId, deletedAt: null, completedAt: null, parentId: null, dueDate: { not: null } } });
-  if (open > 0) return;
-  const leader = await tx.projectMember.findFirst({ where: { projectId, role: "LEADER" }, select: { userId: true } });
-  if (!leader) return;
-  const unread = await tx.notification.count({ where: { recipientId: leader.userId, projectId, type: "DEAL_NEEDS_NEXT_STEP", readAt: null } });
-  if (unread) return;
-  await notify(tx, [leader.userId], "DEAL_NEEDS_NEXT_STEP", { actorId, projectId, data: { project: p.name }, includeActor: true });
-}
 
 export type PartyRoleName = "BUYER" | "FUNDER" | "IMPLEMENTING_OFFICE" | "PARTNER" | "OTHER";
 
