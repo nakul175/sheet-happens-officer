@@ -366,8 +366,21 @@ jobs:
           fi
           node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
 
-      - name: Upload shard counts
+      - name: Scan shard reports before upload
+        id: artifact_value_scan
         if: always()
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+          SHARD_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.nn)] }}
+          PEER_PASS: ${{ secrets[format('ZZ_TEST_{0}_PASS', matrix.peer)] }}
+        run: node scripts/ci/scan-artifact-values.mjs playwright-counts.json playwright-report.json blob-report
+
+      - name: Upload shard counts
+        if: always() && steps.artifact_value_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-counts-${{ matrix.nn }}
@@ -376,7 +389,7 @@ jobs:
           retention-days: 14
 
       - name: Upload the blob report
-        if: always()
+        if: always() && steps.artifact_value_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: blob-report-${{ matrix.nn }}
@@ -452,8 +465,19 @@ jobs:
           fi
           node scripts/ci/assert-playwright-ran.mjs --mode shard --report playwright-report.json --counts-out playwright-counts.json
 
-      - name: Upload serial counts
+      - name: Scan serial reports before upload
+        id: artifact_value_scan
         if: always()
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+        run: node scripts/ci/scan-artifact-values.mjs playwright-counts.json playwright-report.json blob-report
+
+      - name: Upload serial counts
+        if: always() && steps.artifact_value_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-counts-serial
@@ -462,7 +486,7 @@ jobs:
           retention-days: 14
 
       - name: Upload the blob report
-        if: always()
+        if: always() && steps.artifact_value_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: blob-report-serial
@@ -515,7 +539,19 @@ jobs:
           fi
           npx playwright merge-reports --reporter html ./all-blob-reports
 
+      - name: Scan merged HTML report before upload
+        id: artifact_value_scan
+        if: always()
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+        run: node scripts/ci/scan-artifact-values.mjs playwright-report
+
       - name: Upload the HTML report
+        if: always() && steps.artifact_value_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: staging-e2e-report

@@ -11,7 +11,7 @@ const scanner = fileURLToPath(new URL('./scan-artifact-values.mjs', import.meta.
 test('artifact upload is withheld on raw, encoded and symlinked secret content without printing values', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'sho-artifact-scan-'));
   const marker = 'synthetic-private-value/12345';
-  const run = () => spawnSync(process.execPath, [scanner, dir], {
+  const run = (target = dir) => spawnSync(process.execPath, [scanner, target], {
     encoding: 'utf8',
     env: { ...process.env, JOB_SECRET: marker, STAGING_USER: 'synthetic-user', STAGING_PASS: 'synthetic-password' },
   });
@@ -32,6 +32,23 @@ test('artifact upload is withheld on raw, encoded and symlinked secret content w
     const result = run();
     assert.equal(result.status, 1);
     assert.match(result.stderr, /ARTIFACT_SYMLINK/);
+    await rm(file);
+    const source = path.join(dir, 'archive-source');
+    await mkdir(source);
+    const report = path.join(source, 'report.json');
+    await writeFile(report, '{"ok":true}');
+    const archive = path.join(dir, 'report.zip');
+    const pack = () => spawnSync('zip', ['-q', '-FS', archive, 'report.json'], { cwd: source });
+    const packed = pack();
+    assert.equal(packed.status, 0);
+    assert.equal(run(archive).status, 0);
+    await writeFile(report, marker);
+    assert.equal(pack().status, 0);
+    await rm(source, { recursive: true });
+    const zipped = run(archive);
+    assert.equal(zipped.status, 1);
+    assert.match(zipped.stderr, /ARTIFACT_SECRET_MATCH/);
+    assert.doesNotMatch(zipped.stderr + zipped.stdout, /synthetic-private-value/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
