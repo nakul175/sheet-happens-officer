@@ -403,11 +403,12 @@ async function plan(row: any, user: Actor, projectId: string, tx?: Tx): Promise<
       if (f.previousRole === "REMOVE") throw bad("The previous Leader was removed from the project, so this cannot be undone here. Use Change Leader.");
       if (f.handedOver > 0) throw bad("Tasks were handed over with this change, so it cannot be undone. Use Change Leader.");
       const cur = await (tx ?? db).projectMember.findFirst({ where: { projectId, role: "LEADER" } });
+      if (!cur) throw bad("This project has no Leader. Ask an Admin to repair its membership.");
       return {
         conflicts: cur && cur.userId !== f.leaderId ? [{ field: "leaderId", before: b.leaderId, after: f.leaderId, now: cur.userId }] : [], subject: "the project Leader", fields: "Leader",
         apply: async (tx) => {
           if (!(await activeMember(tx, projectId, b.leaderId))) throw bad("The previous Leader is not an active member any more.");
-          await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: cur!.userId } }, data: { role: "EDITOR" } });
+          await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: cur.userId } }, data: { role: "EDITOR" } });
           await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: b.leaderId } }, data: { role: "LEADER" } });
         },
       };

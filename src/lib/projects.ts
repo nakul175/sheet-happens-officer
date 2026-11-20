@@ -531,7 +531,8 @@ export async function changeLeader(
 ) {
   const a = await projectAccess(user, projectId, { write: true });
   requireManage(a);
-  const old = a.project.members.find((m) => m.role === "LEADER")!;
+  const old = a.project.members.find((m) => m.role === "LEADER");
+  if (!old) throw new ApiError(409, "This project has no Leader. Ask an Admin to repair its membership.");
   if (input.newLeaderId === old.userId) throw new ApiError(400, "That person is already the Leader.");
   const next = await activeMember(db, projectId, input.newLeaderId);
   if (!next) throw new ApiError(400, "Choose an active member of this project.");

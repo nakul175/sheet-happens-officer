@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { db } from '@/lib/db';
 import { getOrCreateWorkspace } from '@/lib/workspace';
 import { changeLeader } from '@/lib/projects';
+import { undoAction } from '@/lib/undo';
 import type { Tx } from '@/lib/access';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
 vi.mock('next/server', () => ({ connection: vi.fn() }));
@@ -124,6 +125,27 @@ it('changes an eligible Leader once', async () => {
   expect(await roles(id)).toMatchObject({ [leader.id]: 'EDITOR', [candidate.id]: 'LEADER' });
   expect(await db.actionLog.count({ where: { projectId: id, action: 'project.leader_changed' } })).toBe(1);
   completed.push('valid-control');
+});
+it('returns a conflict without writing when a project has no current Leader', async () => {
+  const id = await fixture();
+  await db.projectMember.update({ where: { projectId_userId: { projectId: id, userId: leader.id } }, data: { role: 'EDITOR' } });
+  const before = await roles(id);
+  await expect(change(admin, id)).rejects.toMatchObject({ status: 409 });
+  expect(await roles(id)).toEqual(before);
+  expect(await db.actionLog.count({ where: { projectId: id, action: 'project.leader_changed' } })).toBe(0);
+  completed.push('missing-leader-change-conflict');
+});
+it('returns a conflict without claiming Undo when a changed Leader is now missing', async () => {
+  const id = await fixture();
+  await change(admin, id);
+  const action = await db.actionLog.findFirstOrThrow({ where: { projectId: id, action: 'project.leader_changed' } });
+  await db.projectMember.update({ where: { projectId_userId: { projectId: id, userId: candidate.id } }, data: { role: 'EDITOR' } });
+  const before = await roles(id);
+  await expect(undoAction(admin, action.id)).rejects.toMatchObject({ status: 409 });
+  expect(await roles(id)).toEqual(before);
+  expect((await db.actionLog.findUniqueOrThrow({ where: { id: action.id } })).undoneAt).toBeNull();
+  expect(await db.actionLog.count({ where: { projectId: id, action: 'undo' } })).toBe(0);
+  completed.push('missing-leader-undo-conflict');
 });
 it('returns a retryable conflict on a locked project, then changes the Leader once', async () => {
   const id = await fixture();
