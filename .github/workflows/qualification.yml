@@ -125,6 +125,22 @@ jobs:
       # SHO-2881. Every *.mode.test.ts file is excluded from `npm test` by one glob and run in this single loop.
       - name: Per-mode tests
         run: npm run test:modes -- --reporter=default --reporter=json --outputFile=test-results/modes.json
+      - name: Enable query counts on disposable audit PostgreSQL
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 385
+        env:
+          AUDIT_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$AUDIT_POSTGRES_CONTAINER" psql -U sho -d sho_test -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements'"
+          docker exec "$AUDIT_POSTGRES_CONTAINER" psql -U sho -d sho_test -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET pg_stat_statements.track_utility = off"
+          docker restart "$AUDIT_POSTGRES_CONTAINER"
+          ready=0
+          for i in $(seq 1 30); do
+            if docker exec "$AUDIT_POSTGRES_CONTAINER" pg_isready -U sho -d sho_test >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" -eq 1
+          docker exec "$AUDIT_POSTGRES_CONTAINER" psql -U sho -d sho_test -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"
+          docker exec "$AUDIT_POSTGRES_CONTAINER" psql -U sho -d sho_test -At -c "SHOW shared_preload_libraries" | grep -Fx pg_stat_statements
       - name: Start the app
         run: |
           # APL-2652: RETURN_PATH_LOG=1 makes the proxy log the return path it forwards, for tests/return-to.test.ts.
@@ -147,6 +163,8 @@ jobs:
             exit 1
           fi
       - name: Unit tests
+        env:
+          SHO_AUDIT_QUERY_STATS: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 385 && '1' || '0' }}
         run: npm test -- --reporter=default --reporter=json --outputFile=test-results/unit.json
       # Audit-only residue check: run the complete suite again against the same
       # disposable database and app process, retaining a separate report.

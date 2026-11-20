@@ -32,9 +32,15 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
  if(![database,base].every(u=>['localhost','127.0.0.1'].includes(u.hostname))||database.pathname!='/sho_test')throw Error('DISPOSABLE_LOOPBACK_FIXTURE_REQUIRED');
  const clockTicksPerSecond=process.platform==='linux'?Number(execFileSync('getconf',['CLK_TCK'],{encoding:'utf8'}).trim()):null;
  if(clockTicksPerSecond!==null&&(!Number.isFinite(clockTicksPerSecond)||clockTicksPerSecond<=0))throw Error('AUDIT_SERVER_CLOCK_UNAVAILABLE');
+ const queryStatsEnabled=process.env.SHO_AUDIT_QUERY_STATS==='1';
+ const resetQueryStats=async()=>{await db.$queryRaw`SELECT pg_stat_statements_reset()::text`;};
+ const queryCalls=async()=>{
+  const rows=await db.$queryRaw<{calls:bigint}[]>`SELECT COALESCE(SUM(calls),0)::bigint AS calls FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query NOT ILIKE '%pg_stat_statements%'`;
+  return Number(rows[0]?.calls??BigInt(0));
+ };
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
  const raw=randomBytes(32).toString('base64url');
- const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;concurrentEdits?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch,clockTicksPerSecond},measurements:[],cleanup:false,status:'INCOMPLETE'};
+ const report:{fixture:unknown;environment:unknown;measurements:unknown[];dealPaging?:unknown;dealCursorAfterArchive?:boolean;dealList?:unknown;concurrentEdits?:unknown;cleanup:boolean;status:string}={fixture:{projects:100,tasks:10000,eligibleDeals:1000,dealTasksAfterMyTasksMeasurement:10000,users:1},environment:{node:process.version,platform:process.platform,architecture:process.arch,clockTicksPerSecond,queryStatsEnabled},measurements:[],cleanup:false,status:'INCOMPLETE'};
  let created=false;
  const originalProjects=await db.project.count(),originalUsers=await db.user.count();
  const read=async(route:string)=>{
@@ -69,11 +75,14 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
     expect(first.groups?.needsNextStep.total).toBe(1000);
     expect(first.groups?.needsNextStep.items).toHaveLength(25);
    }
+   if(queryStatsEnabled)await resetQueryStats();
    const before=serverResource();
    for(let batch=0;batch<2;batch++)samples.push(...await Promise.all(Array.from({length:5},()=>read(route))));
    const after=serverResource();
+   const databaseStatements=queryStatsEnabled?await queryCalls():null;
+   if(queryStatsEnabled)expect(databaseStatements,`database statements for ${route}`).toBeGreaterThan(0);
    const sorted=samples.map(x=>x.ms).sort((a,b)=>a-b);
-   const measurement={route:route.startsWith('/api/search')?'/api/search?q=<fixture>':route.startsWith('/api/projects/')?'/api/projects/<fixture>':route,concurrency:5,samples:sorted.length,firstRequestMs:Math.round(first.ms),p50Ms:Math.round(sorted[4]),p95Ms:Math.round(sorted[9]),maxBytes:Math.max(first.bytes,...samples.map(x=>x.bytes)),serverResource:before&&after&&clockTicksPerSecond?{cpuMs:Math.round((after.cpuTicks-before.cpuTicks)*1000/clockTicksPerSecond),rssBeforeKiB:before.rssKiB,rssAfterKiB:after.rssKiB,highWaterKiB:after.highWaterKiB}:null};
+   const measurement={route:route.startsWith('/api/search')?'/api/search?q=<fixture>':route.startsWith('/api/projects/')?'/api/projects/<fixture>':route,concurrency:5,samples:sorted.length,firstRequestMs:Math.round(first.ms),p50Ms:Math.round(sorted[4]),p95Ms:Math.round(sorted[9]),maxBytes:Math.max(first.bytes,...samples.map(x=>x.bytes)),databaseStatements,serverResource:before&&after&&clockTicksPerSecond?{cpuMs:Math.round((after.cpuTicks-before.cpuTicks)*1000/clockTicksPerSecond),rssBeforeKiB:before.rssKiB,rssAfterKiB:after.rssKiB,highWaterKiB:after.highWaterKiB}:null};
    report.measurements.push(measurement);
    if(route==='/api/my-tasks?v=2'){
     expect(measurement.maxBytes,'approved My Tasks initial response budget').toBeLessThanOrEqual(512*1024);
