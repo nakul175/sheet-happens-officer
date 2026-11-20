@@ -1,12 +1,16 @@
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const secretNames = ['DATABASE_URL', 'DIRECT_DATABASE_URL', 'JOB_SECRET', 'SUITE_ACCOUNTS_CLIENT_SECRET', 'SUITE_BUGOFF_CLIENT_SECRET', 'STAGING_PASS', 'SHO_ADMIN_PASS', 'SHO_MEMBER_PASS', 'SHO_QA_PASS', 'SHARD_PASS'];
-const values = [...new Set(secretNames.flatMap((name) => {
+const secretNames = ['DATABASE_URL', 'DIRECT_DATABASE_URL', 'JOB_SECRET', 'SUITE_ACCOUNTS_CLIENT_SECRET', 'SUITE_BUGOFF_CLIENT_SECRET', 'STAGING_PASS', 'SHO_ADMIN_PASS', 'SHO_MEMBER_PASS', 'SHO_QA_PASS', 'SHARD_PASS', 'PEER_PASS'];
+const configured = secretNames.flatMap((name) => {
   const value = process.env[name];
-  if (!value || value.length < 12) return [];
-  return [value, encodeURIComponent(value)].filter((item) => item.length >= 12);
-}))].map((value) => Buffer.from(value));
+  if (!value) return [];
+  return [value, encodeURIComponent(value)];
+});
+if (process.env.STAGING_USER && process.env.STAGING_PASS) {
+  configured.push(Buffer.from(`${process.env.STAGING_USER}:${process.env.STAGING_PASS}`).toString('base64'));
+}
+const values = [...new Set(configured)].map((value) => Buffer.from(value));
 
 async function scan(target) {
   let stat;

@@ -13,14 +13,14 @@ test('artifact upload is withheld on raw, encoded and symlinked secret content w
   const marker = 'synthetic-private-value/12345';
   const run = () => spawnSync(process.execPath, [scanner, dir], {
     encoding: 'utf8',
-    env: { ...process.env, JOB_SECRET: marker },
+    env: { ...process.env, JOB_SECRET: marker, STAGING_USER: 'synthetic-user', STAGING_PASS: 'synthetic-password' },
   });
   try {
     await mkdir(path.join(dir, 'nested'));
     const file = path.join(dir, 'nested', 'result.json');
     await writeFile(file, '{"ok":true}');
     assert.equal(run().status, 0);
-    for (const value of [marker, encodeURIComponent(marker)]) {
+    for (const value of [marker, encodeURIComponent(marker), Buffer.from('synthetic-user:synthetic-password').toString('base64')]) {
       await writeFile(file, value);
       const result = run();
       assert.equal(result.status, 1);
