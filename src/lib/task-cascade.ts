@@ -32,4 +32,3 @@ export async function cascadedSubtaskIds(tx: Tx, projectId: string, parents: { i
     return !!s.completedAt && at.get(s.parentId) === s.completedAt.getTime();
   }).map((s) => s.id);
 }
-
