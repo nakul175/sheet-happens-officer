@@ -168,7 +168,7 @@ jobs:
       # Audit-only residue check: run the complete suite again against the same
       # disposable database and app process, retaining a separate report.
       - name: Repeat unit tests on same disposable database (audit candidate)
-        if: ${{ github.event.pull_request.head.ref == 'codex/sho-handover-hardening-7c4a' }}
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 385 }}
         run: npm test -- --reporter=default --reporter=json --outputFile=test-results/unit-repeat.json
       - name: Deal filter browser regression
         run: npx vitest run -c vitest.deal-filters.config.mts --reporter=default --reporter=json --outputFile=test-results/deal-filters.json
