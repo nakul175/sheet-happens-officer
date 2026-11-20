@@ -4,9 +4,10 @@
 // the projects and deactivates the people. Self-signup only accepts @aplyd.com, so the alias is
 // nakul17+…@aplyd.com.
 import { afterAll, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
 import { account, superAdmin, task, withVersion, type Account } from "./helpers";
+import { writeApprover500Diagnostic } from "./approver-error-diagnostic";
 
 type Note = { id: string; text: string; href: string; createdAt: string };
 type BoardTask = { id: string; canClose: boolean; sectionId: string; completedAt: string | null };
@@ -132,13 +133,7 @@ describe("APL-2660 approver edge cases", () => {
       // Match the handler's random error ID to this response; concurrent tests
       // can write to the same log interval. Never retain raw log text.
       if (response.status === 500) {
-        const logPresent = existsSync('server.log');
-        const recent = logPresent ? readFileSync('server.log').subarray(logOffset).toString() : '';
-        const errorId = response.headers.get('x-error-id');
-        const matches = [...recent.matchAll(/unexpected error (P\d{4}(?:\/(?:08|22|23|25|28|40|42|53|55|57|58|XX)[0-9A-Z]{3})?|(?:08|22|23|25|28|40|42|53|55|57|58|XX)[0-9A-Z]{3}|UNKNOWN) ([0-9a-f-]{36})/g)];
-        const safeCodes = errorId ? matches.filter(match => match[2] === errorId).map(match => match[1]) : [];
-        mkdirSync('test-results/approver-valid-swap', { recursive: true });
-        writeFileSync('test-results/approver-valid-swap/diagnostic.json', JSON.stringify({ status: 500, errorId: errorId && /^[0-9a-f-]{36}$/.test(errorId) ? errorId : null, safeCodes, logPresent, logBytesSinceRequest: Buffer.byteLength(recent), attribution: safeCodes.length ? 'matched response ID' : logPresent ? 'no matching sanitized server line' : 'server log unavailable' }, null, 2));
+        writeApprover500Diagnostic(response.headers.get('x-error-id'), logOffset);
       }
       return response;
     };
