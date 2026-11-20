@@ -35,7 +35,7 @@ it('records local API latency for 10,000 tasks / 1,000 eligible deals and cleans
  const queryStatsEnabled=process.env.SHO_AUDIT_QUERY_STATS==='1';
  const resetQueryStats=async()=>{await db.$queryRaw`SELECT pg_stat_statements_reset()::text`;};
  const queryCalls=async()=>{
-  const rows=await db.$queryRaw<{calls:bigint}[]>`SELECT COALESCE(SUM(calls),0)::bigint AS calls FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query NOT ILIKE '%pg_stat_statements%'`;
+  const rows=await db.$queryRaw<{calls:bigint}[]>`SELECT COALESCE(SUM(calls),0)::bigint AS calls FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query ~* '^[[:space:]]*(SELECT|INSERT|UPDATE|DELETE|MERGE|WITH)[[:space:]]' AND query NOT ILIKE '%pg_stat_statements%'`;
   return Number(rows[0]?.calls??BigInt(0));
  };
  const id='perf-'+randomUUID(),projectIds:string[]=[],dealIds:string[]=[];
