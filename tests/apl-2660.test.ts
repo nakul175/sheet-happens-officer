@@ -133,7 +133,7 @@ describe("APL-2660 approver edge cases", () => {
       // Match the handler's random error ID to this response; concurrent tests
       // can write to the same log interval. Never retain raw log text.
       if (response.status === 500) {
-        writeApprover500Diagnostic(response.headers.get('x-error-id'), logOffset);
+        await writeApprover500Diagnostic(response.headers.get('x-error-id'), logOffset);
       }
       return response;
     };
