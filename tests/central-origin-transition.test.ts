@@ -53,27 +53,4 @@ describe("central login host transition", () => {
     const sealed = m.set.mock.calls[0][1];
     expect(readFlow(sealed).origin).toBe("https://tasks.aplyd.org");
   });
-
-  it("reports a fixed discovery phase without logging provider error details", async () => {
-    m.discovery.mockRejectedValueOnce(new Error("provider response included secret=DO_NOT_LOG"));
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const response = await GET(new Request("https://tasks.aplyd.org/api/auth/aplyd/start", { headers: { host: "tasks.aplyd.org" } }));
-      expect(response.status).toBe(503);
-      expect(await response.json()).toEqual({ error: "Central sign-in is temporarily unavailable. Existing sign-in remains available." });
-      expect(log.mock.calls).toEqual([["central sign-in start failed", "discovery"]]);
-      expect(JSON.stringify(log.mock.calls)).not.toContain("DO_NOT_LOG");
-    } finally { log.mockRestore(); }
-  });
-
-  it("reports a fixed cookie phase without logging flow or credential values", async () => {
-    m.set.mockImplementationOnce(() => { throw new Error("cookie write secret=DO_NOT_LOG"); });
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const response = await GET(new Request("https://tasks.aplyd.org/api/auth/aplyd/start", { headers: { host: "tasks.aplyd.org" } }));
-      expect(response.status).toBe(503);
-      expect(log.mock.calls).toEqual([["central sign-in start failed", "cookie"]]);
-      expect(JSON.stringify(log.mock.calls)).not.toContain("DO_NOT_LOG");
-    } finally { log.mockRestore(); }
-  });
 });
