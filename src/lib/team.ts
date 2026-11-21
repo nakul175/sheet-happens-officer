@@ -60,12 +60,40 @@ export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" 
   if (isSuper(target)) throw new ApiError(403, "The Super Admin role is set in server configuration only.");
   if (!isActive(target)) throw new ApiError(409, "Only active people can change role.");
   if (target.orgRole === role) return target;
-  await db.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: targetId }, data: { orgRole: role } });
+  return db.$transaction(async (tx) => {
+    try {
+      for (const personId of [...new Set([actor.id, targetId])].sort()) {
+        if (personId === targetId) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR UPDATE NOWAIT`;
+        else await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const [currentActor, currentTarget] = await Promise.all([
+      tx.user.findUnique({ where: { id: actor.id } }),
+      tx.user.findUnique({ where: { id: targetId } }),
+    ]);
+    if (!currentActor || !isActive(currentActor) || currentActor.orgRole !== "SUPER_ADMIN") {
+      throw new ApiError(403, "Only the Super Admin can change roles.");
+    }
+    if (!currentTarget || currentTarget.workspaceId !== currentActor.workspaceId) throw notFound("Person");
+    if (multiWorkspaceEnabled()) {
+      if (currentActor.workspaceId !== actor.workspaceId || await tx.workspaceMembership.count({ where: { userId: targetId } })) {
+        throw new ApiError(403, "Manage this account through Aplyd.");
+      }
+    }
+    if (isSuper(currentTarget)) throw new ApiError(403, "The Super Admin role is set in server configuration only.");
+    if (!isActive(currentTarget)) throw new ApiError(409, "Only active people can change role.");
+    if (currentTarget.orgRole === role) return currentTarget;
+    const updated = await tx.user.update({ where: { id: targetId }, data: { orgRole: role } });
     await notify(tx, [targetId], "ORG_ROLE_CHANGED", { actorId: actor.id, data: { role } });
     await auditTx(tx, role === "ADMIN" ? "ADMIN_PROMOTED" : "ADMIN_DEMOTED", { actorId: actor.id, targetId, data: { role } });
+    return updated;
   });
-  return { ...target, orgRole: role };
 }
 
 export function mayAct(actor: Actor, target: { orgRole: string; email: string }) {
