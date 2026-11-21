@@ -799,9 +799,24 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
     if (current.projectId !== t.projectId || current.updatedAt.getTime() !== t.updatedAt.getTime()) {
       throw new ApiError(409, "This task changed. Reload before converting it.", { stale: true });
     }
+    try {
+      for (const personId of [...new Set([user.id, leader.id])].sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Deal people are changing. Reload and try again.");
+      }
+      throw error;
+    }
     const actor = await tx.user.findUnique({ where: { id: user.id } });
     if (!actor || !isActive(actor) || actor.workspaceId !== current.workspaceId) throw new ApiError(401, "Sign in with an active account.");
     requireCrm(actor);
+    const currentLeader = await tx.user.findUnique({ where: { id: leader.id } });
+    if (!currentLeader || !isActive(currentLeader) || currentLeader.workspaceId !== actor.workspaceId) {
+      throw new ApiError(400, "Choose an active person as Leader.");
+    }
     const freshAccess = await taskAccess({ ...user, orgRole: actor.orgRole }, current.projectId, { write: true, tx });
     requireWrite(freshAccess);
     if (freshAccess.project.typeId === WORKSTREAM_DEAL || current.parentId || current.completedAt || (current.approverId && current.assigneeId === current.approverId)) {

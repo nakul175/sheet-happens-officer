@@ -12,6 +12,7 @@ vi.mock('next/server', () => ({ connection: vi.fn() }));
 
 const prefix = 'conversion-race-' + randomUUID();
 const actor = { id: prefix + '-leader', orgRole: 'MEMBER' as const };
+const chosenLeaderId = prefix + '-chosen-leader';
 let safe = false, workspaceId: string, sourceId: string, sectionId: string, sentinelId: string, taskId: string, organisationId: string, pipelineId: string;
 const completed: string[] = [];
 
@@ -23,6 +24,7 @@ beforeAll(async () => {
   if (!pipeline?.stages.length) throw new Error('Disposable deal pipeline seed is incomplete.');
   pipelineId = pipeline.id;
   await db.user.create({ data: { id: actor.id, workspaceId, name: prefix, email: prefix + '@example.invalid', passwordHash: 'unused', emailVerifiedAt: new Date() } });
+  await db.user.create({ data: { id: chosenLeaderId, workspaceId, name: prefix + '-chosen-leader', email: prefix + '-chosen-leader@example.invalid', passwordHash: 'unused', emailVerifiedAt: new Date() } });
   sentinelId = (await db.project.create({ data: { workspaceId, name: prefix + '-sentinel' } })).id;
   sourceId = (await db.project.create({ data: { workspaceId, name: prefix + '-source' } })).id;
   await db.projectMember.create({ data: { projectId: sourceId, userId: actor.id, role: 'LEADER' } });
@@ -45,7 +47,7 @@ afterAll(async () => {
     await db.auditLog.deleteMany({ where: { actorId: actor.id } });
     await db.project.deleteMany({ where: { id: { in: ids } } });
     await db.organisation.deleteMany({ where: { id: organisationId } });
-    await db.user.delete({ where: { id: actor.id } });
+    await db.user.deleteMany({ where: { id: { in: [actor.id, chosenLeaderId] } } });
     expect(await db.project.count({ where: { id: { in: ids } } })).toBe(0);
     cleanup = true;
   } finally {
@@ -151,6 +153,25 @@ it('rejects a buyer archived after preflight without creating a deal', async () 
     pause.release();
     await pending.catch(() => undefined);
     await db.organisation.update({ where: { id: organisationId }, data: { archivedAt: null } });
+  }
+});
+
+it('rejects a chosen Leader deactivated after preflight without creating a deal', async () => {
+  const task = await freshTask('inactive-leader');
+  const pause = pauseBeforeTransactions(1);
+  const pending = convertTaskToDeal(actor, task.id, { organisationId, pipelineId, leaderId: chosenLeaderId, whyPursue: 'Fits our work', dueDate: '2026-11-30' });
+  try {
+    await pause.ready();
+    await db.user.update({ where: { id: chosenLeaderId }, data: { deactivatedAt: new Date() } });
+    pause.release();
+    await expect(pending).rejects.toMatchObject({ status: 400 });
+    expect((await db.task.findUniqueOrThrow({ where: { id: task.id } })).projectId).toBe(sourceId);
+    expect(await db.project.count({ where: { workspaceId, name: task.title, typeId: 'wst_deal' } })).toBe(0);
+    completed.push('inactive-chosen-leader-denied');
+  } finally {
+    pause.release();
+    await pending.catch(() => undefined);
+    await db.user.update({ where: { id: chosenLeaderId }, data: { deactivatedAt: null } });
   }
 });
 
