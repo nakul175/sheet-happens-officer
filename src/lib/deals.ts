@@ -371,6 +371,17 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
     // not the ON DELETE SET NULL foreign key, prevents a concurrent move from leaving stageId silently cleared.
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Stage" WHERE "id" = ${stage.id} FOR UPDATE`;
     if (!locked.length) throw notFound("Stage");
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor) || actor.orgRole !== "SUPER_ADMIN") throw notFound("Stage");
+    requireCrm(actor);
     // A reason was given for the removed stage. It carries over only to a stage that also asks for one.
     const moved = await tx.project.updateMany({
       where: { stageId: stage.id },
