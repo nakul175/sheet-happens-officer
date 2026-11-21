@@ -90,3 +90,26 @@ it("denies reactivation after the target gains an additional workspace membershi
     expect(await db.auditLog.count({ where: { actorId: actor.id, targetId: id, event: "USER_REACTIVATED" } })).toBe(0);
   } finally { pause.release(); await pending; }
 });
+
+it("holds a new membership insert behind the target account lock", async () => {
+  const id = await target(false);
+  let locked!: () => void;
+  let release!: () => void;
+  const lockReady = new Promise<void>((resolve) => { locked = resolve; });
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const locking = db.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${id} FOR UPDATE NOWAIT`;
+    expect(await tx.workspaceMembership.count({ where: { userId: id } })).toBe(0);
+    locked();
+    await held;
+  });
+  try {
+    await lockReady;
+    const blocked = await db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '250ms'");
+      await tx.$executeRaw`INSERT INTO "WorkspaceMembership" ("userId", "workspaceId", "role") VALUES (${id}, ${otherWorkspaceId}, 'MEMBER')`;
+    }).then(() => null, (error: { code?: string; meta?: { code?: string } }) => error);
+    expect(blocked).toMatchObject({ code: "P2010", meta: { code: "55P03" } });
+    expect(await db.workspaceMembership.count({ where: { userId: id } })).toBe(0);
+  } finally { release(); await locking; }
+});
