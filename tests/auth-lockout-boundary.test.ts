@@ -7,6 +7,8 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { account, BASE, OUTBOX, PW, type Account } from './helpers';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
+
+vi.mock('next/server', () => ({ connection: vi.fn() }));
 import { POST as signIn } from '@/app/api/auth/signin/route';
 
 const prefix = `zzlockout${randomUUID().replaceAll('-', '')}`;
