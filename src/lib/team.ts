@@ -273,14 +273,43 @@ export async function resendSignIn(actor: Actor & { name?: string }, targetId: s
   if (target.id === actor.id) throw new ApiError(409, "Use Profile to change your own password.");
   if (target.deactivatedAt) throw new ApiError(409, "Reactivate this person first.");
   const password = generatePassword();
+  const passwordHash = await hashPassword(password);
   const now = new Date();
-  await db.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: targetId }, data: { passwordHash: await hashPassword(password), tempPasswordAt: now, emailVerifiedAt: target.emailVerifiedAt ?? now } });
+  const currentTarget = await db.$transaction(async (tx) => {
+    try {
+      for (const personId of [...new Set([actor.id, targetId])].sort()) {
+        if (personId === targetId) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR UPDATE NOWAIT`;
+        else await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const [currentActor, currentTarget] = await Promise.all([
+      tx.user.findUnique({ where: { id: actor.id } }),
+      tx.user.findUnique({ where: { id: targetId } }),
+    ]);
+    if (!currentActor || !isActive(currentActor) || currentActor.orgRole !== "SUPER_ADMIN") {
+      throw new ApiError(403, "Only the Super Admin can resend sign-in details.");
+    }
+    if (!currentTarget || currentTarget.workspaceId !== currentActor.workspaceId) throw notFound("Person");
+    if (multiWorkspaceEnabled()) {
+      if (currentActor.workspaceId !== actor.workspaceId || await tx.workspaceMembership.count({ where: { userId: targetId } })) {
+        throw new ApiError(403, "Manage this account through Aplyd.");
+      }
+    }
+    if (currentTarget.id === currentActor.id) throw new ApiError(409, "Use Profile to change your own password.");
+    if (currentTarget.deactivatedAt) throw new ApiError(409, "Reactivate this person first.");
+    await tx.user.update({ where: { id: targetId }, data: { passwordHash, tempPasswordAt: now, emailVerifiedAt: currentTarget.emailVerifiedAt ?? now } });
     await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: now } });
-    await tx.loginAttempt.deleteMany({ where: { email: target.email } });
+    await tx.loginAttempt.deleteMany({ where: { email: currentTarget.email } });
     await auditTx(tx, "USER_SIGNIN_RESENT", { actorId: actor.id, targetId });
+    return currentTarget;
   });
-  const emailSent = await sendDetails(target.email, target.name.split(" ")[0], actor.name ?? "A Super Admin", password);
+  const emailSent = await sendDetails(currentTarget.email, currentTarget.name.split(" ")[0], actor.name ?? "A Super Admin", password);
   return { emailSent };
 }
 
