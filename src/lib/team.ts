@@ -233,14 +233,29 @@ const workspace = multiWorkspaceEnabled()
     ? await db.workspace.findUniqueOrThrow({ where: { id: actor.workspaceId! } })
     : await getOrCreateWorkspace();
   const password = generatePassword();
+  const passwordHash = await hashPassword(password);
   const now = new Date();
   const user = await db.$transaction(async (tx) => {
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${actor.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const currentActor = await tx.user.findUnique({ where: { id: actor.id } });
+    if (!currentActor || !isActive(currentActor) || currentActor.orgRole !== "SUPER_ADMIN" ||
+        (multiWorkspaceEnabled() && currentActor.workspaceId !== actor.workspaceId)) {
+      throw new ApiError(403, "Only the Super Admin can add people.");
+    }
     const u = await tx.user.create({
       data: {
         workspaceId: workspace.id,
         email: input.email,
         name: `${input.firstName} ${input.lastName}`,
-        passwordHash: await hashPassword(password),
+        passwordHash,
         emailVerifiedAt: now,
         tempPasswordAt: now,
         // A listed Super Admin address stays Super Admin whatever role was picked (SHO-US-2.1 AC3).
