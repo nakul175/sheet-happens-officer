@@ -39,7 +39,7 @@ describe("SHO-3137 Concierge removal", () => {
   });
 
   it.each(["MEMBER", "ADMIN", "SUPER_ADMIN"] as const)("keeps task/navigation controls for %s without assistant controls or reserved space", (orgRole) => {
-    const html = renderToStaticMarkup(<Shell user={{ id: "me", name: "Test Person", email: "test@example.invalid", orgRole, crm: true }}>
+    const html = renderToStaticMarkup(<Shell initialAuthorityRevision={"a".repeat(64)} user={{ id: "me", name: "Test Person", email: "test@example.invalid", orgRole, crm: true }}>
       <Page title="My tasks"><button>Task action</button></Page>
     </Shell>);
     expect(html).toContain("My tasks");

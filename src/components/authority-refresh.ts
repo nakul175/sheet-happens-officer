@@ -4,12 +4,13 @@ export const AUTHORITY_CHANGED = "sho:authority-changed";
 export const AUTHORITY_INTERVAL_MS = 10_000;
 
 /** One foreground watcher per authenticated shell, with bounded requests.
- * First observation also invalidates: the screen may predate the first poll.
+ * The first observation invalidates only if it differs from the server-rendered
+ * revision (or no seed was supplied). A screen can still predate the first poll.
  * A timeout is not a revocation; existing API handlers remain authoritative.
  */
-export function watchAuthority(onChange: () => void) {
+export function watchAuthority(onChange: () => void, initialRevision?: string) {
   let stopped = false;
-  let revision: string | null = null;
+  let revision: string | null = initialRevision && /^[a-f0-9]{64}$/.test(initialRevision) ? initialRevision : null;
   let inFlight: AbortController | null = null;
   async function check() {
     if (stopped || inFlight || document.visibilityState === "hidden") return;

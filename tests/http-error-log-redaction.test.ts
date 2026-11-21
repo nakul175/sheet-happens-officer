@@ -1,0 +1,68 @@
+import { afterEach, expect, it, vi } from "vitest";
+
+vi.mock("next/server", () => ({ connection: async () => {} }));
+import { handle } from "@/lib/http";
+
+afterEach(() => vi.restoreAllMocks());
+
+it("unexpected 500s never log untrusted error names, codes or messages", async () => {
+  const marker = "ZZ-TEST-PRIVATE-REQUEST-MARKER";
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await handle(async () => {
+    throw Object.assign(new Error(`message ${marker}`), { name: `name ${marker}`, code: `code ${marker}` });
+  })();
+  expect(response.status).toBe(500);
+  const errorId = response.headers.get("x-error-id");
+  expect(errorId).toMatch(/^[0-9a-f-]{36}$/);
+  const body = await response.text();
+  const lines = log.mock.calls.map((call) => call.join(" ")).join(" ");
+  expect(body).not.toContain(marker);
+  expect(lines).not.toContain(marker);
+  expect(lines).toContain(`unexpected error UNKNOWN ${errorId}`);
+  expect(body).not.toContain(errorId!);
+});
+
+it("separates unexpected requests and leaves mapped errors without a diagnostic ID", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const run = handle(async () => { throw Object.assign(new Error("private"), { code: "P2010" }); });
+  const first = await run(), second = await run();
+  const ids = [first.headers.get("x-error-id"), second.headers.get("x-error-id")];
+  expect(ids[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(ids[1]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(ids[0]).not.toBe(ids[1]);
+  expect(log.mock.calls.map((call) => call.join(" "))).toEqual(ids.map((id) => `unexpected error P2010 ${id}`));
+  const mapped = await handle(async () => { throw Object.assign(new Error("private"), { code: "P2002" }); })();
+  expect(mapped.status).toBe(409);
+  expect(mapped.headers.has("x-error-id")).toBe(false);
+});
+
+it("records a PostgreSQL SQLSTATE without exposing the error text or code to the client", async () => {
+  const marker = "ZZ-TEST-PRIVATE-SQL-PARAMETER";
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const response = await handle(async () => {
+    throw Object.assign(new Error(marker), { code: "40P01" });
+  })();
+  const errorId = response.headers.get("x-error-id");
+  expect(response.status).toBe(500);
+  expect(log.mock.calls.map((call) => call.join(" "))).toEqual([`unexpected error 40P01 ${errorId}`]);
+  expect(await response.text()).not.toMatch(/40P01|ZZ-TEST-PRIVATE-SQL-PARAMETER/);
+  const untrusted = await handle(async () => {
+    throw Object.assign(new Error(marker), { code: "ABCDE" });
+  })();
+  expect(log.mock.calls.at(-1)?.[1]).toBe("UNKNOWN");
+  expect(await untrusted.text()).not.toContain(marker);
+});
+
+it("correlates a Prisma raw-query code with a validated nested SQLSTATE only", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  const marker = "ZZ-TEST-PRIVATE-QUERY-VALUE";
+  const run = (state: string) => handle(async () => {
+    throw Object.assign(new Error(marker), { code: "P2010", meta: { code: state, message: marker } });
+  })();
+  const safe = await run("40P01");
+  expect(log.mock.calls.at(-1)?.[1]).toBe("P2010/40P01");
+  expect(await safe.text()).not.toMatch(/40P01|P2010|ZZ-TEST-PRIVATE-QUERY-VALUE/);
+  const unsafe = await run(marker);
+  expect(log.mock.calls.at(-1)?.[1]).toBe("P2010");
+  expect(await unsafe.text()).not.toContain(marker);
+});

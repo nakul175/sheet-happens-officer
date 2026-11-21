@@ -1,11 +1,17 @@
 import { invitedNativeId, invitedSessionsEnabled } from "@/lib/invited-central-identity";
-import { randomBytes, createHash } from "node:crypto";
+import { assertWorkspaceUser } from "@/lib/workspace";
+import { multiWorkspaceEnabled } from "@/lib/workspace-authority";
+import { randomBytes, createHash, createHmac } from "node:crypto";
 import { cookies } from "next/headers";
 import { centralSessionActive } from "@/lib/central-status";
-import { holyQaIdentity } from "@/lib/holy-qa-identity";
+import { holyQaIdentity, centralIdentitySecret } from "@/lib/holy-qa-identity";
 import { db } from "@/lib/db";
 export async function attachCentralSession(sourceSessionId: string, userId: string, subject: string, sessionUid: string) {
-    const token = randomBytes(32).toString("base64url");
+    // Preserve the live token derivation during the legacy-to-Tasks host transition.
+    // Both hosts must attach the same Accounts session without rotating either cookie.
+    const token = createHmac("sha256", centralIdentitySecret())
+        .update(JSON.stringify(["tasks-source-session-v1", sourceSessionId, userId, subject, sessionUid]))
+        .digest("base64url");
     const expires = await db.$transaction(async (tx) => {
         const session = await tx.session.findUnique({ where: { id: sourceSessionId }, include: { user: true, centralLink: true } });
         const user = session?.user;
@@ -13,6 +19,7 @@ export async function attachCentralSession(sourceSessionId: string, userId: stri
             !user || user.deactivatedAt || !user.emailVerifiedAt || user.tempPasswordAt ||
             (session.centralLink && session.centralLink.subject !== subject))
             throw new Error("Source session unavailable");
+        if (!multiWorkspaceEnabled()) await assertWorkspaceUser(user.workspaceId, tx);
         const changed = await tx.session.updateMany({ where: { id: sourceSessionId, userId, revokedAt: null, expiresAt: { gt: new Date() } },
             data: { tokenHash: createHash("sha256").update(token).digest("hex") } });
         if (changed.count !== 1)
@@ -34,6 +41,7 @@ export async function attachQaCentralSession(userId: string, subject: string, se
         const user = await tx.user.findUnique({ where: { id: userId } });
         if (!user || user.deactivatedAt || !user.emailVerifiedAt || user.tempPasswordAt)
             throw Error('Account unavailable');
+        if (!multiWorkspaceEnabled()) await assertWorkspaceUser(user.workspaceId, tx);
         await tx.session.create({ data: { userId, tokenHash: createHash('sha256').update(token).digest('hex'), expiresAt: expires, centralLink: { create: { subject, sessionUid } } } });
     });
     (await cookies()).set('sho_session', token, { httpOnly: true, sameSite: 'lax', path: '/', expires, secure: true });

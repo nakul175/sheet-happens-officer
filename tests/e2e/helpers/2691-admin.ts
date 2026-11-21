@@ -2,6 +2,7 @@
 // keeps the existing credential contract; production is refused by support/base-url.
 import { api, BASE_URL, expect, login, type Who } from "../support";
 import { test as strictTest } from "../stories/qa";
+import { auditLoopbackIgnoreHTTPSErrors } from "../base-url";
 export const local2691 = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(BASE_URL).hostname);
 export const test = strictTest.extend<{ admin: Who }>({
   admin: async ({ browser }, use) => {
@@ -15,6 +16,7 @@ export const test = strictTest.extend<{ admin: Who }>({
       expect((await root.c.post("/api/auth/signout")).status).toBe(204);
     } else ({ email, password } = login("ADMIN"));
     const context = await browser.newContext({ baseURL: BASE_URL,
+      ignoreHTTPSErrors: auditLoopbackIgnoreHTTPSErrors(),
       httpCredentials: process.env.STAGING_USER ? { username: process.env.STAGING_USER, password: process.env.STAGING_PASS ?? "" } : undefined });
     try {
       const response = await context.request.post("/api/auth/signin", { data: { email, password } });

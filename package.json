@@ -1,5 +1,5 @@
 {
-  "name": "taskboard",
+  "name": "tasks-by-aplyd",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -19,7 +19,7 @@
     "@aplyd/holy-sheet-editor": "file:vendor/aplyd-holy-sheet-editor-0.1.0-holy3.4.tgz",
     "@prisma/client": "^6.19.3",
     "koffi": "^3.3.3",
-    "next": "16.4.2",
+    "next": "16.4.6",
     "openid-client": "6.8.8",
     "pg-connection-string": "^2.14.1",
     "prisma": "^6.19.3",
@@ -37,12 +37,21 @@
     "axe-core": "^4.14.0",
     "dotenv": "^18.0.8",
     "eslint": "^9",
-    "eslint-config-next": "16.4.2",
+    "eslint-config-next": "16.4.6",
     "jsdom": "^29.1.1",
     "pg": "^8.23.1",
     "playwright-core": "^1.64.1",
     "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.0",
+      "effect": "3.22.1"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.1"
+    }
   }
 }

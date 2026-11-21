@@ -1,17 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import localFont from "next/font/local";
 import "./globals.css";
-
-const publicSans = localFont({
-  src: [
-    { path: "./fonts/PublicSans-Regular.woff2", weight: "400", style: "normal" },
-    { path: "./fonts/PublicSans-Medium.woff2", weight: "500", style: "normal" },
-    { path: "./fonts/PublicSans-SemiBold.woff2", weight: "600", style: "normal" },
-  ],
-  variable: "--font-public-sans",
-  display: "swap",
-  adjustFontFallback: "Arial",
-});
 
 export const metadata: Metadata = {
   title: "Tasks by aplyd",
@@ -29,7 +17,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={publicSans.variable}>
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

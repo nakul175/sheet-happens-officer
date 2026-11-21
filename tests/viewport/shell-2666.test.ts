@@ -1,20 +1,21 @@
 // Local test database only. Exercise real routing/session behavior after the Shell lint fixes.
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright-core";
 import { account, BASE, PW, superAdmin, type Account } from "../helpers";
+import { requireLocalFixtures } from "./screen-ready";
 
 let browser: Browser;
 let person: Account;
 
 beforeAll(async () => {
-  if (!["localhost", "127.0.0.1"].includes(new URL(BASE).hostname)) {
-    throw new Error("SHO-2666 Shell regressions require a local test server.");
-  }
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   person = await account("shell2666", `nakul17+zz-shell-2666-${Date.now()}@aplyd.com`, "ZZ-TEST Shell 2666");
 });
 
 afterAll(async () => {
+  let cleanup = false;
   try {
     if (person) {
       const root = await superAdmin();
@@ -22,7 +23,12 @@ afterAll(async () => {
         expect((await root.c.post(`/api/team/${person.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
       } finally { await root.c.post("/api/auth/signout"); }
     }
-  } finally { await browser?.close(); }
+    cleanup = true;
+  } finally {
+    await browser?.close();
+    mkdirSync("test-results/viewport/shell", { recursive: true });
+    writeFileSync("test-results/viewport/shell/cleanup.json", JSON.stringify({ people: Number(Boolean(person)), cleanup }, null, 2));
+  }
 });
 
 async function signedIn(width: number) {

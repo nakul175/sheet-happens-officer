@@ -5,12 +5,13 @@
 // A missing build, or a mode that never answers /api/health, fails this file.
 import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { chromium, expect as browserExpect } from "@playwright/test";
 import { db } from "../src/lib/db";
 import { HIDDEN_DEAL_TEXT } from "../src/lib/feed";
 import { istDate, PW } from "./helpers";
@@ -47,6 +48,10 @@ function removeOutbox(dir: string) {
 const seed: {
   userIds: string[]; emails: string[]; projectId?: string; plainProjectId?: string; projectIds: string[]; orgId?: string; orgIds: string[];
 } = { userIds: [], emails: [], projectIds: [], orgIds: [] };
+let deactivationFixture: {
+  dealId: string; ordinaryId: string; organisationId: string; userIds: string[];
+  sentinel: { id: string; email: string; name: string; orgRole: string; deactivatedAt: Date | null };
+} | null = null;
 
 /**
  * Through the API, as the Super Admin: takes over as Leader where this run's people lead, archives this run's
@@ -267,7 +272,7 @@ function assertBellDealName(body: string, dealName: string, visible: boolean, la
   else expect(present, `${label} notification text leaked the deal name`).toBe(false);
 }
 
-/** My tasks, search, the bell, every concierge quick action, and the deal API. */
+/** My tasks, search, the bell, and the deal API. */
 async function readPaths(base: string, cookie: string, dealId: string, name: string): Promise<Read[]> {
   const my = await call(base, cookie, "GET", "/api/my-tasks");
   const search = await call(base, cookie, "GET", `/api/search?q=${encodeURIComponent(name)}`);
@@ -356,12 +361,74 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
   }, 180_000);
 
   afterAll(async () => {
-    try { await cleanupSeed(); } finally {
+    try {
+      await cleanupSeed();
+      if (deactivationFixture) {
+        const fixture = deactivationFixture;
+        const [projects, organisation, users, sentinel] = await Promise.all([
+          db.project.findMany({ where: { id: { in: [fixture.dealId, fixture.ordinaryId] } }, select: { id: true, archivedAt: true } }),
+          db.organisation.findUnique({ where: { id: fixture.organisationId }, select: { archivedAt: true } }),
+          db.user.findMany({ where: { id: { in: fixture.userIds } }, select: { id: true, deactivatedAt: true } }),
+          db.user.findUnique({ where: { id: fixture.sentinel.id }, select: { id: true, email: true, name: true, orgRole: true, deactivatedAt: true } }),
+        ]);
+        expect(projects.map((p) => p.id).sort()).toEqual([fixture.dealId, fixture.ordinaryId].sort());
+        expect(projects.every((p) => p.archivedAt !== null)).toBe(true);
+        expect(organisation?.archivedAt).toBeTruthy();
+        expect(users.map((u) => u.id).sort()).toEqual([...fixture.userIds].sort());
+        expect(users.every((u) => u.deactivatedAt !== null)).toBe(true);
+        expect(sentinel).toEqual(fixture.sentinel);
+        const evidence = path.join(root, "test-results", "deal-post-deactivation");
+        mkdirSync(evidence, { recursive: true });
+        writeFileSync(path.join(evidence, "cleanup.json"), JSON.stringify({
+          projectIds: projects.map((p) => p.id).sort(),
+          projectsArchived: true,
+          organisationId: fixture.organisationId,
+          organisationArchived: true,
+          deactivatedUserIds: users.map((u) => u.id).sort(),
+          sentinelUserId: fixture.sentinel.id,
+          sentinelFingerprintUnchanged: true,
+          physicalPurge: false,
+        }, null, 2) + "\n");
+      }
+    } finally {
       for (const server of [...running.values(), ...extra.values()]) killGroup(server.pid);
       for (const dir of outboxes) removeOutbox(dir);
       await db.$disconnect();
     }
   });
+
+  it("keeps contact reads and writes within the configured CRM visibility mode", async () => {
+    const on = running.get("on")!;
+    const admins = running.get("admins")!;
+    const off = running.get("off")!;
+    const memberEmail = `nakul17+zz-${runId}-contact-member@aplyd.com`;
+    const adminEmail = `nakul17+zz-${runId}-contact-admin@aplyd.com`;
+    seed.emails.push(memberEmail, adminEmail);
+    const member = await signIn(on, `ZZ-TEST contact member ${tag}`, memberEmail);
+    const ordinaryAdmin = await signIn(on, `ZZ-TEST contact admin ${tag}`, adminEmail);
+    seed.userIds.push(member.id, ordinaryAdmin.id);
+    await promoteToAdmin(on, ordinaryAdmin.id);
+    const org = await call(on.base, member.cookie, "POST", "/api/orgs", { name: `ZZ-TEST contact modes ${tag}` });
+    expect(org.status, org.text).toBe(201);
+    const orgId = (org.json?.organisation as { id: string }).id;
+    seed.orgIds.push(orgId);
+    const created = await call(on.base, member.cookie, "POST", `/api/orgs/${orgId}/contacts`, { name: `ZZ-TEST contact ${tag}` });
+    expect(created.status, created.text).toBe(201);
+    const contactId = (created.json?.contact as { id: string }).id;
+    expect((await call(on.base, member.cookie, "GET", `/api/contacts/${contactId}`)).status).toBe(200);
+    for (const [server, cookie] of [[admins, member.cookie], [off, ordinaryAdmin.cookie]] as const) {
+      expect((await call(server.base, cookie, "GET", `/api/orgs/${orgId}/contacts`)).status).toBe(404);
+      expect((await call(server.base, cookie, "GET", `/api/contacts/${contactId}`)).status).toBe(404);
+      expect((await call(server.base, cookie, "POST", `/api/orgs/${orgId}/contacts`, { name: `ZZ-TEST refused ${tag}` })).status).toBe(404);
+      expect((await call(server.base, cookie, "PATCH", `/api/contacts/${contactId}`, { role: "Refused" })).status).toBe(404);
+      expect((await call(server.base, cookie, "DELETE", `/api/contacts/${contactId}`)).status).toBe(404);
+    }
+    expect((await call(admins.base, ordinaryAdmin.cookie, "GET", `/api/contacts/${contactId}`)).status).toBe(200);
+    expect((await call(admins.base, ordinaryAdmin.cookie, "PATCH", `/api/contacts/${contactId}`, { role: "Allowed Admin" })).status).toBe(200);
+    expect((await call(on.base, member.cookie, "GET", `/api/contacts/${contactId}`)).json?.contact).toMatchObject({ role: "Allowed Admin" });
+    expect((await call(on.base, ordinaryAdmin.cookie, "DELETE", `/api/contacts/${contactId}`)).status).toBe(204);
+    expect((await call(on.base, member.cookie, "GET", `/api/contacts/${contactId}`)).status).toBe(404);
+  }, 120_000);
 
   it("Hidden deals stay hidden through every read path", async () => {
     const open = running.get("on");
@@ -465,6 +532,15 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       const joined = reads.map((read) => read.text).join("\n");
       if (example.visible) expect(joined, label).toContain(dealName);
       else expect(joined, label).not.toContain(dealName);
+
+      // Activity is a separate direct link. A hidden reader must receive the same
+      // generic 404 as the deal detail, without a name or identifier in the body.
+      const activity = await call(server.base, who.cookie, "GET", `/api/projects/${dealId}/activity`);
+      expect(activity.status, `${label} activity`).toBe(example.visible ? 200 : 404);
+      if (!example.visible) {
+        expect(activity.text, `${label} activity name`).not.toContain(dealName);
+        expect(activity.text, `${label} activity id`).not.toContain(dealId);
+      }
     }
 
     // APL-2698 AC3. The open server is CRM_VISIBLE=on; crmMode() treats that as all.
@@ -911,6 +987,176 @@ describe("CRM_VISIBLE modes are tested against a real server per mode", () => {
       expect((await db.user.findUnique({ where: { id: leader.id }, select: { deactivatedAt: true } }))?.deactivatedAt).toBeNull();
     } finally {
       if (allServer) killGroup(allServer.pid);
+    }
+  }, 120_000);
+
+  it("audit: a successful deactivation keeps one fixture's hidden deal out of later reads", async () => {
+    const open = running.get("on")!;
+    const off = running.get("off")!;
+    const admins = running.get("admins")!;
+    const suffix = `deactivated-${tag}`;
+    const deal = `ZZ-TEST Private deal ${suffix}`;
+    const ordinary = `ZZ-TEST Ordinary project ${suffix}`;
+    const dealTask = `ZZ-TEST Private task ${suffix}`;
+    const ordinaryTask = `ZZ-TEST Ordinary task ${suffix}`;
+    const adminEmail = `nakul17+zz-${runId}-removed-admin@aplyd.com`;
+    const targetEmail = `nakul17+zz-${runId}-removed-editor@aplyd.com`;
+    const observerEmail = `nakul17+zz-${runId}-removed-observer@aplyd.com`;
+    seed.emails.push(adminEmail, targetEmail, observerEmail);
+    const admin = await signIn(open, `ZZ-TEST admin ${suffix}`, adminEmail);
+    const target = await signIn(open, `ZZ-TEST editor ${suffix}`, targetEmail);
+    const observer = await signIn(open, `ZZ-TEST observer ${suffix}`, observerEmail);
+    seed.userIds.push(admin.id, target.id, observer.id);
+    await promoteToAdmin(open, admin.id);
+
+    const pipes = await call(open.base, admin.cookie, "GET", "/api/deals/pipelines");
+    expect(pipes.status, pipes.text).toBe(200);
+    const pipe = (pipes.json?.pipelines as { id: string; key: string }[]).find((p) => p.key === "DEAL_PROACTIVE");
+    expect(pipe?.id).toBeTruthy();
+    const org = await call(open.base, admin.cookie, "POST", "/api/orgs", { name: `ZZ-TEST Buyer ${suffix}` });
+    expect(org.status, org.text).toBe(201);
+    const organisationId = (org.json?.organisation as { id: string }).id;
+    seed.orgIds.push(organisationId);
+    const createdDeal = await call(open.base, admin.cookie, "POST", "/api/deals", {
+      name: deal, organisationId, pipelineId: pipe!.id, leaderId: admin.id, whyPursue: tag,
+      nextStep: { title: `ZZ-TEST initial step ${suffix}`, dueDate: istDate(4) },
+    });
+    expect(createdDeal.status, createdDeal.text).toBe(201);
+    const dealId = (createdDeal.json?.deal as { id: string }).id;
+    seed.projectIds.push(dealId);
+    const createdOrdinary = await call(open.base, admin.cookie, "POST", "/api/projects", { name: ordinary, leaderId: admin.id });
+    expect(createdOrdinary.status, createdOrdinary.text).toBe(201);
+    const ordinaryId = (createdOrdinary.json?.project as { id: string }).id;
+    seed.projectIds.push(ordinaryId);
+    for (const projectId of [dealId, ordinaryId]) {
+      for (const userId of [target.id, observer.id]) {
+        const joined = await call(open.base, admin.cookie, "POST", `/api/projects/${projectId}/members`, { userId, role: "EDITOR" });
+        expect(joined.status, joined.text).toBe(201);
+      }
+    }
+    for (const [projectId, title] of [[dealId, dealTask], [ordinaryId, ordinaryTask]]) {
+      const task = await call(open.base, admin.cookie, "POST", `/api/projects/${projectId}/tasks`, {
+        title, assigneeId: target.id, dueDate: istDate(2),
+      });
+      expect(task.status, task.text).toBe(201);
+    }
+    const sentinelUser = await superAdminOn(open);
+    const sentinel = await db.user.findUniqueOrThrow({ where: { id: sentinelUser.id }, select: { id: true, email: true, name: true, orgRole: true, deactivatedAt: true } });
+    deactivationFixture = { dealId, ordinaryId, organisationId, userIds: [admin.id, target.id, observer.id], sentinel };
+
+    // The historical deal notice exists before the person is removed. The helper
+    // verifies that every seeded person and project belongs to this local ZZ-TEST run.
+    const fixtureApi = await startCrmModeSeedApi();
+    try {
+      await fixtureApi.replaceNotifications({
+        people: [
+          { ...admin, email: adminEmail }, { ...observer, email: observerEmail },
+        ],
+        projects: [{ id: dealId, name: deal }, { id: ordinaryId, name: ordinary }],
+        notices: [admin.id, observer.id].flatMap((recipientId) => [
+          { recipientId, type: "DEAL_STAGE_CHANGED", projectId: dealId, data: { project: deal, stage: "Proposal" } },
+          { recipientId, type: "ADDED_TO_PROJECT", projectId: ordinaryId, data: { project: ordinary, role: "EDITOR" } },
+        ]),
+      });
+    } finally {
+      await fixtureApi.close();
+    }
+
+    const removed = await call(off.base, admin.cookie, "POST", `/api/team/${target.id}/deactivate`, { reassign: "leaders" });
+    expect(removed.status, removed.text).toBe(200);
+    expect(removed.json).toEqual({ moved: 1, fellBack: [] });
+    expect((await db.user.findUnique({ where: { id: target.id }, select: { deactivatedAt: true } }))?.deactivatedAt).not.toBeNull();
+    expect((await call(open.base, target.cookie, "GET", "/api/my-tasks")).status).toBe(401);
+
+    const readers = [
+      { mode: "on", server: open, who: admin, hidden: false },
+      { mode: "admins", server: admins, who: observer, hidden: true },
+      { mode: "off", server: off, who: admin, hidden: true },
+    ];
+    for (const row of readers) {
+      const label = `post-deactivation CRM_VISIBLE=${row.mode}`;
+      const bell = await call(row.server.base, row.who.cookie, "GET", "/api/notifications");
+      const person = await call(row.server.base, row.who.cookie, "GET", `/api/team/${admin.id}`);
+      const search = await call(row.server.base, row.who.cookie, "GET", `/api/search?q=${encodeURIComponent(deal)}`);
+      const activity = await call(row.server.base, row.who.cookie, "GET", `/api/projects/${dealId}/activity`);
+      const direct = await call(row.server.base, row.who.cookie, "GET", `/api/projects/${dealId}`);
+      const plain = await call(row.server.base, row.who.cookie, "GET", `/api/projects/${ordinaryId}`);
+      expect([bell.status, person.status, search.status, plain.status], label).toEqual([200, 200, 200, 200]);
+      expect(plain.text, `${label} ordinary control`).toContain(ordinary);
+      expect([activity.status, direct.status], label).toEqual(row.hidden ? [404, 404] : [200, 200]);
+      if (row.hidden) {
+        for (const [surface, body] of [["bell", bell.text], ["person", person.text], ["search", search.text], ["activity", activity.text], ["direct", direct.text]]) {
+          expect(body, `${label} ${surface} deal name`).not.toContain(deal);
+          expect(body, `${label} ${surface} deal id`).not.toContain(dealId);
+          expect(body, `${label} ${surface} task title`).not.toContain(dealTask);
+        }
+        expect(person.text, `${label} neutral person notice`).toContain("A deal you can't view.");
+        expect(person.text, `${label} ordinary person project`).toContain(ordinary);
+        expect(bell.text, `${label} safe bell link`).not.toContain(`/projects/${dealId}`);
+        if (row.mode === "off") {
+          expect(bell.text, `${label} neutral bell notice`).toContain(HIDDEN_DEAL_TEXT);
+          expect((person.json?.person as { openTasks?: number }).openTasks).toBe(1);
+        }
+      } else {
+        expect(bell.text, `${label} visible bell`).toContain(deal);
+        expect(person.text, `${label} visible person`).toContain(deal);
+        expect(direct.text, `${label} visible deal`).toContain(deal);
+      }
+    }
+
+    const browser = await chromium.launch({ headless: true, ...(process.env.SHO_BROWSER_EXECUTABLE ? { executablePath: process.env.SHO_BROWSER_EXECUTABLE } : {}) });
+    try {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+      await context.addCookies([{ name: "sho_session", value: admin.cookie.slice("sho_session=".length), domain: new URL(off.base).hostname, path: "/", httpOnly: true, sameSite: "Lax" }]);
+      const page = await context.newPage();
+      const evidence = path.join(root, "test-results", "deal-post-deactivation");
+      mkdirSync(evidence, { recursive: true });
+
+      await page.goto(`${off.base}/my-tasks`);
+      await page.getByRole("button", { name: /^Notifications/ }).click();
+      const dialog = page.getByRole("dialog", { name: "Notifications" });
+      await browserExpect(dialog.locator(".bell-main").filter({ hasText: HIDDEN_DEAL_TEXT }).first()).toBeVisible();
+      expect(await dialog.innerText()).not.toContain(deal);
+      expect(await dialog.locator(`a[href="/projects/${dealId}"]`).count()).toBe(0);
+      await browserExpect(dialog.locator(`a[href="/projects/${ordinaryId}"]`)).toBeVisible();
+      await page.screenshot({ path: path.join(evidence, "hidden-bell-390.png"), fullPage: true });
+
+      await page.goto(`${off.base}/team/${admin.id}`);
+      await browserExpect(page.getByText("A deal you can't view.", { exact: true })).toBeVisible();
+      expect(await page.locator(`a[href="/projects/${dealId}"]`).count()).toBe(0);
+      const ordinaryLink = page.locator(`a[href="/projects/${ordinaryId}"]`);
+      await browserExpect(ordinaryLink).toBeVisible();
+      expect(await page.locator("main").innerText()).not.toContain(deal);
+      await page.screenshot({ path: path.join(evidence, "hidden-person-390.png"), fullPage: true });
+      await ordinaryLink.click();
+      await browserExpect(page).toHaveURL(new RegExp(`/projects/${ordinaryId}$`));
+      await page.goBack();
+      await browserExpect(page.getByText("A deal you can't view.", { exact: true })).toBeVisible();
+
+      await page.goto(`${off.base}/search`);
+      await page.getByRole("searchbox", { name: "Search" }).fill(deal);
+      await browserExpect(page.getByRole("status")).toContainText("Nothing matches");
+      expect(await page.locator("main").innerText()).not.toContain(dealTask);
+      await page.screenshot({ path: path.join(evidence, "hidden-search-390.png"), fullPage: true });
+
+      await page.goto(`${off.base}/projects/${dealId}`);
+      await browserExpect(page.getByRole("heading", { name: "This project isn't available" })).toBeVisible();
+      expect(await page.locator("main").innerText()).not.toContain(deal);
+      await page.screenshot({ path: path.join(evidence, "hidden-direct-390.png"), fullPage: true });
+
+      await page.goto(`${off.base}/projects/${dealId}/activity`);
+      await browserExpect(page.getByText("This project isn't available.", { exact: false })).toBeVisible();
+      expect(await page.locator("main").innerText()).not.toContain(deal);
+      await page.screenshot({ path: path.join(evidence, "hidden-activity-390.png"), fullPage: true });
+
+      writeFileSync(path.join(evidence, "verification.json"), JSON.stringify({
+        fixture: { dealId, ordinaryId, deactivatedUserId: target.id },
+        viewport: { width: 390, height: 844 },
+        checks: ["hidden bell has no deal link", "person has one neutral deal sentence and visible ordinary link", "ordinary project navigation and Back", "search has no hidden deal result", "direct deal and Activity routes show safe unavailable text"],
+        screenshots: ["hidden-bell-390.png", "hidden-person-390.png", "hidden-search-390.png", "hidden-direct-390.png", "hidden-activity-390.png"],
+      }, null, 2) + "\n");
+    } finally {
+      await browser.close();
     }
   }, 120_000);
 });

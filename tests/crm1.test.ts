@@ -2,6 +2,7 @@
 // Server must run with SUPER_ADMIN_EMAILS=root.test@aplyd.com and the same EMAIL_OUTBOX_DIR.
 import { describe, expect, it } from "vitest";
 import { account, admin, istDate, project, superAdmin, task, type Account, withVersion } from "./helpers";
+import { db } from "@/lib/db";
 
 let seq = 0;
 async function pipelines(a: Account) {
@@ -224,7 +225,9 @@ describe("stages (10.3)", () => {
     const id = r.json.deal.id as string;
     await lead.c.post(`/api/projects/${id}/members`, { userId: viewer.id, role: "VIEWER" });
     const conv = pipes.proactive.stages[1].id;
+    const beforeViewerStage = (await lead.c.get(`/api/projects/${id}`)).json.project.deal;
     expect((await viewer.c.post(`/api/projects/${id}/stage`, { stageId: conv })).status).toBe(403);
+    expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal).toEqual(beforeViewerStage);
     expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: pipes.bid.stages[1].id })).status).toBe(400);
     expect((await lead.c.post(`/api/projects/${id}/archive`, {})).status).toBe(200);
     expect((await lead.c.post(`/api/projects/${id}/stage`, { stageId: conv })).status).toBe(409);
@@ -341,7 +344,7 @@ describe("stages (10.3)", () => {
 describe("deal details (12.3)", () => {
   it("edits details, keeps unknown value empty, and undoes", async () => {
     const lead = await account("detlead");
-    const { r } = await deal(lead, lead);
+    const { r, orgId, pipes } = await deal(lead, lead);
     const id = r.json.deal.id as string;
     const e = await lead.c.patch(`/api/projects/${id}/deal`, { value: 250000, currency: "INR", probability: 40 });
     expect(e.status, JSON.stringify(e.json)).toBe(200);
@@ -354,6 +357,31 @@ describe("deal details (12.3)", () => {
     expect((await lead.c.get(`/api/projects/${id}`)).json.project.deal.details.value).toBeNull();
     const viewer = await account("detviewer");
     await lead.c.post(`/api/projects/${id}/members`, { userId: viewer.id, role: "VIEWER" });
-    expect((await viewer.c.patch(`/api/projects/${id}/deal`, { need: "x" })).status).toBe(403);
+    expect((await lead.c.post(`/api/projects/${id}/parties`, { organisationId: orgId, role: "PARTNER" })).status).toBe(201);
+    const replacementOrgId = await org(lead, `Viewer-boundary replacement ${Date.now()}-${seq++}`);
+    const buyer = await db.dealParty.findFirstOrThrow({ where: { projectId: id, role: "BUYER" } });
+    const party = await db.dealParty.findFirstOrThrow({ where: { projectId: id, role: "PARTNER" } });
+    const stored = async () => ({
+      project: await db.project.findUniqueOrThrow({ where: { id } }),
+      details: await db.dealDetails.findUniqueOrThrow({ where: { projectId: id } }),
+      parties: await db.dealParty.findMany({ where: { projectId: id }, orderBy: { id: "asc" } }),
+      tasks: await db.task.findMany({ where: { projectId: id }, orderBy: { id: "asc" } }),
+      actions: await db.actionLog.findMany({ where: { projectId: id }, orderBy: { id: "asc" } }),
+      notifications: await db.notification.findMany({ where: { projectId: id }, orderBy: { id: "asc" } }),
+      audit: await db.auditLog.findMany({ where: { targetId: id }, orderBy: { id: "asc" } }),
+    });
+    const beforeViewerWrites = await stored();
+    expect((await viewer.c.get(`/api/projects/${id}`)).status).toBe(200);
+    const denied: [string, string, unknown?][] = [
+      ["PATCH", `/api/projects/${id}/deal`, { need: "Forbidden detail" }],
+      ["POST", `/api/projects/${id}/stage`, { stageId: pipes.proactive.stages[1].id }],
+      ["POST", `/api/projects/${id}/parties`, { organisationId: orgId, role: "FUNDER" }],
+      ["DELETE", `/api/projects/${id}/parties/${party.id}`],
+      ["PATCH", `/api/projects/${id}/parties/buyer`, { organisationId: replacementOrgId, expectedPartyId: buyer.id, expectedOrganisationId: orgId }],
+    ];
+    for (const [method, path, body] of denied) {
+      expect((await viewer.c.call(method, path, body)).status, `${method} ${path}`).toBe(403);
+      expect(await stored(), `${method} ${path}`).toEqual(beforeViewerWrites);
+    }
   });
 });

@@ -78,8 +78,8 @@ export default function DealsView() {
         <label>Date basis <select className="in" value={dateFilter.field} onChange={e => setDateFilter({ ...dateFilter, field: e.target.value as DealDateFilter["field"] })}>
           {DEAL_DATE_FIELDS.map(field => <option key={field.value} value={field.value}>{field.label}</option>)}
         </select></label>
-        <label>From <input className="in" type="date" value={dateFilter.start} onChange={e => setDateFilter({ ...dateFilter, start: e.target.value })} /></label>
-        <label>Through <input className="in" type="date" value={dateFilter.end} onChange={e => setDateFilter({ ...dateFilter, end: e.target.value })} /></label>
+        <label>From <input className="in" type="date" value={dateFilter.start} aria-invalid={invalidRange} aria-describedby={invalidRange ? "deal-date-range-error" : undefined} onChange={e => setDateFilter({ ...dateFilter, start: e.target.value })} /></label>
+        <label>Through <input className="in" type="date" value={dateFilter.end} aria-invalid={invalidRange} aria-describedby={invalidRange ? "deal-date-range-error" : undefined} onChange={e => setDateFilter({ ...dateFilter, end: e.target.value })} /></label>
         <label>No date <select className="in" value={dateFilter.undated} onChange={e => setDateFilter({ ...dateFilter, undated: e.target.value as DealDateFilter["undated"] })}>
           <option value="include">Include</option><option value="exclude">Exclude</option><option value="only">Only no date</option>
         </select></label>
@@ -90,7 +90,7 @@ export default function DealsView() {
         {data && lifecycle === "sales" && <span aria-label="Open commercial pipeline">{old ? "Archived open-stage" : "Open"} RFP/RFA + OTC: {openCommercial.length}{openTotals.sums.length > 0 ? ` · ${openTotals.sums.join(" · ")}` : ""}{openTotals.unknown ? ` · ${openTotals.unknown} without value` : ""}</span>}
         {(opportunities.length > 0 || stages.length > 0 || dateActive) && <button className="link" onClick={() => { setOpportunities([]); setStages([]); setDateFilter({ field: "submissionDeadline", start: "", end: "", undated: "include" }); }}>Clear filters</button>}
       </div>
-      {invalidRange && <p className="err" role="alert">From must be on or before Through.</p>}
+      {invalidRange && <p id="deal-date-range-error" className="err" role="alert">From must be on or before Through.</p>}
       {loading && !data && <Skeleton />}
       {error && <div className="err" role="alert">{error}</div>}
       {data && deals.length === 0 && <div className="card empty" role="region" aria-label="No matching deals">

@@ -36,11 +36,11 @@ export function HolySheetDocuments({ kind, id }: {
             if (!isApprovedHolySheetOrigin(data.origin) || data.origin !== context?.origin || data.subject !== context?.subject)
                 return { status: 'signin' };
             return { status: 'ready', origin: data.origin, subject: data.subject };
-        } }), [endpoint, context?.subject]);
-    const key = (subject: string) => `sho.hs.pending:${subject}:${kind}:${id}`;
+        } }), [endpoint, context?.origin, context?.subject]);
+    const key = (subject: string, origin: string) => `sho.hs.pending:${subject}:${origin}:${kind}:${id}`;
     useEffect(() => {
         active.current = true;
-        function lock() { epoch.current++; verified.current = null; setContext(null); setFrame(''); setPicker(''); setPending(null); }
+        function lock() { epoch.current++; verified.current = null; channel.current = ''; setContext(null); setFrame(''); setPicker(''); setPending(null); }
         async function check() {
             const attempt = ++checks.current;
             try {
@@ -54,13 +54,13 @@ export function HolySheetDocuments({ kind, id }: {
                 }
                 setVisible(true);
                 if (!response.ok)
-                    throw Error('Sign in with Aplyd and check your SHO access, then retry.');
+                    throw Error('Sign in with Aplyd and check your Tasks by aplyd access, then retry.');
                 const data: Context = await response.json();
                 if (!active.current || attempt !== checks.current)
                     return;
                 if (!isApprovedHolySheetOrigin(data.origin) || !data.subject || !Array.isArray(data.links))
                     throw Error('Holy Sheet access could not be checked.');
-                if (verified.current && verified.current.subject !== data.subject)
+                if (verified.current && (verified.current.subject !== data.subject || verified.current.origin !== data.origin))
                     lock();
                 verified.current = data;
                 setContext(data);
@@ -71,7 +71,7 @@ export function HolySheetDocuments({ kind, id }: {
                 }
                 else
                     try {
-                        const saved = JSON.parse(sessionStorage.getItem(key(data.subject)) ?? 'null');
+                        const saved = JSON.parse(sessionStorage.getItem(key(data.subject, data.origin)) ?? 'null');
                         if (saved && uuid.test(saved.pageId) && typeof saved.spaceId === 'string' && typeof saved.created === 'boolean')
                             setPending(saved);
                     }
@@ -101,7 +101,7 @@ export function HolySheetDocuments({ kind, id }: {
         if (!remove) {
             setPending(selection);
             try {
-                sessionStorage.setItem(key(c.subject), JSON.stringify(selection));
+                sessionStorage.setItem(key(c.subject, c.origin), JSON.stringify(selection));
             }
             catch { }
         }
@@ -120,7 +120,7 @@ export function HolySheetDocuments({ kind, id }: {
             }
             else {
                 try {
-                    sessionStorage.removeItem(key(c.subject));
+                    sessionStorage.removeItem(key(c.subject, c.origin));
                 }
                 catch { }
                 setPending(null);
@@ -143,7 +143,7 @@ export function HolySheetDocuments({ kind, id }: {
         if (!context) return;
         const nextChannel = crypto.randomUUID();
         channel.current = nextChannel;
-        const hash = new URLSearchParams({ 'hs-user': context.subject, 'hs-channel': nextChannel, 'hs-mode': mode, 'hs-host': context.hostOrigin ?? 'https://sheethappensofficer.aplyd.org' });
+        const hash = new URLSearchParams({ 'hs-user': context.subject, 'hs-channel': nextChannel, 'hs-mode': mode, 'hs-host': context.hostOrigin ?? 'https://tasks.aplyd.org' });
         if (context.defaultSpaceId) hash.set('hs-space', context.defaultSpaceId);
         setFrame('');
         setPicker(`${context.origin}/embed/picker#${hash}`);

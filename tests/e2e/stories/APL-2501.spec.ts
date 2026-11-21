@@ -1,7 +1,7 @@
 import { archiveProject, removeMember } from "../helpers/migration-2731";
 import { test, PASS, passwordOk } from "./qa";
 // APL-2501 · SHO-US-5.6 Branded app shell that works on a phone
-// Acceptance criteria: AC1 approved full-width desktop header, AC2 390 px phone layout, AC3 brand mark and Public Sans,
+// Acceptance criteria: AC1 approved full-width desktop header, AC2 390 px phone layout, AC3 brand mark and current Lato branding,
 // AC4 sidebar by role, AC5 notification bell.
 // Notes on AC text that later stories changed (the tests follow the live behaviour and say so):
 //  - AC4 lists only My tasks, Projects and Team; CRM stories later added Deals and Accounts, so the test checks the role-specific items only.
@@ -55,7 +55,7 @@ test("AC2: at 390 px the sidebar collapses and no page scrolls sideways", async 
   }
 });
 
-test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", async ({ admin }) => {
+test("AC3: the icon-only mark shows at 24 px and the text uses Lato", async ({ admin }) => {
   await admin.page.setViewportSize({ width: 1280, height: 800 });
   await admin.page.goto("/");
   const img = admin.page.getByRole("link", { name: "Tasks by aplyd home", exact: true }).getByAltText("", { exact: true });
@@ -66,7 +66,7 @@ test("AC3: the icon-only mark shows at 24 px and the text uses Public Sans", asy
   const svg = await admin.page.request.get("/logo-icon-reversed.svg");
   expect(svg.status()).toBe(200);
   const font = await admin.page.evaluate(() => getComputedStyle(document.body).fontFamily);
-  expect(font).toMatch(/Public\s*Sans/i);
+  expect(font).toMatch(/Lato/i);
 });
 
 test("AC4: Audit log is for the Super Admin only; retired Usage is not in the navigation", async ({ admin, member }) => {

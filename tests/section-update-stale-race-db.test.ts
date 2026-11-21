@@ -1,0 +1,135 @@
+// A section update must recheck the actor and section after its preflight read.
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
+import { db } from '@/lib/db';
+import { addSection, deleteSection, updateSection } from '@/lib/sections';
+import { getOrCreateWorkspace } from '@/lib/workspace';
+import type { Tx } from '@/lib/access';
+import { assertLocalFixture } from './e2e/local-fixture-guard';
+
+vi.mock('next/server', () => ({ connection: vi.fn() }));
+
+const prefix = `section-stale-${randomUUID()}`;
+const leader = { id: `${prefix}-leader`, orgRole: 'MEMBER' as const };
+const replacement = { id: `${prefix}-replacement`, orgRole: 'MEMBER' as const };
+const users = [leader.id, replacement.id];
+const projects: string[] = [];
+const completed: string[] = [];
+const transact = db.$transaction.bind(db);
+let safe = false, workspaceId = '', sentinelId = '';
+
+beforeAll(async () => {
+  assertLocalFixture(process.env.DATABASE_URL); safe = true;
+  workspaceId = (await getOrCreateWorkspace()).id;
+  for (const actor of [leader, replacement]) {
+    await db.user.create({ data: { id: actor.id, workspaceId, name: actor.id, email: `${actor.id}@example.invalid`, passwordHash: 'unused', emailVerifiedAt: new Date() } });
+  }
+  sentinelId = (await db.project.create({ data: { workspaceId, name: `${prefix}-sentinel` } })).id;
+  projects.push(sentinelId);
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+afterAll(async () => {
+  if (!safe) return;
+  let cleanup = false;
+  try {
+    expect((await db.project.findUniqueOrThrow({ where: { id: sentinelId } })).name).toBe(`${prefix}-sentinel`);
+    await db.notification.deleteMany({ where: { projectId: { in: projects } } });
+    await db.actionLog.deleteMany({ where: { projectId: { in: projects } } });
+    await db.project.deleteMany({ where: { id: { in: projects } } });
+    await db.user.deleteMany({ where: { id: { in: users } } });
+    expect(await db.project.count({ where: { id: { in: projects } } })).toBe(0);
+    cleanup = true;
+  } finally {
+    mkdirSync('test-results/section-update-stale', { recursive: true });
+    writeFileSync('test-results/section-update-stale/cleanup.json', JSON.stringify({ fixture: prefix, completed, cleanup }, null, 2));
+  }
+});
+
+async function fixture() {
+  const project = await db.project.create({ data: { workspaceId, name: `${prefix}-subject` } });
+  projects.push(project.id);
+  await db.projectMember.createMany({ data: [
+    { projectId: project.id, userId: leader.id, role: 'LEADER' },
+    { projectId: project.id, userId: replacement.id, role: 'EDITOR' },
+  ] });
+  const section = await db.section.create({ data: { projectId: project.id, name: 'To do', position: 0 } });
+  const done = await db.section.create({ data: { projectId: project.id, name: 'Done', position: 1, isDone: true } });
+  return { project, section, done };
+}
+
+function pauseBeforeTransaction() {
+  let release!: () => void;
+  let arrived = false;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const spy = vi.spyOn(db, '$transaction').mockImplementationOnce((async (callback: (tx: Tx) => Promise<unknown>, options?: Parameters<typeof db.$transaction>[1]) => {
+    arrived = true; await held; return transact(callback, options);
+  }) as typeof db.$transaction);
+  return { ready: async () => { await vi.waitFor(() => expect(arrived).toBe(true), { timeout: 5000 }); spy.mockRestore(); }, release };
+}
+
+async function transferLeadership(projectId: string) {
+  await db.$transaction(async tx => {
+    await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: leader.id } }, data: { role: 'EDITOR' } });
+    await tx.projectMember.update({ where: { projectId_userId: { projectId, userId: replacement.id } }, data: { role: 'LEADER' } });
+  });
+}
+
+it('rejects a former Leader after preflight without a section write or action row', async () => {
+  const f = await fixture();
+  const sentinel = await db.project.findUniqueOrThrow({ where: { id: sentinelId } });
+  const pause = pauseBeforeTransaction();
+  const pending = Promise.allSettled([updateSection(leader, f.project.id, f.section.id, { name: 'Unauthorized' })]);
+  try {
+    await pause.ready();
+    await transferLeadership(f.project.id);
+    pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect((await db.section.findUniqueOrThrow({ where: { id: f.section.id } })).name).toBe('To do');
+    expect(await db.actionLog.count({ where: { projectId: f.project.id, action: 'section.renamed' } })).toBe(0);
+    expect(await db.project.findUniqueOrThrow({ where: { id: sentinelId } })).toEqual(sentinel);
+    completed.push('revoked-leader-no-write');
+  } finally { pause.release(); await pending; }
+});
+
+it('rejects a former Leader adding a section after preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransaction();
+  const pending = Promise.allSettled([addSection(leader, f.project.id, 'Unauthorized')]);
+  try {
+    await pause.ready(); await transferLeadership(f.project.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await db.section.count({ where: { projectId: f.project.id } })).toBe(2);
+    expect(await db.actionLog.count({ where: { projectId: f.project.id, action: 'section.added' } })).toBe(0);
+    completed.push('revoked-leader-add-no-write');
+  } finally { pause.release(); await pending; }
+});
+
+it('rejects a former Leader deleting a section after preflight', async () => {
+  const f = await fixture(), pause = pauseBeforeTransaction();
+  const pending = Promise.allSettled([deleteSection(leader, f.project.id, f.section.id, f.done.id)]);
+  try {
+    await pause.ready(); await transferLeadership(f.project.id); pause.release();
+    expect(await pending).toEqual([expect.objectContaining({ status: 'rejected', reason: expect.objectContaining({ status: 403 }) })]);
+    expect(await db.section.count({ where: { projectId: f.project.id } })).toBe(2);
+    expect(await db.actionLog.count({ where: { projectId: f.project.id, action: 'section.deleted' } })).toBe(0);
+    completed.push('revoked-leader-delete-no-write');
+  } finally { pause.release(); await pending; }
+});
+
+it('does not write a duplicate done-section change after the same change wins the race', async () => {
+  const f = await fixture();
+  const pause = pauseBeforeTransaction();
+  const pending = updateSection(leader, f.project.id, f.section.id, { isDone: true });
+  try {
+    await pause.ready();
+    await updateSection(leader, f.project.id, f.section.id, { isDone: true });
+    pause.release();
+    await pending;
+    expect((await db.section.findUniqueOrThrow({ where: { id: f.section.id } })).isDone).toBe(true);
+    expect((await db.section.findUniqueOrThrow({ where: { id: f.done.id } })).isDone).toBe(false);
+    expect(await db.actionLog.count({ where: { projectId: f.project.id, action: 'section.done_changed' } })).toBe(1);
+    completed.push('duplicate-done-change-no-write');
+  } finally { pause.release(); await pending; }
+});

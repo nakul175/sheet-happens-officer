@@ -21,6 +21,15 @@ type Item = {
 type NeedsStep = { id: string; name: string; stage: string | null };
 type Waiting = Item & { waitingDays: number; approver: { id: string; name: string } | null; assignee: { id: string; name: string } };
 type Groups = { waitingOnMe?: Waiting[]; waitingOnOthers?: Waiting[]; overdue: Item[]; next7: Item[]; later: Item[]; needsNextStep?: NeedsStep[] };
+type GroupName = "waitingOnMe" | "waitingOnOthers" | "overdue" | "next7" | "later" | "needsNextStep";
+type PageOf<T> = { items: T[]; total: number; hasMore: boolean; nextCursor: string | null };
+type PagedGroups = {
+  waitingOnMe: PageOf<Waiting>; waitingOnOthers: PageOf<Waiting>;
+  overdue: PageOf<Item>; next7: PageOf<Item>; later: PageOf<Item>; needsNextStep: PageOf<NeedsStep>;
+};
+type PagedResponse = { version: 2; groups: PagedGroups };
+type MorePage = PageOf<Item | Waiting | NeedsStep>;
+type MoreState = { source: PagedResponse | null; pages: Partial<Record<GroupName, MorePage>>; busy: Partial<Record<GroupName, boolean>>; errors: Partial<Record<GroupName, string>> };
 
 const waitText = (d: number) => (d === 0 ? "Waiting since today" : `Waiting ${d} day${d === 1 ? "" : "s"}`);
 
@@ -75,11 +84,48 @@ const GROUP_KEY = (id: string) => `sho.home.group.${id}`;
 function Inner() {
   const me = useMe();
   const { canAdd, openAdd } = useExtras();
-  const { data: rawData, error, loading, reload } = useGet<Groups>("/api/my-tasks");
   const query = useSearchParams();
   const path = usePathname() || "/my-tasks";
   const overdueOnly = query.get("filter") === "overdue";
-  const data = overdueOnly && rawData ? { ...rawData, waitingOnMe: rawData.waitingOnMe?.filter(t => isOverdue(t.dueDate)), waitingOnOthers: [], next7: [], later: [], needsNextStep: [] } : rawData;
+  const { data: rawData, error, loading, reload } = useGet<PagedResponse>(`/api/my-tasks?v=2${overdueOnly ? "&filter=overdue" : ""}`);
+  const [moreState, setMoreState] = useState<MoreState>({ source: null, pages: {}, busy: {}, errors: {} });
+  const active = moreState.source === rawData ? moreState : { source: rawData, pages: {}, busy: {}, errors: {} };
+  const more = active.pages;
+  const moreBusy = active.busy;
+  const moreError = active.errors;
+  const combine = <T,>(key: GroupName, initial: PageOf<T> | undefined) => [...(initial?.items ?? []), ...(more[key]?.items ?? [])] as T[];
+  const data: Groups | null = rawData ? {
+    waitingOnMe: combine("waitingOnMe", rawData.groups.waitingOnMe),
+    waitingOnOthers: combine("waitingOnOthers", rawData.groups.waitingOnOthers),
+    overdue: combine("overdue", rawData.groups.overdue), next7: combine("next7", rawData.groups.next7),
+    later: combine("later", rawData.groups.later), needsNextStep: combine("needsNextStep", rawData.groups.needsNextStep),
+  } : null;
+  const counts = rawData?.groups;
+  async function loadMore(key: GroupName) {
+    if (!rawData || moreBusy[key]) return;
+    const current = more[key] ?? rawData.groups[key];
+    if (!current.hasMore || !current.nextCursor) return;
+    setMoreState(state => ({ source: rawData, pages: state.source === rawData ? state.pages : {}, busy: { ...(state.source === rawData ? state.busy : {}), [key]: true }, errors: { ...(state.source === rawData ? state.errors : {}), [key]: undefined } }));
+    const params = new URLSearchParams({ v: "2", group: key, cursor: current.nextCursor });
+    if (overdueOnly) params.set("filter", "overdue");
+    const result = await api<{ version: 2; group: GroupName; page: MorePage }>("GET", `/api/my-tasks?${params}`);
+    setMoreState(state => state.source === rawData ? { ...state, busy: { ...state.busy, [key]: false } } : state);
+    if (!result.ok || result.data.group !== key) {
+      setMoreState(state => state.source === rawData ? { ...state, errors: { ...state.errors, [key]: result.error ?? "Could not load more. Refresh My tasks and try again." } } : state);
+      return;
+    }
+    setMoreState(state => {
+      if (state.source !== rawData) return state;
+      const previous = state.pages[key];
+      const seen = new Set([...(rawData.groups[key].items as { id: string }[]), ...((previous?.items ?? []) as { id: string }[])].map(item => item.id));
+      const additions = result.data.page.items.filter(item => !seen.has(item.id));
+      return { ...state, pages: { ...state.pages, [key]: { ...result.data.page, items: [...(previous?.items ?? []), ...additions] } } };
+    });
+  }
+  const loadButton = (key: GroupName, label: string) => {
+    if (!rawData || !(more[key] ?? rawData.groups[key]).hasMore) return null;
+    return <div className="more-work"><button className="btn ghost" disabled={!!moreBusy[key]} onClick={() => loadMore(key)}>Load more {label}</button>{moreError[key] && <span role="alert" className="err">{moreError[key]} <button className="link" onClick={reload}>Refresh</button></span>}</div>;
+  };
   const taskHref = (id?: string) => { const q = new URLSearchParams(query.toString()); if (id) q.set("task", id); else q.delete("task"); return `${path}${q.size ? `?${q}` : ""}`; };
   const [mode, setMode] = useState<"date" | "project">("date");
   const [done, setDone] = useState<{ projectId: string; name: string }[]>([]);
@@ -95,7 +141,7 @@ function Inner() {
   const open = query.get("task");
   const wait = data?.waitingOnMe ?? [];
   const others = data?.waitingOnOthers ?? [];
-  const total = data ? wait.length + data.overdue.length + data.next7.length + data.later.length : 0;
+  const total = counts ? counts.waitingOnMe.total + counts.overdue.total + counts.next7.total + counts.later.total : 0;
   const groups: ("overdue" | "next7" | "later")[] = ["overdue", "next7", "later"];
   const labels = { overdue: "Overdue", next7: "Next 7 days", later: "Later" };
   const all = data ? [...data.overdue, ...data.next7, ...data.later] : [];
@@ -165,14 +211,16 @@ function Inner() {
       )}
       {wait.length > 0 && (
         <section aria-label="Waiting on me">
-          <div className="grp gold">Waiting on me · {wait.length}</div>
+          <div className="grp gold">Waiting on me · {counts?.waitingOnMe.total ?? 0}</div>
           <div className="list">{wait.map((t) => waitRow(t, true))}</div>
+          {loadButton("waitingOnMe", "waiting on me")}
         </section>
       )}
       {data && (!me.crm || mode === "date") && groups.map((key) => data[key].length > 0 && (
         <section key={key} aria-label={labels[key]}>
-          <div className={`grp${key === "overdue" ? " red" : ""}`}>{labels[key]} · {data[key].length}</div>
+          <div className={`grp${key === "overdue" ? " red" : ""}`}>{labels[key]} · {counts?.[key].total ?? 0}</div>
           <div className="list">{data[key].map(row)}</div>
+          {loadButton(key, labels[key].toLowerCase())}
         </section>
       ))}
       {data && me.crm && mode === "project" && byProject.map((g) => (
@@ -190,16 +238,19 @@ function Inner() {
           )}
         </section>
       ))}
+      {data && me.crm && mode === "project" && <div className="more-work">{groups.map(key => loadButton(key, labels[key].toLowerCase()))}{loadButton("needsNextStep", "deals needing a next step")}</div>}
       {others.length > 0 && (
         <section aria-label="Waiting on others">
-          <div className="grp">Waiting on others · {others.length}</div>
+          <div className="grp">Waiting on others · {counts?.waitingOnOthers.total ?? 0}</div>
           <div className="list">{others.map((t) => waitRow(t, false))}</div>
+          {loadButton("waitingOnOthers", "waiting on others")}
         </section>
       )}
       {data && (!me.crm || mode === "date") && needs.length > 0 && (
         <section aria-label="Deals that need a next step">
-          <div className="grp red">Deals that need a next step · {needs.length}</div>
+          <div className="grp red">Deals that need a next step · {counts?.needsNextStep.total ?? 0}</div>
           <DealCollection view="needs-step" deals={needs} renderAction={id => <AddNext projectId={id} meId={me.id} label="+ Add task" onDone={reload} />} />
+          {loadButton("needsNextStep", "deals needing a next step")}
         </section>
       )}
       {open && <TaskModal id={open} me={me.id} onClose={() => router.replace(taskHref(), { scroll: false })} onChanged={reload} />}

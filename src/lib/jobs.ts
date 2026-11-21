@@ -2,8 +2,8 @@ import { crmRoleProjectWhere } from "@/lib/access";
 // Scheduled jobs (SHO-US-9.3 AC6). Each run is recorded in JobRun; a failure or a missed
 // day puts a notice in every Super Admin's bell. Jobs are triggered by the server's cron
 // through POST /api/jobs/<name> with the JOB_SECRET; nothing here is reachable from a session.
-import { timingSafeEqual } from "node:crypto";
-import type { Prisma } from "@/generated/prisma/client";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { Prisma } from "@/generated/prisma/client";
 import type { OrgRole } from "@/lib/access";
 import { db } from "@/lib/db";
 import { purgeOld } from "@/lib/feed";
@@ -13,6 +13,7 @@ import { notifyStalledDeals } from "@/lib/deals";
 import { purgeTrash } from "@/lib/tasks";
 import { startOfTodayIST } from "@/lib/dates";
 import { crmMode } from "@/lib/crm";
+import { displayedJobFailure, jobFailureCategory } from "@/lib/job-diagnostic";
 
 type Job = { name: string; about: string; run: (now?: Date) => Promise<unknown> };
 
@@ -24,6 +25,7 @@ export const JOBS: Job[] = [
   { name: "check", about: "Tells the Super Admin when a job failed or did not run", run: () => checkJobs() },
 ];
 const DAILY_GRACE_HOURS = 30;
+
 
 const DAY_MS = 86400_000;
 /** Which reminder, if any, a task due `due` gets on the day starting at `today` (SHO-US-7.4). */
@@ -71,13 +73,30 @@ const REMINDERS_LOCK_KEY = 2749001;
 /** Holder = the assignee; while a task awaits approval the approver is the assignee (SHO-US-4.6). */
 export async function sendReminders(now = new Date()) {
   const today = startOfTodayIST(now);
-  const tasks = await db.task.findMany({
-    where: reminderTaskWhere(today),
-    select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } } },
-  });
-  // One transaction under an advisory lock: two overlapping runs cannot both find "not sent yet" (APL-2749).
+  // One transaction under an advisory lock: overlapping runs cannot both find "not sent yet" (APL-2749).
+  // Keep candidate selection, row locks, fresh eligibility and inserts in this transaction.
+  // Otherwise an edit after the task read can produce a stale notice after that edit commits.
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${REMINDERS_LOCK_KEY})`;
+    const candidateIds = (await tx.task.findMany({
+      where: reminderTaskWhere(today),
+      select: { id: true },
+    })).map((t) => t.id);
+    if (!candidateIds.length) return { sent: 0 };
+    // Lock the task and the two eligibility rows. A deletion, completion, reassignment, archive or
+    // deactivation committed before these locks is reflected by the fresh query below;
+    // one attempted after the locks waits until this reminder transaction commits.
+    await tx.$queryRaw(Prisma.sql`
+      SELECT t."id" FROM "Task" t
+      JOIN "Project" p ON p."id" = t."projectId"
+      JOIN "User" u ON u."id" = t."assigneeId"
+      WHERE t."id" IN (${Prisma.join(candidateIds)})
+      ORDER BY t."id" FOR SHARE OF t, p, u
+    `);
+    const tasks = await tx.task.findMany({
+      where: { AND: [reminderTaskWhere(today), { id: { in: candidateIds } }] },
+      select: { id: true, title: true, projectId: true, assigneeId: true, dueDate: true, assignee: { select: { deactivatedAt: true } } },
+    });
     const already = await tx.notification.findMany({
       where: { type: { in: ["TASK_DUE_TOMORROW", "TASK_DUE_TODAY", "TASK_OVERDUE"] }, createdAt: { gte: today } },
       select: { taskId: true, type: true },
@@ -92,7 +111,7 @@ export async function sendReminders(now = new Date()) {
     }
     if (rows.length) await tx.notification.createMany({ data: rows });
     return { sent: rows.length };
-  });
+  }, { timeout: 30_000 });
 }
 
 export function requireJobSecret(req: Request) {
@@ -112,10 +131,12 @@ export async function runJob(name: string, now?: Date) {
     await db.jobRun.update({ where: { job: name }, data: { lastFinishedAt: new Date(), lastStatus: "OK", lastError: null } });
     return { job: name, status: "OK", result };
   } catch (err) {
-    const error = String((err as Error)?.message ?? err).slice(0, 500);
+    const referenceId = randomUUID();
+    const error = `${jobFailureCategory(err)} (${referenceId})`;
+    console.error("job failed", name, error);
     await db.jobRun.update({ where: { job: name }, data: { lastFinishedAt: new Date(), lastStatus: "FAILED", lastError: error } });
     await tellSuperAdmins("JOB_FAILED", name, error);
-    throw new ApiError(500, `Job ${name} failed: ${error}`);
+    throw new ApiError(500, `Job ${name} failed. Reference ${referenceId}.`);
   }
 }
 
@@ -134,7 +155,7 @@ export async function jobStatus() {
   const runs = await db.jobRun.findMany();
   return JOBS.map((j) => {
     const r = runs.find((x) => x.job === j.name);
-    return { job: j.name, about: j.about, lastStartedAt: r?.lastStartedAt ?? null, lastFinishedAt: r?.lastFinishedAt ?? null, lastStatus: r?.lastStatus ?? null, lastError: r?.lastError ?? null };
+    return { job: j.name, about: j.about, lastStartedAt: r?.lastStartedAt ?? null, lastFinishedAt: r?.lastFinishedAt ?? null, lastStatus: r?.lastStatus ?? null, lastError: displayedJobFailure(r?.lastError) };
   });
 }
 

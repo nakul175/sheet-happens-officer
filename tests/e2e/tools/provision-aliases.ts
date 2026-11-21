@@ -2,7 +2,7 @@
 // It talks to the app's public API only: no database connection, no app code, nothing on production.
 //
 // Run from a laptop with the staging secrets in the environment (never on the command line):
-//   BASE_URL=https://staging.sheethappensofficer.com STAGING_USER=... STAGING_PASS=... SHO_QA_PASS=... \
+//   BASE_URL=https://staging.tasks.aplyd.org STAGING_USER=... STAGING_PASS=... SHO_QA_PASS=... \
 //     npx tsx tests/e2e/tools/provision-aliases.ts [--check] [--slots 01,02,serial | --slots all]
 //
 //   1. The Super Admin alias (nakul17+zz-sa) must sign in with SHO_QA_PASS and be listed in SUPER_ADMIN_EMAILS.
