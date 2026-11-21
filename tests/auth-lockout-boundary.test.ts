@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { account, BASE, OUTBOX, PW, type Account } from './helpers';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
@@ -100,4 +100,27 @@ it('serializes concurrent failures at the per-email lockout boundary', async () 
   expect((await who.c.post('/api/auth/signin', { email: who.email, password: PW })).status).toBe(429);
   expect(await db.user.findUniqueOrThrow({ where: { id: sentinel.id } })).toEqual(sentinelBefore);
   writeFileSync(`${evidenceDir}/race-verification.json`, JSON.stringify({ concurrentRequests: 12, invalidResponses: 5, lockedResponses: 7, recordedFailures: 5, correctPasswordStillLocked: true, unrelatedSentinelPreserved: true }, null, 2));
+});
+
+it('expires a failure exactly at the 15-minute cutoff', async () => {
+  const who = await account(`${prefix}cutoff`); owned.push(who);
+  const wrongPassword = `wrong-${randomUUID()}`;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    expect((await who.c.post('/api/auth/signin', { email: who.email, password: wrongPassword })).status).toBe(401);
+  }
+  const fixedNow = Date.now();
+  const cutoff = fixedNow - 15 * 60_000;
+  const now = vi.spyOn(Date, 'now').mockReturnValue(fixedNow);
+  try {
+    await db.loginAttempt.updateMany({ where: { email: who.email }, data: { createdAt: new Date(cutoff + 1) } });
+    expect((await who.c.post('/api/auth/signin', { email: who.email, password: PW })).status).toBe(429);
+    await db.loginAttempt.updateMany({ where: { email: who.email }, data: { createdAt: new Date(cutoff) } });
+    const recovered = await who.c.post('/api/auth/signin', { email: who.email, password: PW });
+    expect(recovered.status).toBe(200);
+    expect(recovered.json.user.id).toBe(who.id);
+    expect(await db.loginAttempt.count({ where: { email: who.email } })).toBe(0);
+    writeFileSync(`${evidenceDir}/exact-cutoff.json`, JSON.stringify({ windowMinutes: 15, oneMillisecondInside: 429, exactlyAtCutoff: 200, attemptsClearedOnRecovery: true }, null, 2));
+  } finally {
+    now.mockRestore();
+  }
 });
