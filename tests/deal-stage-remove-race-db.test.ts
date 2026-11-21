@@ -11,6 +11,7 @@ vi.mock("next/server", () => ({ connection: vi.fn() }));
 const prefix = `deal-stage-remove-${randomUUID()}`;
 const actor = { id: `${prefix}-admin`, orgRole: "SUPER_ADMIN" as const };
 const stageId = `${prefix}-stage`;
+let dealId = "";
 let targetId = "";
 let pipelineId = "";
 let safe = false;
@@ -45,12 +46,15 @@ beforeAll(async () => {
   targetId = pipeline.stages[0].id;
   await db.user.create({ data: { id: actor.id, workspaceId, name: prefix, email: `${prefix}@example.invalid`, passwordHash: "unused", emailVerifiedAt: new Date(), orgRole: "SUPER_ADMIN" } });
   await db.stage.create({ data: { id: stageId, pipelineId, name: prefix, position: 999, category: "ACTIVE", requiredFields: [] } });
+  const deal = await db.project.create({ data: { workspaceId, name: `${prefix}-deal`, typeId: "wst_deal", pipelineId, stageId } });
+  dealId = deal.id;
   safe = true;
 });
 afterEach(() => vi.restoreAllMocks());
 afterAll(async () => {
   if (!safe) return;
   await db.auditLog.deleteMany({ where: { targetId: stageId } });
+  await db.project.deleteMany({ where: { id: dealId } });
   await db.stage.deleteMany({ where: { id: stageId } });
   await db.user.deleteMany({ where: { id: actor.id } });
   expect(await db.stage.count({ where: { id: stageId } })).toBe(0);
@@ -66,6 +70,7 @@ it("does not remove a stage after the Super Admin is deactivated following prefl
     pause.release();
     expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 404 }) })]);
     expect(await db.stage.findUnique({ where: { id: stageId } })).not.toBeNull();
+    expect((await db.project.findUniqueOrThrow({ where: { id: dealId } })).stageId).toBe(stageId);
     expect(await db.auditLog.count({ where: { event: "STAGE_REMOVED", targetId: stageId } })).toBe(0);
   } finally { pause.release(); await pending; }
 }, 20_000);
@@ -80,6 +85,7 @@ it("does not remove a stage after the Super Admin role is revoked following pref
     pause.release();
     expect(await pending).toEqual([expect.objectContaining({ status: "rejected", reason: expect.objectContaining({ status: 404 }) })]);
     expect(await db.stage.findUnique({ where: { id: stageId } })).not.toBeNull();
+    expect((await db.project.findUniqueOrThrow({ where: { id: dealId } })).stageId).toBe(stageId);
     expect(await db.auditLog.count({ where: { event: "STAGE_REMOVED", targetId: stageId } })).toBe(0);
   } finally { pause.release(); await pending; }
 }, 20_000);
