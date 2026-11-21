@@ -192,6 +192,26 @@ export async function reactivate(actor: Actor, targetId: string) {
   if (!mayAct(actor, target)) throw new ApiError(403, "You cannot reactivate this person.");
   if (!target.deactivatedAt) throw new ApiError(409, "This person is not deactivated.");
   await db.$transaction(async (tx) => {
+    try {
+      for (const personId of [...new Set([actor.id, targetId])].sort()) {
+        if (personId === targetId) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR UPDATE NOWAIT`;
+        else await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const [currentActor, currentTarget] = await Promise.all([
+      tx.user.findUnique({ where: { id: actor.id } }),
+      tx.user.findUnique({ where: { id: targetId } }),
+    ]);
+    if (!currentTarget || !currentActor || !isActive(currentActor) || currentActor.workspaceId !== currentTarget.workspaceId || !mayAct(currentActor, currentTarget)) {
+      throw new ApiError(403, "You cannot reactivate this person.");
+    }
+    if (!currentTarget.deactivatedAt) throw new ApiError(409, "This person is not deactivated.");
     await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: null } });
     await auditTx(tx, "USER_REACTIVATED", { actorId: actor.id, targetId });
   });
