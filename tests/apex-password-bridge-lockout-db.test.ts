@@ -54,10 +54,30 @@ it('serializes concurrent wrong credentials at the bridge lockout boundary', asy
   const statuses = responses.map((response) => response.status);
   expect(statuses.filter((status) => status === 403)).toHaveLength(5);
   expect(statuses.filter((status) => status === 429)).toHaveLength(7);
+  for (const response of responses) {
+    expect(await response.json()).toEqual({ error: 'access_denied' });
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  }
   expect(await db.loginAttempt.count({ where: { email: who.email, success: false } })).toBe(5);
   expect((await POST(request(PW))).status).toBe(429);
   expect(await db.session.count({ where: { userId: who.id } })).toBe(sessionsBefore);
   expect(await db.user.findUniqueOrThrow({ where: { id: sentinel.id } })).toEqual(sentinelBefore);
   mkdirSync(evidenceDir, { recursive: true });
   writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ concurrentRequests: 12, rejected: 5, locked: 7, recordedFailures: 5, validPasswordStillLocked: true, unrelatedSentinelPreserved: true }, null, 2));
+});
+
+it('shares the native sign-in failure budget with the bridge', async () => {
+  const who = await account(`${prefix}cross`); owned.push(who);
+  const wrong = `wrong-${randomUUID()}`;
+  const bridgeRequest = (password: string) => new Request('https://sho.example.invalid/api/suite/password', {
+    method: 'POST',
+    body: JSON.stringify({ client_id: 'accounts', client_secret: secret, user_id: who.id, email: who.email, password }),
+  });
+  for (let i = 0; i < 4; i++) expect((await POST(bridgeRequest(wrong))).status).toBe(403);
+  expect((await who.c.post('/api/auth/signin', { email: who.email, password: wrong })).status).toBe(401);
+  expect(await db.loginAttempt.count({ where: { email: who.email, success: false } })).toBe(5);
+  expect((await POST(bridgeRequest(PW))).status).toBe(429);
+  mkdirSync(evidenceDir, { recursive: true });
+  writeFileSync(`${evidenceDir}/shared-budget.json`, JSON.stringify({ bridgeFailures: 4, nativeFailures: 1, recordedFailures: 5, bridgeValidPasswordLocked: true }, null, 2));
 });

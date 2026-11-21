@@ -18,26 +18,33 @@ export async function POST(req: Request) {
     const { email, password } = signInInput.parse(body);
     if (typeof body.user_id !== "string" || !body.user_id || body.user_id.length > 200 || body.user_id.startsWith("central-invited:"))
       return oauthJson({ error: "access_denied" }, 403);
-    const since = new Date(Date.now() - LOCKOUT_MINUTES * 60000);
-    const failures = await db.loginAttempt.count({ where: { email, success: false, createdAt: { gt: since } } });
-    if (failures >= LOCKOUT_FAILURES) return oauthJson({ error: "access_denied" }, 429);
-    const user = await db.user.findUnique({ where: { id: body.user_id } });
-    const ok = await verifyPassword(password, user?.passwordHash ?? null);
-    if (!ok || !user || user.email.toLowerCase() !== email || user.deactivatedAt || !user.emailVerifiedAt || user.tempPasswordAt) {
-      await db.loginAttempt.create({ data: { email, success: false } });
-      return oauthJson({ error: "access_denied" }, 403);
-    }
-    const source = await db.$transaction(async tx => {
+    // Share the native sign-in email lock: both entry points must count failures,
+    // verify the password, and write the attempt or source session atomically.
+    const attempt = await db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 FROM pg_catalog.pg_advisory_xact_lock(258703, pg_catalog.hashtext(${email}))`;
+      const since = new Date(Date.now() - LOCKOUT_MINUTES * 60000);
+      const failures = await tx.loginAttempt.count({ where: { email, success: false, createdAt: { gt: since } } });
+      if (failures >= LOCKOUT_FAILURES) return { kind: "locked" as const };
+      const user = await tx.user.findUnique({ where: { id: body.user_id } });
+      const ok = await verifyPassword(password, user?.passwordHash ?? null);
+      if (!ok || !user || user.email.toLowerCase() !== email || user.deactivatedAt || !user.emailVerifiedAt || user.tempPasswordAt) {
+        await tx.loginAttempt.create({ data: { email, success: false } });
+        return { kind: "invalid" as const };
+      }
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE`;
       const fresh = await tx.user.findUnique({ where: { id: user.id } });
       if (!fresh || fresh.passwordHash !== user.passwordHash || fresh.email !== user.email || fresh.deactivatedAt || !fresh.emailVerifiedAt || fresh.tempPasswordAt)
         throw Error("Identity changed");
       // Reverification must not mint an orphan native session or reset login attempts.
-      if (body.purpose === "account-link-proof") return undefined;
+      if (body.purpose === "account-link-proof") return { kind: "valid" as const, user, source: undefined };
       const session = await tx.session.create({ data: { userId: user.id,
         tokenHash: suiteHash(suiteToken()), expiresAt: new Date(Date.now() + SESSION_DAYS * 86400000), userAgent: "Aplyd central sign-in" } });
       await tx.loginAttempt.deleteMany({ where: { email } });
-      return session.id;
-    });
+      return { kind: "valid" as const, user, source: session.id };
+    }, { timeout: 20_000 });
+    if (attempt.kind === "locked") return oauthJson({ error: "access_denied" }, 429);
+    if (attempt.kind === "invalid") return oauthJson({ error: "access_denied" }, 403);
+    const { user, source } = attempt;
     return oauthJson({ sub: user.id, email: user.email, email_verified: true, name: user.name,
       ...(body.purpose === "account-link-proof" ? { purpose: "account-link-proof" } : { source_session_id: source }) });
   } catch { return oauthJson({ error: "access_denied" }, 403); }
