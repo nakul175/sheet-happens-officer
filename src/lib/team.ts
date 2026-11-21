@@ -135,6 +135,10 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
     if (!currentActor || !isActive(currentActor) || currentActor.workspaceId !== currentTarget.workspaceId || !mayAct(currentActor, currentTarget)) {
       throw new ApiError(403, "You cannot deactivate this person.");
     }
+    if (multiWorkspaceEnabled() && (currentActor.workspaceId !== actor.workspaceId ||
+        await tx.workspaceMembership.count({ where: { userId: targetId } }))) {
+      throw new ApiError(403, "Manage this account through Aplyd.");
+    }
     if (currentTarget.deactivatedAt) throw new ApiError(409, "This person is already deactivated.");
     const memberships = await tx.projectMember.findMany({ where: { userId: targetId }, include: { project: true } });
     const leads = memberships.filter((m) => m.role === "LEADER");
@@ -210,6 +214,10 @@ export async function reactivate(actor: Actor, targetId: string) {
     ]);
     if (!currentTarget || !currentActor || !isActive(currentActor) || currentActor.workspaceId !== currentTarget.workspaceId || !mayAct(currentActor, currentTarget)) {
       throw new ApiError(403, "You cannot reactivate this person.");
+    }
+    if (multiWorkspaceEnabled() && (currentActor.workspaceId !== actor.workspaceId ||
+        await tx.workspaceMembership.count({ where: { userId: targetId } }))) {
+      throw new ApiError(403, "Manage this account through Aplyd.");
     }
     if (!currentTarget.deactivatedAt) throw new ApiError(409, "This person is not deactivated.");
     await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: null } });
