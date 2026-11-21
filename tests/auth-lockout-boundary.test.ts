@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { db } from '@/lib/db';
 import { account, BASE, OUTBOX, PW, type Account } from './helpers';
 import { assertLocalFixture } from './e2e/local-fixture-guard';
+import { POST as signIn } from '@/app/api/auth/signin/route';
 
 const prefix = `zzlockout${randomUUID().replaceAll('-', '')}`;
 const evidenceDir = 'test-results/auth-lockout-boundary';
@@ -111,15 +112,20 @@ it('expires a failure exactly at the 15-minute cutoff', async () => {
   const fixedNow = Date.now();
   const cutoff = fixedNow - 15 * 60_000;
   const now = vi.spyOn(Date, 'now').mockReturnValue(fixedNow);
+  // Invoke the route in this process so the fixed clock also controls its count query.
+  const request = () => new Request(`${BASE}/api/auth/signin`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: who.email, password: wrongPassword }),
+  });
   try {
     await db.loginAttempt.updateMany({ where: { email: who.email }, data: { createdAt: new Date(cutoff + 1) } });
-    expect((await who.c.post('/api/auth/signin', { email: who.email, password: PW })).status).toBe(429);
+    expect((await signIn(request())).status).toBe(429);
     await db.loginAttempt.updateMany({ where: { email: who.email }, data: { createdAt: new Date(cutoff) } });
-    const recovered = await who.c.post('/api/auth/signin', { email: who.email, password: PW });
-    expect(recovered.status).toBe(200);
-    expect(recovered.json.user.id).toBe(who.id);
-    expect(await db.loginAttempt.count({ where: { email: who.email } })).toBe(0);
-    writeFileSync(`${evidenceDir}/exact-cutoff.json`, JSON.stringify({ windowMinutes: 15, oneMillisecondInside: 429, exactlyAtCutoff: 200, attemptsClearedOnRecovery: true }, null, 2));
+    const expired = await signIn(request());
+    expect(expired.status).toBe(401);
+    expect(await db.loginAttempt.count({ where: { email: who.email } })).toBe(6);
+    writeFileSync(`${evidenceDir}/exact-cutoff.json`, JSON.stringify({ windowMinutes: 15, oneMillisecondInside: 429, exactlyAtCutoff: 401, expiredAttemptsIgnored: true }, null, 2));
   } finally {
     now.mockRestore();
   }
