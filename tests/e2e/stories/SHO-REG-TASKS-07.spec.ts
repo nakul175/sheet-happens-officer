@@ -13,6 +13,7 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
   let foreignId = "";
   let organisationId = "";
   let viewerId = "";
+  const linkedPeople: string[] = [];
   later(async () => {
     if (!sourceId || !foreignId) return;
     const source = await admin.api.get(`/api/projects/${sourceId}`);
@@ -23,6 +24,11 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
     expect(foreign.json.project.archived).toBe(true);
     if (viewerId) {
       const person = await admin.api.get(`/api/team/${viewerId}`);
+      expect(person.status).toBe(200);
+      expect(person.json.person.status).toBe("DEACTIVATED");
+    }
+    for (const id of linkedPeople) {
+      const person = await admin.api.get(`/api/team/${id}`);
       expect(person.status).toBe(200);
       expect(person.json.person.status).toBe("DEACTIVATED");
     }
@@ -40,8 +46,23 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
   sourceId = source.id;
   const foreign = await newProject(admin, later, { label: "section move foreign sentinel" });
   foreignId = foreign.id;
+  const worker = await account(zz("section move assignee"), `nakul17+zz-tasks-07-${fixture}-assignee@aplyd.com`);
+  const approver = await account(zz("section move approver"), `nakul17+zz-tasks-07-${fixture}-approver@aplyd.com`);
+  for (const person of [worker, approver]) {
+    linkedPeople.push(person.id);
+    later(async () => {
+      const current = await admin.api.get(`/api/team/${person.id}`);
+      expect(current.status).toBe(200);
+      if (current.json.person.status !== "DEACTIVATED") {
+        const removed = await admin.api.post(`/api/team/${person.id}/deactivate`, { reassign: "leaders" });
+        expect(removed.status, JSON.stringify(removed.json)).toBe(200);
+      }
+    });
+    const membership = await admin.api.post(`/api/projects/${source.id}/members`, { userId: person.id, role: "EDITOR" });
+    expect(membership.status, JSON.stringify(membership.json)).toBe(201);
+  }
   const title = zz("section move parent");
-  const taskId = await newTask(admin, source.id, { title });
+  const taskId = await newTask(admin, source.id, { title, assigneeId: worker.id, approverId: approver.id });
   const childId = await newTask(admin, source.id, { title: zz("section move child"), parentId: taskId });
   const linked = await postTaskCurrent(admin, taskId, "links", { organisationId });
   expect(linked.status, JSON.stringify(linked.json)).toBe(201);
@@ -58,9 +79,16 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
     expect((await admin.api.post(`/api/team/${viewer.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
   });
   expect((await admin.api.post(`/api/projects/${source.id}/members`, { userId: viewer.id, role: "VIEWER" })).status).toBe(201);
+  const collaborator = await postTaskCurrent(admin, taskId, "collaborators", { userId: viewer.id });
+  expect(collaborator.status, JSON.stringify(collaborator.json)).toBe(201);
+  const withPeople = await read();
+  expect(withPeople.status).toBe(200);
+  expect(withPeople.json.task.assignee.id).toBe(worker.id);
+  expect(withPeople.json.task.approver.id).toBe(approver.id);
+  expect(withPeople.json.task.collaborators.map((person: { id: string }) => person.id)).toContain(viewer.id);
   expect((await viewer.c.get(`/api/tasks/${taskId}`)).status).toBe(200);
-  expect((await viewer.c.post(`/api/tasks/${taskId}/move`, { sectionId: source.doing, expectedUpdatedAt: before.json.task.updatedAt })).status).toBe(403);
-  expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task).toEqual(before.json.task);
+  expect((await viewer.c.post(`/api/tasks/${taskId}/move`, { sectionId: source.doing, expectedUpdatedAt: withPeople.json.task.updatedAt })).status).toBe(403);
+  expect((await admin.api.get(`/api/tasks/${taskId}`)).json.task).toEqual(withPeople.json.task);
   const viewerSession = await signInAs(browser, viewer.email, PW);
   try {
     await viewerSession.page.goto(`/projects/${source.id}?task=${taskId}`);
@@ -70,7 +98,7 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
   } finally { await viewerSession.ctx.close(); }
   const foreignBefore = (await admin.api.get(`/api/projects/${foreign.id}`)).json.project;
   const foreignHash = createHash("sha256").update(JSON.stringify(foreignBefore)).digest("hex");
-  const related = (task: typeof before.json.task) => ({
+  const related = (task: typeof withPeople.json.task) => ({
     projectId: task.projectId,
     parentId: task.parentId,
     assigneeId: task.assignee?.id,
@@ -80,11 +108,11 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
     links: task.links,
   });
 
-  const refused = await admin.api.post(`/api/tasks/${taskId}/move`, { sectionId: foreign.doing, expectedUpdatedAt: before.json.task.updatedAt });
+  const refused = await admin.api.post(`/api/tasks/${taskId}/move`, { sectionId: foreign.doing, expectedUpdatedAt: withPeople.json.task.updatedAt });
   expect(refused.status).toBe(404);
   const afterRefusal = await read();
   expect(afterRefusal.status).toBe(200);
-  expect(afterRefusal.json.task).toEqual(before.json.task);
+  expect(afterRefusal.json.task).toEqual(withPeople.json.task);
   expect((await admin.api.get(`/api/tasks/${childId}`)).json.task).toEqual(childBefore.json.task);
 
   const page = admin.page;
@@ -99,7 +127,7 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
   expect(movedResponse.status()).toBe(200);
   await expect.poll(async () => (await read()).json.task.sectionId).toBe(source.doing);
   const moved = (await read()).json.task;
-  expect(related(moved)).toEqual(related(before.json.task));
+  expect(related(moved)).toEqual(related(withPeople.json.task));
   expect((await admin.api.get(`/api/tasks/${childId}`)).json.task).toEqual(childBefore.json.task);
   mkdirSync(evidenceDir, { recursive: true });
   await page.screenshot({ path: `${evidenceDir}/moved.png`, fullPage: true });
@@ -113,10 +141,10 @@ test("SHO-REG-TASKS-07 moves sections only inside one project and Undo restores 
   const restored = await read();
   expect(restored.status).toBe(200);
   expect(restored.json.task.sectionId).toBe(source.todo);
-  expect(related(restored.json.task)).toEqual(related(before.json.task));
+  expect(related(restored.json.task)).toEqual(related(withPeople.json.task));
   expect((await admin.api.get(`/api/tasks/${childId}`)).json.task).toEqual(childBefore.json.task);
   expect((await admin.api.post(`/api/actions/${action!.id}/undo`, {})).status).toBe(409);
   const foreignAfter = (await admin.api.get(`/api/projects/${foreign.id}`)).json.project;
   expect(createHash("sha256").update(JSON.stringify(foreignAfter)).digest("hex")).toBe(foreignHash);
-  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, childId, sourceId, foreignId, organisationId, linkedRecordPreserved: true, viewerMoveDenied: true, viewerSectionControlHidden: true, foreignSectionRejected: true, mobileWidth: 390, movedWithinProject: true, relatedStatePreserved: true, undoRestoredSection: true, replayRejected: true, foreignProjectPreserved: true }, null, 2));
+  writeFileSync(`${evidenceDir}/verification.json`, JSON.stringify({ fixture, taskId, childId, sourceId, foreignId, organisationId, assigneeId: worker.id, approverId: approver.id, collaboratorId: viewer.id, linkedRecordPreserved: true, viewerMoveDenied: true, viewerSectionControlHidden: true, foreignSectionRejected: true, mobileWidth: 390, movedWithinProject: true, relatedStatePreserved: true, undoRestoredSection: true, replayRejected: true, foreignProjectPreserved: true }, null, 2));
 });
