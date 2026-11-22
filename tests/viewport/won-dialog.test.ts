@@ -1,8 +1,10 @@
 // SHO-3050 supersedes the Won refusal; APL-2691 open-task alerts remain for Lost. Vitest's expect, not Playwright's.
 // Runs with the phone checks (npm run test:viewport), which has Chromium and a local server.
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
-import { admin, BASE, istDate, PW, superAdmin, task, type Account } from "../helpers";
+import { admin, BASE, cleanupZz, istDate, PW, superAdmin, task, type Account } from "../helpers";
+import { requireLocalFixtures } from "./screen-ready";
 
 const WITHIN = 10_000;
 
@@ -17,15 +19,19 @@ let lostId = "";
 let lostStep = "";
 let lostStepId = "";
 let subId = "";
+let orgId = "";
+const ownedDeals: string[] = [];
 
 beforeAll(async () => {
-  if (!/^(localhost|127\.0\.0\.1)$/.test(new URL(BASE).hostname)) throw new Error(`Refusing to run the Won dialog check against ${BASE}: use a local server with a test database.`);
+  requireLocalFixtures(BASE, process.env.DATABASE_URL);
   browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || undefined });
   const sa = await superAdmin();
   lead = await admin(sa, "wone2e");
   const pipes = (await lead.c.get("/api/deals/pipelines")).json.pipelines as { id: string; key: string }[];
   const pro = pipes.find((p) => p.key === "DEAL_PROACTIVE")!;
-  const orgId = (await lead.c.post("/api/orgs", { name: `Org e2e 2691 ${Date.now()}` })).json.organisation.id as string;
+  const org = await lead.c.post("/api/orgs", { name: `ZZ-TEST Org e2e 2691 ${Date.now()}` });
+  expect(org.status, JSON.stringify(org.json)).toBe(201);
+  orgId = org.json.organisation.id as string;
 
   async function make(label: string, step: string) {
     const made = await lead.c.post("/api/deals", {
@@ -34,6 +40,7 @@ beforeAll(async () => {
     });
     expect(made.status, JSON.stringify(made.json)).toBe(201);
     const id = made.json.deal.id as string;
+    ownedDeals.push(id);
     const stepId = (await lead.c.get(`/api/projects/${id}`)).json.project.deal.nextStep.id as string;
     return { id, stepId };
   }
@@ -62,7 +69,22 @@ beforeAll(async () => {
   page = await ctx.newPage();
 }, 90000);
 
-afterAll(async () => { await ctx?.close(); await browser?.close(); });
+afterAll(async () => {
+  await ctx?.close();
+  await browser?.close();
+  let cleanup = false;
+  try {
+    if (ownedDeals.length || lead) await cleanupZz(ownedDeals, lead ? [lead] : []);
+    if (orgId) {
+      const root = await superAdmin();
+      expect((await root.c.post(`/api/orgs/${orgId}/archive`, { archive: true })).status).toBe(200);
+    }
+    cleanup = true;
+  } finally {
+    mkdirSync("test-results/viewport/won-dialog", { recursive: true });
+    writeFileSync("test-results/viewport/won-dialog/cleanup.json", JSON.stringify({ deals: ownedDeals.length, people: Number(Boolean(lead)), organisation: Boolean(orgId), cleanup }, null, 2));
+  }
+});
 
 async function openStage(projectId: string, name: string) {
   await page.goto(`/projects/${projectId}`);

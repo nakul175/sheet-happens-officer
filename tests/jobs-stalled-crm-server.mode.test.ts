@@ -433,7 +433,9 @@ async function runMode(mode: Mode) {
     expectNoDealMail(server.outbox);
     await clearNotes();
     await postJob(server.base, LOAD);
-    await expectMode(server.base, mode, false);
+    // Forty simultaneous authenticated job calls still produce one notice per
+    // stalled deal and recipient, not merely at least one.
+    await expectMode(server.base, mode, true);
     expectNoDealMail(server.outbox);
   } finally {
     stopServer(server);

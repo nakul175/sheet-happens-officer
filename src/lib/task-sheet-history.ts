@@ -43,6 +43,10 @@ function ensureEntry(id: string): Entry | null {
   const url = urls(id); if (!url) return null;
   const existing = readEntry(history.state, id);
   if (existing?.href === url.here && sameBackground(existing.base, url.base)) return existing;
+  // Back to an overlay must preserve the Forward destination. Adding a
+  // synthetic background entry here would discard that destination.
+  const navigation = (window as Window & { navigation?: { canGoForward?: boolean } }).navigation;
+  if (navigation?.canGoForward) return null;
   const entry: Entry = { v: 1, token: crypto.randomUUID(), id, href: url.here, base: url.base };
   const opaque = cleanState();
   // This atomic pair ends at the same URL, so the router needs no intermediate background render.

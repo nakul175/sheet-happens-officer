@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { randomUUID } from "node:crypto";
 import { ZodError, type ZodType } from "zod";
 import { reqCtx, type ReqCtx } from "@/lib/reqctx";
 import { isVersionCode, versionErrorBody } from "@/lib/version-error";
@@ -82,9 +83,18 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
       }
       if (code === "P2025") return Response.json({ error: "Resource not found" }, { status: 404 });
       if (code === "P2003") return Response.json({ error: "Referenced record does not exist" }, { status: 400 });
-      // Name and database code only: an error's message or fields can carry chat or task text.
-      console.error("unexpected error", (err as Error)?.name ?? typeof err, code ?? "");
-      return Response.json({ error: "Internal server error" }, { status: 500 });
+      // Keep only fixed-shape Prisma codes or SQLSTATEs. Raw-query failures
+      // carry PostgreSQL's SQLSTATE in meta.code, so retain that safe category
+      // alongside P2010 without logging the query or parameter values.
+      const sqlstate = /^(?:08|22|23|25|28|40|42|53|55|57|58|XX)[0-9A-Z]{3}$/;
+      const prismaCode = typeof code === "string" && /^P\d{4}$/.test(code) ? code : "";
+      const directState = typeof code === "string" && sqlstate.test(code) ? code : "";
+      const metaCode = (err as { meta?: { code?: unknown } })?.meta?.code;
+      const nestedState = prismaCode === "P2010" && typeof metaCode === "string" && sqlstate.test(metaCode) ? metaCode : "";
+      const safeCode = nestedState ? `${prismaCode}/${nestedState}` : prismaCode || directState;
+      const errorId = randomUUID();
+      console.error("unexpected error", safeCode || "UNKNOWN", errorId);
+      return Response.json({ error: "Internal server error" }, { status: 500, headers: { "x-error-id": errorId } });
     }
   };
 }

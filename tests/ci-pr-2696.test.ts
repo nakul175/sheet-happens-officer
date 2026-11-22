@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
 
-const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+const wrapper = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+const shared = readFileSync(new URL("../.github/workflows/qualification.yml", import.meta.url), "utf8");
+// Expand the referenced job for the existing behavioral assertions; the wrapper is checked below.
+const workflow = wrapper.slice(0, wrapper.indexOf("jobs:\n")) + shared.slice(shared.indexOf("jobs:\n"));
+it("PR wrapper uses the exact shared qualification workflow", () => expect(wrapper).toContain("uses: ./.github/workflows/qualification.yml"));
 
 function between(start: string, end: string) {
   const from = workflow.indexOf(start);
@@ -27,8 +31,8 @@ function startScript() {
 function runStart(curlOk: boolean) {
   const bin = mkdtempSync(path.join(tmpdir(), "ci-health-"));
   try {
-    writeFileSync(path.join(bin, "npx"), "#!/bin/sh\nexit 0\n");
-    chmodSync(path.join(bin, "npx"), 0o755);
+    writeFileSync(path.join(bin, "node"), "#!/bin/sh\nexit 0\n");
+    chmodSync(path.join(bin, "node"), 0o755);
     if (curlOk) {
       writeFileSync(path.join(bin, "curl"), "#!/bin/sh\nexit 0\n");
       chmodSync(path.join(bin, "curl"), 0o755);
@@ -55,7 +59,7 @@ it("AC1 every pull request runs lint, tsc, unit tests and build", () => {
   expect(workflow).toContain("run: npm run lint");
   expect(workflow).toContain("npx next typegen && npx tsc --noEmit");
   expect(workflow).toContain("run: npm test");
-  expect(workflow).toContain("run: npm run build");
+  expect(workflow).toContain("run: node scripts/ci/measure-command.mjs test-results/build-capacity.json -- npm run build");
 });
 
 it("AC2 a non-zero lint, tsc, unit test or build fails the job", () => {
@@ -65,6 +69,55 @@ it("AC2 a non-zero lint, tsc, unit test or build fails the job", () => {
     expect(line, command).toBeTruthy();
     expect(line).not.toContain("|| true");
   }
+});
+
+it("the measured build wrapper propagates a command failure", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ci-build-capacity-"));
+  try {
+    const receipt = path.join(dir, "receipt.json");
+    const result = spawnSync(process.execPath, [
+      "scripts/ci/measure-command.mjs", receipt, "--", process.execPath, "-e", "process.exit(7)",
+    ], { encoding: "utf8" });
+    expect(result.status).toBe(7);
+    expect(JSON.parse(readFileSync(receipt, "utf8")).exitCode).toBe(7);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("the measured build wrapper records available memory and tolerates missing proc data", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "ci-build-memory-"));
+  try {
+    const meminfo = path.join(dir, "meminfo");
+    const receipt = path.join(dir, "receipt.json");
+    writeFileSync(meminfo, "MemTotal: 8192000 kB\nMemAvailable: 4194304 kB\n");
+    const command = ["scripts/ci/measure-command.mjs", receipt, "--", process.execPath, "-e", "process.exit(0)"];
+    const measured = spawnSync(process.execPath, command, {
+      encoding: "utf8", env: { ...process.env, BUILD_CAPACITY_MEMINFO_PATH: meminfo },
+    });
+    expect(measured.status).toBe(0);
+    const first = JSON.parse(readFileSync(receipt, "utf8"));
+    expect(first.memoryAvailableKiBBefore).toBe("4194304");
+    expect(first.minimumMemoryAvailableKiB).toBe("4194304");
+    expect(first.memoryAvailableKiBAfter).toBe("4194304");
+    const lowering = spawnSync(process.execPath, ["scripts/ci/measure-command.mjs", receipt, "--", process.execPath,
+      "-e", 'setTimeout(() => require("fs").writeFileSync(process.env.BUILD_CAPACITY_MEMINFO_PATH, "MemAvailable: 3000000 kB\\n"), 100); setTimeout(() => process.exit(0), 650)'], {
+      encoding: "utf8", env: { ...process.env, BUILD_CAPACITY_MEMINFO_PATH: meminfo },
+    });
+    expect(lowering.status).toBe(0);
+    const low = JSON.parse(readFileSync(receipt, "utf8"));
+    expect(low.memoryAvailableKiBBefore).toBe("4194304");
+    expect(low.minimumMemoryAvailableKiB).toBe("3000000");
+    expect(low.memoryAvailableKiBAfter).toBe("3000000");
+    const missing = spawnSync(process.execPath, command, {
+      encoding: "utf8", env: { ...process.env, BUILD_CAPACITY_MEMINFO_PATH: path.join(dir, "missing") },
+    });
+    expect(missing.status).toBe(0);
+    const second = JSON.parse(readFileSync(receipt, "utf8"));
+    expect(second.memoryAvailableKiBBefore).toBeNull();
+    expect(second.minimumMemoryAvailableKiB).toBeNull();
+    expect(second.memoryAvailableKiBAfter).toBeNull();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 it("AC3 the health check fails the job when the app never answers", () => {

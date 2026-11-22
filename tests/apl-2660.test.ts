@@ -4,8 +4,10 @@
 // the projects and deactivates the people. Self-signup only accepts @aplyd.com, so the alias is
 // nakul17+…@aplyd.com.
 import { afterAll, describe, expect, it } from "vitest";
+import { existsSync, statSync } from "node:fs";
 import { canDropOnSection, closeControlOffered, completeTickAllowed, moveMenuSections } from "@/lib/approver-ui";
 import { account, superAdmin, task, withVersion, type Account } from "./helpers";
+import { writeApprover500Diagnostic } from "./approver-error-diagnostic";
 
 type Note = { id: string; text: string; href: string; createdAt: string };
 type BoardTask = { id: string; canClose: boolean; sectionId: string; completedAt: string | null };
@@ -124,19 +126,49 @@ describe("APL-2660 approver edge cases", () => {
       { who: creator }, { who: worker }, { who: editor }, { who: gone }, { who: viewer, role: "VIEWER" },
     ]);
     const t = await zzTask(creator, p.id, { title: "Plain creator", assigneeId: worker.id });
-    const put = async (id: string) => creator.c.put(`/api/tasks/${t}/approver`, await withVersion(creator, t, { approverId: id }));
+    const put = async (id: string) => {
+      const logOffset = existsSync('server.log') ? statSync('server.log').size : 0;
+      const response = await creator.c.put(`/api/tasks/${t}/approver`, await withVersion(creator, t, { approverId: id }));
+      // The CI failure tail can lose the relevant line during the rest of the suite.
+      // Match the handler's random error ID to this response; concurrent tests
+      // can write to the same log interval. Never retain raw log text.
+      if (response.status === 500) {
+        await writeApprover500Diagnostic(response.headers.get('x-error-id'), logOffset);
+      }
+      return response;
+    };
 
     expect((await put(editor.id)).status).toBe(200);
     expect((await taskOf(creator, t)).approver?.id).toBe(editor.id);
     expect((await put(lead.id)).status).toBe(200);
     expect((await taskOf(creator, t)).approver?.id).toBe(lead.id);
 
+    // HR-93: one exact-head CI attempt returned 500 on the second valid change.
+    // Exercise repeated versioned swaps in this owned project before denial checks.
+    for (let i = 0; i < 24; i++) {
+      const next = i % 2 === 0 ? editor.id : lead.id;
+      const reply = await put(next);
+      expect(reply.status, `valid approver swap ${i + 1}: ${JSON.stringify(reply.json)}`).toBe(200);
+      expect((await taskOf(creator, t)).approver?.id).toBe(next);
+    }
+
+    // Two valid writers may read the same version. Exactly one may commit;
+    // the loser must receive a version conflict rather than an unexplained 500.
+    const concurrentBody = await withVersion(creator, t, { approverId: editor.id });
+    const concurrent = await Promise.all([
+      creator.c.put(`/api/tasks/${t}/approver`, concurrentBody),
+      creator.c.put(`/api/tasks/${t}/approver`, concurrentBody),
+    ]);
+    expect(concurrent.map((reply) => reply.status).sort()).toEqual([200, 409]);
+    expect((await taskOf(creator, t)).approver?.id).toBe(editor.id);
+    expect((await put(lead.id)).status).toBe(200);
+
     expect((await sa.c.post(`/api/team/${gone.id}/deactivate`, { reassign: "leaders" })).status).toBe(200);
     for (const id of [viewer.id, outsider.id, gone.id, worker.id]) {
       expect((await put(id)).status).toBe(400);
     }
     expect((await taskOf(creator, t)).approver?.id).toBe(lead.id);
-  });
+  }, 90000);
 
   it("AC2 (close by the approver): the approver holds the task and selects Close, and the task completes", async () => {
     const lead = await zzAccount("lead");
@@ -144,10 +176,15 @@ describe("APL-2660 approver edge cases", () => {
     const boss = await zzAccount("boss");
     const p = await zzProject(lead, lead, [{ who: worker }, { who: boss }]);
     const t = await zzTask(lead, p.id, { title: "Ready to close", assigneeId: worker.id, approverId: boss.id });
+    const before = await taskOf(worker, t);
+    expect((await worker.c.post(`/api/tasks/${t}/complete`, await withVersion(worker, t))).status).toBe(403);
+    expect(await taskOf(worker, t)).toEqual(before);
     expect((await worker.c.post(`/api/tasks/${t}/send-for-approval`)).status).toBe(200);
     const held = await taskOf(boss, t);
     expect(held.assignee.id).toBe(boss.id);
     expect(held.awaitingApproval).toBe(true);
+    expect((await worker.c.post(`/api/tasks/${t}/complete`, await withVersion(worker, t))).status).toBe(403);
+    expect(await taskOf(boss, t)).toEqual(held);
     // Close on the task detail posts complete.
     expect(closeControlOffered({ canEdit: true, done: false, canClose: held.canClose })).toBe(true);
     expect((await boss.c.post(`/api/tasks/${t}/complete`, await withVersion(boss, t))).status).toBe(200);

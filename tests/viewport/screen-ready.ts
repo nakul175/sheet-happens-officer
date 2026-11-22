@@ -19,7 +19,7 @@ export async function openScreen(page: Page, screen: Screen, ids: Ids, base: str
   // Next can retain hidden skeletons from an inactive page after the known legacy task redirect.
   await page.waitForFunction(() => ![...document.querySelectorAll(".skel, .skel-wrap")].some(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden"), undefined, { timeout: 15000 });
   if (screen.wait) await page.waitForSelector(screen.wait, { timeout: 10000 });
-  if (screen.heading) await page.getByRole("heading", { name: screen.heading, exact: true }).waitFor();
+  if (screen.heading) await page.getByRole("heading", { name: typeof screen.heading === "function" ? screen.heading(ids) : screen.heading, exact: true }).waitFor();
   if (screen.taskPanel || screen.taskPage) {
     const title = (screen.taskPanel ? page.getByRole("dialog") : page).getByRole("textbox", { name: "Title", exact: true });
     await title.waitFor();

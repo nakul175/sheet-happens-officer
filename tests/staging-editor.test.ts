@@ -17,6 +17,8 @@ const OTHER_PASSWORD = "staging-editor-2";
 const PROD_APP = "app.sheethappensofficer.com";
 
 let workspaceId = "";
+let localFixtureReady = false;
+const extraProjectIds: string[] = [];
 
 const target = new URL(databaseUrl);
 const dbHost = target.hostname;
@@ -69,37 +71,39 @@ function expectNoSecrets(text: string, secrets: string[]) {
 }
 
 async function wipe() {
+  if (!localFixtureReady) return;
+  // This fixture shares the sole organisation; never wipe by workspace anymore.
   const users = await db.user.findMany({
-    where: workspaceId
-      ? { OR: [{ workspaceId }, { email: { in: [EDITOR_EMAIL, LEADER_EMAIL] } }] }
-      : { email: { in: [EDITOR_EMAIL, LEADER_EMAIL] } },
+    where: { email: { in: [EDITOR_EMAIL, LEADER_EMAIL, `canary-${workspaceId}@example.invalid`] } },
     select: { id: true },
   });
-  const ids = users.map((user) => user.id);
-  if (ids.length) {
-    await db.task.deleteMany({ where: { OR: [{ assigneeId: { in: ids } }, { createdById: { in: ids } }] } });
-    await db.actionLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { undoneById: { in: ids } }] } });
-    await db.modelUsage.deleteMany({ where: { userId: { in: ids } } });
-    await db.auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { targetId: { in: ids } }] } });
-    await db.user.deleteMany({ where: { id: { in: ids } } });
-  }
-  if (workspaceId) {
-    await db.task.deleteMany({ where: { workspaceId } });
-    await db.project.deleteMany({ where: { workspaceId } });
-  }
+  const ids = users.map(user => user.id);
+  const projects = await db.project.findMany({
+    where: { OR: [{ workspaceId, name: QA_PROJECT_NAME }, { id: { in: extraProjectIds } }] }, select: { id: true },
+  });
+  const projectIds = projects.map(p => p.id);
+  await db.task.deleteMany({ where: { OR: [{ projectId: { in: projectIds } }, { assigneeId: { in: ids } }, { createdById: { in: ids } }] } });
+  await db.actionLog.deleteMany({ where: { OR: [{ projectId: { in: projectIds } }, { actorId: { in: ids } }, { undoneById: { in: ids } }] } });
+  await db.modelUsage.deleteMany({ where: { userId: { in: ids } } });
+  await db.auditLog.deleteMany({ where: { OR: [{ actorId: { in: ids } }, { targetId: { in: ids } }] } });
+  await db.project.deleteMany({ where: { id: { in: projectIds } } });
+  await db.user.deleteMany({ where: { id: { in: ids } } });
+  extraProjectIds.length = 0;
 }
 
 describe("staging editor (APL-2682)", () => {
   beforeAll(async () => {
-    const workspace = await db.workspace.create({ data: { name: "ZZ-TEST staging editor" } });
-    workspaceId = workspace.id;
+    if (!["localhost", "127.0.0.1"].includes(dbHost) || dbName !== "sho_test") throw Error("Disposable local test database required");
+    const workspaces = await db.workspace.findMany({ take: 2 });
+    expect(workspaces.length).toBeLessThanOrEqual(1);
+    workspaceId = (workspaces[0] ?? await db.workspace.create({ data: { name: "ZZ-TEST staging editor" } })).id;
+    localFixtureReady = true;
   });
 
   beforeEach(wipe);
 
   afterAll(async () => {
     await wipe();
-    if (workspaceId) await db.workspace.delete({ where: { id: workspaceId } }).catch(() => undefined);
     await db.$disconnect();
   });
 
@@ -449,6 +453,7 @@ describe("staging editor (APL-2682)", () => {
     });
     const qa = await db.project.create({ data: { workspaceId, name: QA_PROJECT_NAME, typeId: "wst_project" } });
     const other = await db.project.create({ data: { workspaceId, name: "Other project", typeId: "wst_project" } });
+    extraProjectIds.push(other.id);
     await db.projectMember.create({ data: { projectId: qa.id, userId: user.id, role: "LEADER" } });
     await db.projectMember.create({ data: { projectId: other.id, userId: user.id, role: "EDITOR" } });
 

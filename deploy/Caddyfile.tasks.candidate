@@ -1,0 +1,15 @@
+# HR-123 review candidate. This file is not installed on the live host.
+# Keep legacy API and cached Next assets on the app until external clients are inventoried.
+tasks.aplyd.org {
+	encode gzip
+	reverse_proxy 127.0.0.1:3000
+}
+
+sheethappensofficer.aplyd.org {
+	@legacy_pages {
+		method GET HEAD
+		not path /api /api/* /_next /_next/*
+	}
+	redir @legacy_pages https://tasks.aplyd.org{uri} permanent
+	reverse_proxy 127.0.0.1:3000
+}

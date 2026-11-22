@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { audit } from "@/lib/auth";
 import { attachCentralSession, attachQaCentralSession, attachInvitedCentralSession } from "@/lib/attach-central-session";
 import { centralSessionActive, centralIdentity } from "@/lib/central-status";
-import { centralClient, SHO_ORIGIN, FLOW_COOKIE, flowCookieOptions, readFlow } from "@/lib/central-client";
+import { centralClient, centralRequestOrigin, SHO_ORIGIN, FLOW_COOKIE, flowCookieOptions, readFlow } from "@/lib/central-client";
 import { returnToEnabled, safeReturnPath } from "@/lib/return-to";
 export async function GET(req: Request) {
     try {
@@ -14,8 +14,10 @@ export async function GET(req: Request) {
         jar.set(FLOW_COOKIE, "", { ...flowCookieOptions, maxAge: 0 });
         if (!value)
             return Response.json({ error: "Sign-in expired. Start again." }, { status: 400 });
-        const flow = readFlow(value), config = await centralClient();
-        const incoming = new URL(req.url), callback = new URL(incoming.pathname + incoming.search, SHO_ORIGIN);
+        const flow = readFlow(value), origin = centralRequestOrigin(req);
+        if ((flow.origin ?? SHO_ORIGIN) !== origin) throw new Error("Callback origin changed");
+        const config = await centralClient();
+        const incoming = new URL(req.url), callback = new URL(incoming.pathname + incoming.search, origin);
         const tokens = await client.authorizationCodeGrant(config, callback, { pkceCodeVerifier: flow.verifier, expectedState: flow.state, expectedNonce: flow.nonce });
         const claims = tokens.claims(), qa = holyQaIdentity();
         const invited = invitedSessionsEnabled() && claims?.aplyd_auth_origin === "central-invited";
@@ -37,7 +39,7 @@ export async function GET(req: Request) {
         else
             await attachCentralSession(claims.sho_source_session_id as string, user.id, claims.sub, claims.aplyd_session_uid);
         await audit("CENTRAL_SIGN_IN", { actorId: user.id });
-        return new Response(null, { status: 302, headers: { Location: SHO_ORIGIN + (returnToEnabled() ? safeReturnPath(flow.returnPath, 1) ?? "/" : "/"), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+        return new Response(null, { status: 302, headers: { Location: origin + (returnToEnabled() ? safeReturnPath(flow.returnPath, 1) ?? "/" : "/"), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
     }
     catch {
         return Response.json({ error: "Central sign-in could not finish. Start again." }, { status: 400 });

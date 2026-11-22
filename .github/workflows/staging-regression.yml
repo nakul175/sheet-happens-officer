@@ -14,7 +14,7 @@
 # verify them from the server's local mail outbox. On staging that would make real accounts and send real mail, then fail.
 # They still run against a local server.
 #
-# Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.sheethappensofficer.com. Only staging
+# Target: the repository variable STAGING_BASE_URL (not a secret), else https://staging.tasks.aplyd.org. Only staging
 # or a pr1-pr4 preview is accepted; production is refused.
 # Secrets (repository settings that staging-e2e.yml already uses; this workflow adds none):
 #   STAGING_USER, STAGING_PASS   the basic-auth gate in front of staging
@@ -22,20 +22,14 @@
 #   SHO_MEMBER_EMAIL / SHO_MEMBER_PASS also feed SHARD_EMAIL / SHARD_PASS, which APL-2733 signs in with.
 # They reach steps through env: only and are never echoed.
 #
-# Traces are OFF unless the "trace" input asks for them. A trace cannot be redacted: it holds the sign-in request body (the
+# Traces are OFF and cannot be enabled through this workflow. A trace cannot be redacted: it holds the sign-in request body (the
 # password) and the basic-auth header (STAGING_USER:STAGING_PASS in base64, which GitHub's log masking does not
-# catch) (APL-2476). With traces on, the uploaded test-results artifact carries those secrets to anyone who can download it.
+# catch) (APL-2476). Do not upload traces: the test-results artifact would expose those secrets to artifact readers.
 name: Staging regression
 
 on:
   workflow_dispatch:
     inputs:
-      trace:
-        description: "Playwright traces. They contain passwords (see the comment at the top of this file)."
-        required: false
-        default: "off"
-        type: choice
-        options: ["off", "retain-on-failure"]
 
 permissions:
   contents: read
@@ -46,9 +40,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BASE_URL: ${{ vars.STAGING_BASE_URL || 'https://staging.sheethappensofficer.com' }}
+  BASE_URL: ${{ vars.STAGING_BASE_URL || 'https://staging.tasks.aplyd.org' }}
   # The only hosts a run may target: staging, or the preview slots pr1-pr4. Matched against the whole host.
-  TARGET_ALLOWLIST: '^(staging\.sheethappensofficer\.com|pr[1-4]\.staging\.sheethappensofficer\.com)$'
+  TARGET_ALLOWLIST: '^(staging\.tasks\.aplyd\.org|pr[1-4]\.staging\.sheethappensofficer\.com)$'
   # Only for `prisma generate` during npm ci; nothing connects to it.
   DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
   DIRECT_DATABASE_URL: postgresql://unused:unused@127.0.0.1:1/unused
@@ -73,11 +67,11 @@ jobs:
             echo "::error::STAGING_BASE_URL must be https://<host> with no path."; exit 1
           fi
           host="${BASH_REMATCH[1]}"
-          if [[ "${host,,}" =~ ^(www\.|app\.)?sheethappensofficer\.com\.?$ ]]; then
+          if [[ "${host,,}" =~ ^((www\.|app\.)?sheethappensofficer\.com|sheethappensofficer\.aplyd\.org|tasks\.aplyd\.org)\.?$ ]]; then
             echo "::error::Refusing to run against production ($host)."; exit 1
           fi
           if ! [[ "$host" =~ $TARGET_ALLOWLIST ]]; then
-            echo "::error::Target '$host' is not allowed. Use staging.sheethappensofficer.com or pr1-pr4.staging.sheethappensofficer.com."; exit 1
+            echo "::error::Target '$host' is not allowed. Use staging.tasks.aplyd.org or pr1-pr4.staging.sheethappensofficer.com."; exit 1
           fi
           echo "Target: https://$host"
 
@@ -137,7 +131,7 @@ jobs:
           SHARD_EMAIL: ${{ secrets.SHO_MEMBER_EMAIL }}
           SHARD_PASS: ${{ secrets.SHO_MEMBER_PASS }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: playwright-report.json
-          TRACE: ${{ inputs.trace }}
+          TRACE: "off"
         run: npx playwright test --workers=1 --grep-invert "$EXCLUDED_TAGS" --reporter=list,html,json --trace="$TRACE"
 
       - name: Count the results
@@ -172,8 +166,19 @@ jobs:
             echo "Also excluded: @static (a file-contains check) and @manual (cannot force a failure on staging), as in staging-e2e.yml."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload the counts
+      - name: Scan staging reports before upload
+        id: artifact_value_scan
         if: always()
+        env:
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+          STAGING_PASS: ${{ secrets.STAGING_PASS }}
+          SHO_ADMIN_PASS: ${{ secrets.SHO_ADMIN_PASS }}
+          SHO_MEMBER_PASS: ${{ secrets.SHO_MEMBER_PASS }}
+          SHO_QA_PASS: ${{ secrets.SHO_QA_PASS }}
+        run: node scripts/ci/scan-artifact-values.mjs playwright-counts.json playwright-report.json playwright-report test-results
+
+      - name: Upload the counts
+        if: always() && steps.artifact_value_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: staging-regression-counts
@@ -183,8 +188,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload the evidence (HTML report, test results, traces when turned on)
-        if: always()
+      - name: Upload the evidence (HTML report and test results)
+        if: always() && steps.artifact_value_scan.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: staging-regression-evidence

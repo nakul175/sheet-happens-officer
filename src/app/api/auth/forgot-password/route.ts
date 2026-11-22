@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
-import { emailLimitReached, issueToken } from "@/lib/auth";
-import { resetMail, sendMail } from "@/lib/email";
+import { AuthMailLimitError, emailLimitReached, issueTokenAndSend } from "@/lib/auth";
+import { MailError, resetMail, sendMail } from "@/lib/email";
 import { handle, parseBody } from "@/lib/http";
 import { resendInput } from "@/lib/schemas";
 
@@ -9,7 +9,10 @@ export const POST = handle(async (req: Request) => {
   const { email } = await parseBody(req, resendInput);
   const user = await db.user.findUnique({ where: { email } });
   if (user && !user.deactivatedAt && !(await emailLimitReached(user.id, "RESET"))) {
-    await sendMail(resetMail(email, await issueToken(user.id, "RESET")));
+    try { await issueTokenAndSend(user.id, "RESET", (token) => sendMail(resetMail(email, token))); }
+    // A provider outage must not reveal whether this address has an account.
+    // sendMail records the redacted provider failure; unexpected DB errors still fail.
+    catch (err) { if (!(err instanceof AuthMailLimitError) && !(err instanceof MailError)) throw err; }
   }
   return Response.json({
     status: "ok",

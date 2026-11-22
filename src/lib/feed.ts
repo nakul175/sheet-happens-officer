@@ -12,6 +12,7 @@ import { purgeExpiredComments } from "@/lib/comments";
 import { COMMENT_ACTION_PREFIX, COMMENT_NOTICE_TYPES, commentsEnabled } from "@/lib/flags";
 import { isTooOldToUndo, isUndoable } from "@/lib/undoable";
 import { passwordField } from "@/lib/schemas";
+import { displayedJobFailure } from "@/lib/job-diagnostic";
 
 const NOTE_DAYS = 90;
 const LOG_MONTHS = 12;
@@ -82,7 +83,7 @@ export function noticeText(n: N) {
     DEAL_STAGE_CHANGED: `${who} moved ${p} to ${d.stage ?? "another stage"}.`,
     DEAL_NEEDS_NEXT_STEP: `${p} needs a next step.`,
     DEAL_STALLED: `${p} has had no activity for 30 days.`,
-    JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${d.error}` : ""}.`,
+    JOB_FAILED: `Scheduled job "${d.job}" failed${d.error ? `: ${displayedJobFailure(d.error)}` : ""}.`,
     JOB_MISSED: `Scheduled job "${d.job}" did not run on its day.`,
   };
   // A deleted task cannot be opened, so its notice links to the project Trash (SHO-US-7.3 AC1).
@@ -255,6 +256,7 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
     db.task.findMany({ where: { id: { in: ids } }, select: { id: true, title: true } }),
   ]);
   const names = new Map<string, string>([...users, ...sections].map((x) => [x.id, x.name] as [string, string]));
+  const existingSectionIds = new Set(sections.map((s) => s.id));
   for (const t of tasks) names.set(`t:${t.id}`, t.title);
   return {
     items: page.map((r) => ({
@@ -267,7 +269,8 @@ export async function projectActivity(user: Actor, projectId: string, cursor?: s
       // "How" is only worth a word when it was not the screen (SHO-US-14.14 AC4).
       via: r.channel === "SCREEN" ? "screen" : "historical",
       // Undo stays on the row (AC5); an Editor can only undo their own actions, as the server enforces.
-      undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id) ? "none"
+      undo: r.undoneAt ? "undone" : !isUndoable(r.action) || (!leader && r.actorId !== user.id)
+        || (r.action === "task.moved" && !existingSectionIds.has(String((r.beforeState as { sectionId?: unknown } | null)?.sectionId ?? ""))) ? "none"
         : isTooOldToUndo(r.createdAt) ? "too_old" : "available",
     })),
     nextCursor: more ? page[page.length - 1].id : null,

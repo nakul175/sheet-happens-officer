@@ -5,11 +5,10 @@
 // Date, or a `now` argument on the server job. No request field sets it.
 import { readdirSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { account, admin, project, superAdmin, task, withVersion, BASE, OUTBOX, type Client } from "./helpers";
+import { account, admin, project, superAdmin, task, withVersion, OUTBOX, type Client } from "./helpers";
 import { actor, db } from "./actor";
 import { sentence } from "../src/lib/activity-text";
 import { addComment, editComment, listComments, purgeExpiredComments, removeComment } from "../src/lib/comments";
-import { commentsEnabled } from "../src/lib/flags";
 import { listNotifications, markRead, markUnread, projectActivity, purgeOld } from "../src/lib/feed";
 import { logAction } from "../src/lib/notify";
 import { search } from "../src/lib/search";
@@ -418,6 +417,14 @@ describe("flag on (AC1–AC8)", () => {
       posted.push(row.text);
       expect((await listComments(actor(who), t1)).comments.some((c) => c.id === row.id)).toBe(true);
     }
+    const writeState = async () => ({
+      task: await db.task.findUniqueOrThrow({ where: { id: t1 } }),
+      comments: await db.comment.findMany({ where: { taskId: t1 }, orderBy: { id: "asc" } }),
+      actions: await db.actionLog.findMany({ where: { projectId: p.id, targetId: t1 }, orderBy: { id: "asc" } }),
+      notifications: await db.notification.findMany({ where: { taskId: t1 }, orderBy: { id: "asc" } }),
+      audit: await db.auditLog.findMany({ where: { targetId: t1 }, orderBy: { id: "asc" } }),
+    });
+    const beforeDeniedWrites = await writeState();
     await expect(addComment(actor(viewer), t1, { text: "ZZ-TEST v" })).rejects.toMatchObject({ status: 403 });
     const viewerList = await listComments(actor(viewer), t1);
     expect(viewerList.comments.map((c) => c.text)).toEqual(posted);
@@ -425,6 +432,7 @@ describe("flag on (AC1–AC8)", () => {
     const ok = viewerList.comments[0];
     await expect(editComment(actor(viewer), t1, ok.id, { text: "ZZ-TEST v" })).rejects.toMatchObject({ status: 403 });
     await expect(removeComment(actor(viewer), t1, ok.id)).rejects.toMatchObject({ status: 403 });
+    expect(await writeState()).toEqual(beforeDeniedWrites);
     await expect(editComment(actor(outsider), t1, ok.id, { text: "ZZ-TEST o" })).rejects.toMatchObject({ status: 404, message: absent.message });
     await expect(removeComment(actor(outsider), t1, ok.id)).rejects.toMatchObject({ status: 404, message: absent.message });
     const other = await project(outsider, outsider);
@@ -666,8 +674,8 @@ describe("flag on (AC1–AC8)", () => {
     expect(p95, `p95 ${p95}ms over 50 reads`).toBeLessThanOrEqual(1000);
   }, 60_000);
 
-  // D6: the full case is BLOCKED until SHO-US-17.1. This checks the comment search that is built today.
-  it("qa:TC-APL2590-b4442f7b@v1: BLOCKED (SHO-US-17.1) Comment search. Record it as BLOCKED.", async () => {
+  // D6: current comment search returns the task without disclosing the comment body.
+  it("qa:TC-APL2590-b4442f7b@v1: comment search returns the task without text and denies outsiders", async () => {
     const { worker, outsider, t1 } = await cast();
     const phrase = `zzsearch${Date.now().toString(36)}`;
     await addComment(actor(worker), t1, { text: `ZZ-TEST note ${phrase}` });

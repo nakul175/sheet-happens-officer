@@ -12,6 +12,7 @@ const PRODUCTION_HOSTS = new Set([
   "www.sheethappensofficer.com",
   "app.sheethappensofficer.com",
   "sheethappensofficer.aplyd.org",
+  "tasks.aplyd.org",
   "168.144.144.69",
 ]);
 
@@ -94,6 +95,13 @@ export function resolveBaseUrl(env: TargetEnv = process.env): string {
 }
 
 export const BASE_URL = resolveBaseUrl();
+
+/** Ignore a short-lived self-signed certificate only for the audit job's HTTPS loopback proxy. */
+export function auditLoopbackIgnoreHTTPSErrors(baseUrl = BASE_URL): boolean {
+  if (process.env.SHO_AUDIT_LOOPBACK_TLS !== '1') return false;
+  const target = new URL(baseUrl);
+  return target.protocol === 'https:' && ['localhost', '127.0.0.1', '[::1]'].includes(target.hostname);
+}
 
 if (!process.env.VITEST) {
   const host = hostOf(BASE_URL);

@@ -1,10 +1,35 @@
 import {it,expect,vi,afterEach} from 'vitest';
-import {holyQaIdentity,centralIdentitySecret} from '../src/lib/holy-qa-identity';
+import {holyQaIdentity,centralIdentitySecret,holySheetHostOrigin,holySheetSameOrigin} from '../src/lib/holy-qa-identity';
 const sub='12345678-1234-4234-8234-123456789abc',env={SHO_HOLY_QA:'1',APP_URL:'https://sho-qa.aplyd.org',SHO_HOLY_QA_SUBJECTS:sub,SHO_HOLY_QA_CLIENT_SECRET:'q'.repeat(48),APLYD_ACCOUNTS_CLIENT_SECRET:'p'.repeat(48)};
 afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();});
 it('is inert by default and keeps the existing production secret selection',()=>{expect(holyQaIdentity({APP_URL:'https://sheethappensofficer.aplyd.org'})).toBeNull();expect(centralIdentitySecret({...env,SHO_HOLY_QA:'0'})).toBe('p'.repeat(48));});
 it('permits only exact isolated origin, separate client and explicit subjects',()=>{expect(holyQaIdentity(env)).toEqual({origin:env.APP_URL,clientId:'sho-holy-qa',subjects:[sub]});expect(centralIdentitySecret(env)).toBe('q'.repeat(48));for(const value of ['http://staging.sheethappensofficer.com','https://sheethappensofficer.aplyd.org','https://evil.invalid','https://sho-qa.aplyd.org/'])expect(()=>holyQaIdentity({...env,APP_URL:value})).toThrow();});
 it('does not fall back to the production secret or admit ambiguous identity allowlists',()=>{expect(()=>centralIdentitySecret({...env,SHO_HOLY_QA_CLIENT_SECRET:undefined})).toThrow();for(const value of ['',sub+','+sub,'not-an-id',Array(5).fill(sub).join(',')])expect(()=>holyQaIdentity({...env,SHO_HOLY_QA_SUBJECTS:value})).toThrow();});
+it('binds Holy Sheet document writes to the exact canonical or legacy public host',()=>{
+ const request=(host:string,origin:string)=>new Request(`https://${host}/api/projects/p/documents`,{headers:{host,origin}});
+ const prod={SHO_HOLY_QA:'0'};
+ expect(holySheetHostOrigin(prod)).toBe('https://tasks.aplyd.org');
+ expect(holySheetHostOrigin({...prod,APP_URL:'https://staging.tasks.aplyd.org'})).toBe('https://staging.tasks.aplyd.org');
+ for(const host of ['tasks.aplyd.org','staging.tasks.aplyd.org','sheethappensofficer.aplyd.org'])
+  expect(holySheetSameOrigin(request(host,`https://${host}`),prod)).toBe(true);
+ for(const [host,origin] of [
+  ['tasks.aplyd.org','https://sheethappensofficer.aplyd.org'],
+  ['sheethappensofficer.aplyd.org','https://tasks.aplyd.org'],
+  ['staging.tasks.aplyd.org','https://tasks.aplyd.org'],
+  ['tasks.aplyd.org','http://tasks.aplyd.org'],
+  ['tasks.aplyd.org','https://tasks.aplyd.org.evil.invalid'],
+  ['evil.invalid','https://evil.invalid'],
+  ['tasks.aplyd.org:443','https://tasks.aplyd.org:443'],
+ ]) expect(holySheetSameOrigin(request(host,origin),prod)).toBe(false);
+ expect(holySheetSameOrigin(new Request('https://tasks.aplyd.org/api/projects/p/documents',{headers:{origin:'https://tasks.aplyd.org'}}),prod)).toBe(false);
+});
+it('keeps the isolated Holy Sheet QA origin separate from both public hosts',()=>{
+ const request=(host:string,origin:string)=>new Request(`https://${host}/api/tasks/t/documents`,{headers:{host,origin}});
+ expect(holySheetHostOrigin(env)).toBe(env.APP_URL);
+ expect(holySheetSameOrigin(request('sho-qa.aplyd.org',env.APP_URL),env)).toBe(true);
+ expect(holySheetSameOrigin(request('tasks.aplyd.org','https://tasks.aplyd.org'),env)).toBe(false);
+ expect(holySheetSameOrigin(request('sho-qa.aplyd.org','https://tasks.aplyd.org'),env)).toBe(false);
+});
 it('checks the live QA client binding and denies identities outside its allowlist without a request',async()=>{
  for(const [k,v]of Object.entries({...env,APLYD_ACCOUNTS_ISSUER:'https://accounts.aplyd.org'}))vi.stubEnv(k,v);
  const f=vi.fn().mockResolvedValue(Response.json({active:true,sub,local_id:'native-stage'}));vi.stubGlobal('fetch',f);

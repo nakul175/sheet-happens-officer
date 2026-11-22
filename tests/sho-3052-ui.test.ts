@@ -117,19 +117,16 @@ describe("SHO-3052 Buyer confirmation in the browser", () => {
     try {
       const foreign = await db.organisation.create({ data: { workspaceId: workspace.id, createdById: leader.id, name: `ZZ-TEST foreign Buyer ${Date.now()}` } });
       foreignId = foreign.id;
-      const { context, page } = await openAs(leader, 390, f.id, f.name);
-      try {
-        await page.getByRole("button", { name: "Change Buyer", exact: true }).click();
-        const select = page.getByLabel("New Buyer (active organisations only)");
-        await select.locator(`option[value="${f.newBuyer.id}"]`).waitFor({ state: "attached" });
-        expect(await select.locator(`option[value="${foreign.id}"]`).count()).toBe(0);
-        const current = before.parties.find((p: { role: string }) => p.role === "BUYER");
-        for (const force of [false, true]) {
-          const result = await leader.c.patch(`/api/projects/${f.id}/parties/buyer`, { organisationId: foreign.id, expectedPartyId: current.id, expectedOrganisationId: f.oldBuyer.id, force });
-          expect(result.status).toBe(400);
-          expect(await snapshot(f.id)).toEqual(before);
-        }
-      } finally { await context.close(); }
+      // Invalid multi-workspace storage must fail closed for reads and writes,
+      // rather than silently treating it as a supported second tenant.
+      expect((await leader.c.get(`/api/projects/${f.id}`)).status).toBe(503);
+      const current = before.parties.find((p: { role: string }) => p.role === "BUYER");
+      for (const force of [false, true]) {
+        const result = await leader.c.patch(`/api/projects/${f.id}/parties/buyer`, { organisationId: foreign.id, expectedPartyId: current.id, expectedOrganisationId: f.oldBuyer.id, force });
+        expect(result.status).toBe(503);
+        expect(await snapshot(f.id)).toEqual(before);
+      }
+
     } finally {
       // Remove only these two test-owned rows; never alter schema or another workspace.
       if (foreignId) await db.organisation.delete({ where: { id: foreignId } });

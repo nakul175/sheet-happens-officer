@@ -1,5 +1,7 @@
+import { multiWorkspaceEnabled } from "@/lib/workspace-authority";
 import { nativeSessionActive } from "@/lib/native-session-status";
 import { centralSessionActive } from "@/lib/central-status";
+import { assertWorkspaceUser } from "@/lib/workspace";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { holyQaRealm } from "@/lib/holy-qa-identity";
 import { db } from "@/lib/db";
@@ -18,7 +20,7 @@ export function suiteConfig(id = "bugoff") {
   return {
     id,
     secret,
-    origin: realm?.origin ?? "https://sheethappensofficer.aplyd.org",
+    origin: realm?.origin ?? "https://tasks.aplyd.org",
     callback: id === "accounts" ? (realm ? realm.origin + "/bridge/callback" : "https://accounts.aplyd.org/bridge/callback") : "https://bugoff.aplyd.org/api/auth/callback/aplyd",
   };
 }
@@ -37,10 +39,15 @@ export async function activeSuiteIdentity(userId: string, sessionId: string) {
     const central = await db.centralSessionLink.findUnique({ where: { sessionId: session.id } });
     if (central ? !await centralSessionActive(central.subject, central.sessionUid, user.id) : !await nativeSessionActive(user.id, session.createdAt)) return null;
   }
+  if (!multiWorkspaceEnabled()) await assertWorkspaceUser(user.workspaceId);
   return { sub: user.id, email: user.email, email_verified: true, name: user.name };
 }
 export function oauthJson(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store", Pragma: "no-cache", "Referrer-Policy": "no-referrer" } });
+}
+
+export class SuiteBodyTooLargeError extends Error {
+  constructor() { super("Body too large"); }
 }
 
 export async function readSuiteBody(req: Request, limit = 4096): Promise<string> {
@@ -51,7 +58,7 @@ export async function readSuiteBody(req: Request, limit = 4096): Promise<string>
     const { done, value } = await reader.read();
     if (done) break;
     length += value.byteLength;
-    if (length > limit) { await reader.cancel(); throw new Error("Body too large"); }
+    if (length > limit) { await reader.cancel(); throw new SuiteBodyTooLargeError(); }
     chunks.push(value);
   }
   return Buffer.concat(chunks).toString("utf8");

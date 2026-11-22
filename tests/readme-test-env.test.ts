@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { describe, expect, it } from "vitest";
 
-const PLACEHOLDER_SECRET = /replace-with|placeholder|changeme|example-token/i;
+const PLACEHOLDER_SECRET = /replace-with|placeholder|changeme|example-token|local-test-only/i;
 
 function testSection(readme: string): string {
   const start = readme.indexOf("\n## Test\n");
@@ -58,26 +58,15 @@ function npmTestEnv(section: string): Record<string, string> {
   return command.env;
 }
 
-/**
- * The README publishes postgresql://USER:PASSWORD@localhost/taskboard.
- * Prepare that login on the suite's server so a fresh `npm test` can actually query it.
- */
+/** Verify the already-provisioned disposable database. Never provision roles/DBs from a documentation test. */
 async function ensureReadmeDatabase(): Promise<void> {
-  const admin = new PrismaClient();
-  try {
-    await admin.$executeRawUnsafe(`DO $$ BEGIN
-      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'USER') THEN
-        CREATE ROLE "USER" LOGIN PASSWORD 'PASSWORD';
-      END IF;
-    END $$;`);
-    const found = await admin.$queryRawUnsafe<Array<{ exists: boolean }>>(
-      `SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'taskboard') AS exists`,
-    );
-    if (!found[0]?.exists) await admin.$executeRawUnsafe(`CREATE DATABASE taskboard OWNER "USER"`);
-    await admin.$executeRawUnsafe(`GRANT CONNECT ON DATABASE taskboard TO "USER"`);
-  } finally {
-    await admin.$disconnect();
+  const url = new URL(process.env.DATABASE_URL ?? "");
+  if (!["localhost", "127.0.0.1"].includes(url.hostname) || url.pathname !== "/sho_test") {
+    throw new Error("README test requires disposable loopback sho_test database");
   }
+  const admin = new PrismaClient();
+  try { await admin.$queryRaw`SELECT 1 AS ok`; }
+  finally { await admin.$disconnect(); }
 }
 
 /** `npm test` with only the README's variables. PATH is the harness, not a documented setting. */
@@ -160,7 +149,7 @@ function connectionProblem(value: string): string | null {
   if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return `host ${url.hostname} is not local`;
   const user = decodeURIComponent(url.username);
   const password = decodeURIComponent(url.password);
-  if (!/^(USER|user)$/.test(user) || !/^(PASSWORD|password)$/.test(password)) return "credentials are not placeholders";
+  if (user !== "sho" || password !== "sho" || url.pathname !== "/sho_test") return "credentials/database are not the documented disposable fixture";
   return null;
 }
 
@@ -222,7 +211,7 @@ describe("README tells a developer which env vars the test process needs", () =>
   it("qa:TC-APL2654-57913ce9@v1: npm test from a fresh setup using only the README", async () => {
     await ensureReadmeDatabase();
     const started = runFreshNpmTest(npmTestEnv(section));
-    expect(started.output).toContain("using-db=localhost/taskboard");
+    expect(started.output).toContain("using-db=127.0.0.1/sho_test");
     expect(started.output).toContain("query-ok");
     expect(started.output).toContain("job-secret-ok");
     expect(started.status).toBe(0);

@@ -15,6 +15,7 @@ export function Verify() {
   const token = useSearchParams().get("token") ?? "";
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const started = useRef(false);
 
   useEffect(() => {
@@ -25,9 +26,15 @@ export function Verify() {
     if (started.current) return; // a link works once; never submit it twice
     started.current = true;
     setBusy(true);
+    setError("");
     const r = await post("/api/auth/verify", { token });
     if (r.ok) setDone(true);
-    else router.replace("/expired");
+    else if (r.status === 400) router.replace("/expired");
+    else {
+      started.current = false;
+      setBusy(false);
+      setError("Could not verify right now. Check your connection and try again.");
+    }
   }
 
   return (
@@ -43,6 +50,7 @@ export function Verify() {
         <>
           <h1>Verify your email</h1>
           <p className={styles.lead}>Confirm this is your address to finish creating your account.</p>
+          {error && <p className={styles.alert} role="alert">{error}</p>}
           <button type="button" onClick={verify} disabled={busy || !token} className={styles.primary}>
             {busy ? "Verifying…" : "Verify my email"}
           </button>

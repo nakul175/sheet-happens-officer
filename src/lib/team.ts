@@ -1,5 +1,6 @@
 import { multiWorkspaceEnabled, workspaceScope, workspacePeopleWhere, personInWorkspace, requireOriginalAccountAdministration } from "@/lib/workspace-authority";
 import { invitedNativeId } from "@/lib/invited-central-identity";
+import { getOrCreateWorkspace } from "@/lib/workspace";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { activeMember, isActive, isAdmin, leaderId, type Actor } from "@/lib/access";
@@ -59,12 +60,40 @@ export async function setOrgRole(actor: Actor, targetId: string, role: "MEMBER" 
   if (isSuper(target)) throw new ApiError(403, "The Super Admin role is set in server configuration only.");
   if (!isActive(target)) throw new ApiError(409, "Only active people can change role.");
   if (target.orgRole === role) return target;
-  await db.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: targetId }, data: { orgRole: role } });
+  return db.$transaction(async (tx) => {
+    try {
+      for (const personId of [...new Set([actor.id, targetId])].sort()) {
+        if (personId === targetId) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR UPDATE NOWAIT`;
+        else await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const [currentActor, currentTarget] = await Promise.all([
+      tx.user.findUnique({ where: { id: actor.id } }),
+      tx.user.findUnique({ where: { id: targetId } }),
+    ]);
+    if (!currentActor || !isActive(currentActor) || currentActor.orgRole !== "SUPER_ADMIN") {
+      throw new ApiError(403, "Only the Super Admin can change roles.");
+    }
+    if (!currentTarget || currentTarget.workspaceId !== currentActor.workspaceId) throw notFound("Person");
+    if (multiWorkspaceEnabled()) {
+      if (currentActor.workspaceId !== actor.workspaceId || await tx.workspaceMembership.count({ where: { userId: targetId } })) {
+        throw new ApiError(403, "Manage this account through Aplyd.");
+      }
+    }
+    if (isSuper(currentTarget)) throw new ApiError(403, "The Super Admin role is set in server configuration only.");
+    if (!isActive(currentTarget)) throw new ApiError(409, "Only active people can change role.");
+    if (currentTarget.orgRole === role) return currentTarget;
+    const updated = await tx.user.update({ where: { id: targetId }, data: { orgRole: role } });
     await notify(tx, [targetId], "ORG_ROLE_CHANGED", { actorId: actor.id, data: { role } });
     await auditTx(tx, role === "ADMIN" ? "ADMIN_PROMOTED" : "ADMIN_DEMOTED", { actorId: actor.id, targetId, data: { role } });
+    return updated;
   });
-  return { ...target, orgRole: role };
 }
 
 export function mayAct(actor: Actor, target: { orgRole: string; email: string }) {
@@ -81,33 +110,58 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
   if (!mayAct(actor, target)) throw new ApiError(403, "You cannot deactivate this person.");
   if (target.id === actor.id) throw new ApiError(409, "You cannot deactivate yourself.");
   if (target.deactivatedAt) throw new ApiError(409, "This person is already deactivated.");
-
-  const memberships = await db.projectMember.findMany({ where: { userId: targetId }, include: { project: true } });
-  const leads = memberships.filter((m) => m.role === "LEADER");
-  if (leads.length) {
-    // A caller who can see the CRM gets every leadership, in the same order as before (APL-2735 AC2).
-    // crmProjectWhere drops deals the caller cannot see, so those names, ids and counts stay out of the 409.
-    let visible = leads;
-    if (!crmVisible(actor)) {
-      const visibleIds = new Set((await db.projectMember.findMany({
-        where: { userId: targetId, role: "LEADER", project: crmProjectWhere(actor) },
-        select: { projectId: true },
-      })).map((row) => row.projectId));
-      visible = leads.filter((m) => visibleIds.has(m.projectId));
-    }
-    if (!visible.length) throw new ApiError(409, "Name a new Leader first.");
-    throw new ApiError(409, "Name a new Leader first for: " + visible.map((m) => m.project.name).join(", "), {
-      leads: visible.map((m) => ({ id: m.projectId, name: m.project.name })),
-    });
-  }
-  if (reassign !== "leaders") {
-    const named = await db.user.findUnique({ where: { id: reassign } });
-    if (!named || !isActive(named) || named.id === targetId) throw new ApiError(400, "Choose an active person to take the tasks.");
-  }
-
   // APL-2995: fellBack names only projects the caller can see; a hidden deal still falls back to its Leader, unnamed.
-  const showDeals = crmVisible(actor);
   return db.$transaction(async (tx) => {
+    // A task writer and this deactivation must agree on the person's eligibility.
+    // Lock the account before reading memberships; an FK membership insert then
+    // cannot appear between this snapshot and the final account update.
+    try {
+      for (const personId of [actor.id, targetId].sort()) {
+        if (personId === targetId) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR UPDATE NOWAIT`;
+        else await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+      await tx.$queryRaw`SELECT "projectId" FROM "ProjectMember" WHERE "userId" = ${targetId} FOR SHARE NOWAIT`;
+      if (reassign !== "leaders" && reassign !== actor.id) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${reassign} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === 'P2010' && failure.meta?.code === '55P03') {
+        throw new ApiError(409, "Account or membership is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const currentActor = await tx.user.findUnique({ where: { id: actor.id } });
+    const currentTarget = await tx.user.findUnique({ where: { id: targetId } });
+    if (!currentTarget) throw notFound("Person");
+    if (!currentActor || !isActive(currentActor) || currentActor.workspaceId !== currentTarget.workspaceId || !mayAct(currentActor, currentTarget)) {
+      throw new ApiError(403, "You cannot deactivate this person.");
+    }
+    if (multiWorkspaceEnabled() && (currentActor.workspaceId !== actor.workspaceId ||
+        await tx.workspaceMembership.count({ where: { userId: targetId } }))) {
+      throw new ApiError(403, "Manage this account through Aplyd.");
+    }
+    if (currentTarget.deactivatedAt) throw new ApiError(409, "This person is already deactivated.");
+    const memberships = await tx.projectMember.findMany({ where: { userId: targetId }, include: { project: true } });
+    const leads = memberships.filter((m) => m.role === "LEADER");
+    if (leads.length) {
+      // A caller who cannot see the CRM gets no deal names, ids or counts in this 409.
+      let visible = leads;
+      if (!crmVisible(currentActor)) {
+        const visibleIds = new Set((await tx.projectMember.findMany({
+          where: { userId: targetId, role: "LEADER", project: crmProjectWhere(currentActor) },
+          select: { projectId: true },
+        })).map((row) => row.projectId));
+        visible = leads.filter((m) => visibleIds.has(m.projectId));
+      }
+      if (!visible.length) throw new ApiError(409, "Name a new Leader first.");
+      throw new ApiError(409, "Name a new Leader first for: " + visible.map((m) => m.project.name).join(", "), {
+        leads: visible.map((m) => ({ id: m.projectId, name: m.project.name })),
+      });
+    }
+    if (reassign !== "leaders") {
+      const named = await tx.user.findUnique({ where: { id: reassign } });
+      if (!named || !isActive(named) || named.workspaceId !== currentTarget.workspaceId || named.id === targetId) throw new ApiError(400, "Choose an active person to take the tasks.");
+    }
+    const showDeals = crmVisible(currentActor);
     const fellBack: string[] = [];
     let moved = 0;
     for (const m of memberships) {
@@ -126,11 +180,12 @@ export async function deactivate(actor: Actor, targetId: string, reassign: strin
       // Tasks on a hidden deal still go to its Leader; only what this caller is told is redacted.
       if (visible) moved += r.moved;
     }
-    await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: new Date() } });
-    await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: new Date() } });
+    const now = new Date();
+    await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: now } });
+    await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: now } });
     await auditTx(tx, "USER_DEACTIVATED", { actorId: actor.id, targetId });
     return { moved, fellBack };
-  });
+  }, { isolationLevel: "ReadCommitted" });
 }
 
 /** Restores sign-in only; reassigned tasks are not moved back (SHO-US-2.3 AC3). */
@@ -141,6 +196,30 @@ export async function reactivate(actor: Actor, targetId: string) {
   if (!mayAct(actor, target)) throw new ApiError(403, "You cannot reactivate this person.");
   if (!target.deactivatedAt) throw new ApiError(409, "This person is not deactivated.");
   await db.$transaction(async (tx) => {
+    try {
+      for (const personId of [...new Set([actor.id, targetId])].sort()) {
+        if (personId === targetId) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR UPDATE NOWAIT`;
+        else await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const [currentActor, currentTarget] = await Promise.all([
+      tx.user.findUnique({ where: { id: actor.id } }),
+      tx.user.findUnique({ where: { id: targetId } }),
+    ]);
+    if (!currentTarget || !currentActor || !isActive(currentActor) || currentActor.workspaceId !== currentTarget.workspaceId || !mayAct(currentActor, currentTarget)) {
+      throw new ApiError(403, "You cannot reactivate this person.");
+    }
+    if (multiWorkspaceEnabled() && (currentActor.workspaceId !== actor.workspaceId ||
+        await tx.workspaceMembership.count({ where: { userId: targetId } }))) {
+      throw new ApiError(403, "Manage this account through Aplyd.");
+    }
+    if (!currentTarget.deactivatedAt) throw new ApiError(409, "This person is not deactivated.");
     await tx.user.update({ where: { id: targetId }, data: { deactivatedAt: null } });
     await auditTx(tx, "USER_REACTIVATED", { actorId: actor.id, targetId });
   });
@@ -158,17 +237,33 @@ export async function addPerson(actor: Actor & { name?: string }, input: AddInpu
       existingId: existing.id,
     });
   }
-  const workspace =
-    (multiWorkspaceEnabled() ? await db.workspace.findUniqueOrThrow({where:{id:actor.workspaceId!}}) : await db.workspace.findFirst({ orderBy: { createdAt: "asc" } })) ?? (await db.workspace.create({ data: { name: "Workspace" } }));
+const workspace = multiWorkspaceEnabled()
+    ? await db.workspace.findUniqueOrThrow({ where: { id: actor.workspaceId! } })
+    : await getOrCreateWorkspace();
   const password = generatePassword();
+  const passwordHash = await hashPassword(password);
   const now = new Date();
   const user = await db.$transaction(async (tx) => {
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${actor.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const currentActor = await tx.user.findUnique({ where: { id: actor.id } });
+    if (!currentActor || !isActive(currentActor) || currentActor.orgRole !== "SUPER_ADMIN" ||
+        (multiWorkspaceEnabled() && currentActor.workspaceId !== actor.workspaceId)) {
+      throw new ApiError(403, "Only the Super Admin can add people.");
+    }
     const u = await tx.user.create({
       data: {
         workspaceId: workspace.id,
         email: input.email,
         name: `${input.firstName} ${input.lastName}`,
-        passwordHash: await hashPassword(password),
+        passwordHash,
         emailVerifiedAt: now,
         tempPasswordAt: now,
         // A listed Super Admin address stays Super Admin whatever role was picked (SHO-US-2.1 AC3).
@@ -201,14 +296,43 @@ export async function resendSignIn(actor: Actor & { name?: string }, targetId: s
   if (target.id === actor.id) throw new ApiError(409, "Use Profile to change your own password.");
   if (target.deactivatedAt) throw new ApiError(409, "Reactivate this person first.");
   const password = generatePassword();
+  const passwordHash = await hashPassword(password);
   const now = new Date();
-  await db.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: targetId }, data: { passwordHash: await hashPassword(password), tempPasswordAt: now, emailVerifiedAt: target.emailVerifiedAt ?? now } });
+  const currentTarget = await db.$transaction(async (tx) => {
+    try {
+      for (const personId of [...new Set([actor.id, targetId])].sort()) {
+        if (personId === targetId) await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR UPDATE NOWAIT`;
+        else await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const [currentActor, currentTarget] = await Promise.all([
+      tx.user.findUnique({ where: { id: actor.id } }),
+      tx.user.findUnique({ where: { id: targetId } }),
+    ]);
+    if (!currentActor || !isActive(currentActor) || currentActor.orgRole !== "SUPER_ADMIN") {
+      throw new ApiError(403, "Only the Super Admin can resend sign-in details.");
+    }
+    if (!currentTarget || currentTarget.workspaceId !== currentActor.workspaceId) throw notFound("Person");
+    if (multiWorkspaceEnabled()) {
+      if (currentActor.workspaceId !== actor.workspaceId || await tx.workspaceMembership.count({ where: { userId: targetId } })) {
+        throw new ApiError(403, "Manage this account through Aplyd.");
+      }
+    }
+    if (currentTarget.id === currentActor.id) throw new ApiError(409, "Use Profile to change your own password.");
+    if (currentTarget.deactivatedAt) throw new ApiError(409, "Reactivate this person first.");
+    await tx.user.update({ where: { id: targetId }, data: { passwordHash, tempPasswordAt: now, emailVerifiedAt: currentTarget.emailVerifiedAt ?? now } });
     await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: now } });
-    await tx.loginAttempt.deleteMany({ where: { email: target.email } });
+    await tx.loginAttempt.deleteMany({ where: { email: currentTarget.email } });
     await auditTx(tx, "USER_SIGNIN_RESENT", { actorId: actor.id, targetId });
+    return currentTarget;
   });
-  const emailSent = await sendDetails(target.email, target.name.split(" ")[0], actor.name ?? "A Super Admin", password);
+  const emailSent = await sendDetails(currentTarget.email, currentTarget.name.split(" ")[0], actor.name ?? "A Super Admin", password);
   return { emailSent };
 }
 

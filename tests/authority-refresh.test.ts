@@ -5,6 +5,13 @@ let stop: (() => void) | undefined;
 const revision = (s: string) => new Response(JSON.stringify({ revision: s.repeat(64) }));
 beforeEach(() => { vi.useFakeTimers(); Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" }); });
 afterEach(() => { stop?.(); stop=undefined; vi.useRealTimers(); vi.unstubAllGlobals(); });
+it("matching server-rendered authority does not discard an early draft, but a real change still invalidates", async () => {
+  const fetcher = vi.fn().mockResolvedValue(revision("a")); vi.stubGlobal("fetch", fetcher);
+  const change = vi.fn(); stop = watchAuthority(change, "a".repeat(64));
+  await vi.advanceTimersByTimeAsync(1); expect(change).not.toHaveBeenCalled();
+  fetcher.mockResolvedValue(revision("b")); await vi.advanceTimersByTimeAsync(AUTHORITY_INTERVAL_MS);
+  expect(change).toHaveBeenCalledTimes(1);
+});
 it("first observation, grant, downgrade, revoke and regrant invalidate once per changed authority", async () => {
   const fetcher = vi.fn().mockResolvedValue(revision("a")); vi.stubGlobal("fetch", fetcher);
   const change = vi.fn(); stop=watchAuthority(change);

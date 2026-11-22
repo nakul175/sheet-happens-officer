@@ -1,3 +1,6 @@
+@font-face { font-family: Lato; src: url('/fonts/Lato-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: Lato; src: url('/fonts/Lato-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+
 :root {
   --navy: #2c2f71;
   --navy-dark: #1f2252;
@@ -24,9 +27,11 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: var(--font-public-sans), system-ui, sans-serif;
+  font-family: Lato, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+button, input, select, textarea { font-family: inherit; }
 
 a { color: var(--navy); }
 @media (hover: hover) { a:hover { color: var(--navy-dark); } }

@@ -2,12 +2,12 @@
 
 ## Runtime versus migration identity
 
-Sheet Happens Officer intentionally uses two PostgreSQL identities:
+Tasks by aplyd is designed to use two PostgreSQL identities:
 
-- `DATABASE_URL` is the long-running application connection. Production uses `sho_app`, a login role with `USAGE` on the application schema plus `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on its tables and `USAGE`, `SELECT`, and `UPDATE` on its sequences. It has no schema `CREATE`, superuser, database-creation, role-creation, inheritance, replication, or RLS-bypass rights.
+- `DATABASE_URL` is the long-running application connection. The **intended** production identity is `sho_app`, a login role with `USAGE` on the application schema plus `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on its tables and `USAGE`, `SELECT`, and `UPDATE` on its sequences. It must have no schema `CREATE`, superuser, database-creation, role-creation, replication, or RLS-bypass rights; managed-role `INHERIT` is allowed only with zero memberships.
 - `DIRECT_DATABASE_URL` is the direct migration/admin connection. It remains `doadmin` because Prisma migrations need DDL rights and the existing production objects are owned by `doadmin`.
 
-`doadmin` must not be used by the running application. It is reserved for managed-database administration and migrations.
+`doadmin` must not be used by the running application. It is reserved for managed-database administration and migrations. **Observed 19 November 2026:** a read-only check of the live `sho.service` MainPID environment found `DATABASE_URL` still uses `doadmin`; the connected role owns 37/37 application tables and can create in the database and `public` schema. The runtime and admin URL identities match. This is a P0 production least-privilege gap, and the intended state above is **not** a claim that rollout is complete. Do not edit the URL or restart SHO during the production pause. A future approved correction must first verify the existing `sho_app` credentials and DML grants, rehearse an exact staging cut and rollback, then use a named production runner with automatic recovery and post-cut role/health checks. See the [audit receipt](../../../work/handover-audit-20261103/remediation/operations02-runtime-role-readonly-20261119.json).
 
 The operator preserves the database URL's declared TLS policy. In particular,
 DigitalOcean's existing `sslmode=require` URLs use encrypted libpq semantics

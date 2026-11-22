@@ -19,7 +19,15 @@ export function centralIdentitySecret(env: Record<string, string | undefined> = 
 
 /** Fixed public origin; never trust the reverse proxy's internal request URL or caller forwarding headers. */
 export function holySheetHostOrigin(env: Record<string, string | undefined> = process.env) {
- return holyQaIdentity(env)?.origin ?? 'https://sheethappensofficer.aplyd.org';
+ return holyQaIdentity(env)?.origin ?? (env.APP_URL === 'https://staging.tasks.aplyd.org' ? env.APP_URL : 'https://tasks.aplyd.org');
+}
+
+/** Bind cookie-authenticated document writes to the exact public Host and Origin. */
+export function holySheetSameOrigin(request: Request, env: Record<string, string | undefined> = process.env) {
+ const host = request.headers.get('host');
+ const qa = holyQaIdentity(env);
+ const allowed = qa ? [new URL(qa.origin).host] : ['tasks.aplyd.org', 'staging.tasks.aplyd.org', 'sheethappensofficer.aplyd.org'];
+ return !!host && allowed.includes(host) && request.headers.get('origin') === `https://${host}`;
 }
 
 /** Disposable four-user acceptance realm; never uses the shared staging schema. */

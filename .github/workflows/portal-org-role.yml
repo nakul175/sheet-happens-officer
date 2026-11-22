@@ -4,6 +4,7 @@ permissions:
   contents: read
 jobs:
   postgres:
+    name: Portal organisation role transactions
     runs-on: ubuntu-latest
     services:
       postgres:

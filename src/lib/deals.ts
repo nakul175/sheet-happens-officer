@@ -3,7 +3,7 @@ import { scopedUser, findScopedUser, workspaceScope, multiWorkspaceEnabled, pers
 // SHO-E10 and SHO-E12: Deals are projects of type Deal. This file holds creation, stages, details,
 // next step and stalled logic. Access is still project membership (src/lib/access.ts).
 import { createHash } from "node:crypto";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { ApiError, notFound } from "@/lib/http";
 import { isActive, isAdmin, projectAccess, requireManage, requireWrite, type Actor, type Tx } from "@/lib/access";
@@ -11,14 +11,17 @@ import { WORKSTREAM_DEAL, crmMode, crmVisible, requireCrm } from "@/lib/crm";
 import { formatDueDate, parseDueDate } from "@/lib/dates";
 import { auditTx, logAction, notify } from "@/lib/notify";
 import { orgOf } from "@/lib/orgs";
-import { taskAccess } from "@/lib/tasks";
+import { taskAccess } from "@/lib/task-access";
 
 import { dealClassificationFields, type DealClassificationInput } from "@/lib/deal-classification";
+import { isWorking, WORKING_CATEGORIES } from "@/lib/deal-next-step";
+import { blockingTaskWhere } from "@/lib/deal-task-rules";
+export { isWorking, ensureNextStep } from "@/lib/deal-next-step";
+export { blockingTaskWhere } from "@/lib/deal-task-rules";
 
 export const STALL_DAYS = 30;
 const DEFAULT_SECTIONS = ["To do", "In progress", "Done"];
 export const OPEN_CATEGORIES = ["NOT_STARTED", "ACTIVE", "PAUSED"] as const;
-const WORKING_CATEGORIES = ["NOT_STARTED", "ACTIVE"] as const; // "Needs a next step" and "Stalled" apply to these only
 
 export type Currency = "INR" | "USD" | "EUR";
 export type DealDetailsInput = DealClassificationInput & {
@@ -101,6 +104,45 @@ export async function createDeal(
   if (dup && !input.force) throw new ApiError(409, `A deal called "${name}" already exists for ${org.name}.`, { needsConfirm: "duplicate", existingId: dup.id });
 
   return db.$transaction(async (tx) => {
+    // Preflight reads can become stale before the first write. Hold the creator,
+    // chosen Leader and Buyer steady through the whole create transaction.
+    try {
+      for (const personId of [...new Set([user.id, leader.id])].sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+      // Serialize unconfirmed creations for the same Buyer. Without this lock,
+      // two requests can both pass the duplicate preflight and insert together.
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${org.id} FOR UPDATE NOWAIT`;
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Deal people or Buyer are changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const [currentActor, currentLeader, currentBuyer] = await Promise.all([
+      tx.user.findUnique({ where: { id: user.id } }),
+      tx.user.findUnique({ where: { id: leader.id } }),
+      tx.organisation.findUnique({ where: { id: org.id } }),
+    ]);
+    if (!currentActor || !isActive(currentActor) || currentActor.workspaceId !== u.workspaceId) throw notFound("Deal");
+    requireCrm({ ...user, orgRole: currentActor.orgRole });
+    if (!currentLeader || !isActive(currentLeader) || currentLeader.workspaceId !== currentActor.workspaceId) {
+      throw new ApiError(400, "Choose an active person as Leader.");
+    }
+    if (!currentBuyer || currentBuyer.workspaceId !== currentActor.workspaceId || currentBuyer.archivedAt) {
+      throw new ApiError(400, "Choose an active organisation as Buyer.");
+    }
+    if (!input.force) {
+      // The earlier warning is only for fast feedback; this is the decision
+      // made after acquiring the Buyer lock and seeing the latest committed deal.
+      // project-lookup-ok: Same-workspace Buyer/name duplicate warning; the selected Buyer was authorized and locked above.
+      const currentDuplicate = await tx.project.findFirst({
+        where: { workspaceId: currentActor.workspaceId, typeId: WORKSTREAM_DEAL, name: { equals: name, mode: "insensitive" }, parties: { some: { organisationId: currentBuyer.id, role: "BUYER" } } },
+        select: { id: true },
+      });
+      if (currentDuplicate) throw new ApiError(409, `A deal called "${name}" already exists for ${currentBuyer.name}.`, { needsConfirm: "duplicate", existingId: currentDuplicate.id });
+    }
     const project = await tx.project.create({
       data: { workspaceId: u.workspaceId, name, typeId: WORKSTREAM_DEAL, pipelineId: pipeline.id, stageId: first.id, stageChangedAt: new Date() },
     });
@@ -135,11 +177,6 @@ export async function createDeal(
 }
 
 // ---- stages (SHO-US-10.3) ----
-
-/** Tasks still open on a deal, including subtasks. Lost refuses while any of these remain; Won retains follow-up work. */
-export function blockingTaskWhere(projectId: string) {
-  return { projectId, deletedAt: null, completedAt: null };
-}
 
 async function openTasks(projectId: string) {
   return db.task.findMany({ where: blockingTaskWhere(projectId), select: { id: true, title: true, parentId: true }, orderBy: { createdAt: "asc" } });
@@ -196,6 +233,30 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
   }
 
   return db.$transaction(async (tx) => {
+    // Membership or account authority can change after the stage preview.
+    // Hold the deal while rechecking the current actor before any stage,
+    // detail, notice or history write commits.
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor)) throw notFound("Project");
+    const currentActor = { ...user, orgRole: actor.orgRole };
+    requireCrm(currentActor);
+    const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (fresh.project.typeId !== WORKSTREAM_DEAL || fresh.project.pipelineId !== a.project.pipelineId) {
+      throw new ApiError(409, "This deal changed. Refresh it before changing its stage.");
+    }
     // Claim the snapshot before changing details or emitting history/notifications. A stale
     // transition rolls the entire transaction back, including optional detail edits.
     // Delivery still requires the row to be Bid Won so a concurrent commercial move cannot bypass that gate.
@@ -213,11 +274,11 @@ export async function moveStage(user: Actor, projectId: string, input: { stageId
         : "This deal changed. Refresh it before changing its stage.");
     }
     if (input.fields && Object.keys(stripUndefined(input.fields)).length) await applyDetails(tx, projectId, input.fields, details);
-    const leader = a.project.members.find((m) => m.role === "LEADER")!.userId;
-    await notify(tx, [leader], "DEAL_STAGE_CHANGED", { actorId: user.id, projectId, data: { project: a.project.name, stage: stage.name } });
+    const leader = fresh.project.members.find((m) => m.role === "LEADER")!.userId;
+    await notify(tx, [leader], "DEAL_STAGE_CHANGED", { actorId: user.id, projectId, data: { project: fresh.project.name, stage: stage.name } });
     await logAction(tx, {
       actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.stage_changed",
-      before: { stageId: cur?.id ?? null, stage: cur?.name ?? null, reason: a.project.stageReason ?? null },
+      before: { stageId: cur?.id ?? null, stage: cur?.name ?? null, reason: fresh.project.stageReason ?? null },
       after: { stageId: stage.id, stage: stage.name, reason },
     });
     if (stage.category === "DONE" || stage.category === "LOST") {
@@ -310,6 +371,17 @@ export async function removeStage(user: Actor, stageId: string, input: { moveTo?
     // not the ON DELETE SET NULL foreign key, prevents a concurrent move from leaving stageId silently cleared.
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Stage" WHERE "id" = ${stage.id} FOR UPDATE`;
     if (!locked.length) throw notFound("Stage");
+    try {
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "Account is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor) || actor.orgRole !== "SUPER_ADMIN") throw notFound("Stage");
+    requireCrm(actor);
     // A reason was given for the removed stage. It carries over only to a stage that also asks for one.
     const moved = await tx.project.updateMany({
       where: { stageId: stage.id },
@@ -337,6 +409,27 @@ export async function updateDealDetails(user: Actor, projectId: string, input: D
   if (!Object.keys(data).length) return;
   const before = detailsState(cur);
   await db.$transaction(async (tx) => {
+    // The editor's seat or account can change after the form's preflight read.
+    // Lock and recheck current authority before touching either deal row or history.
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor)) throw notFound("Project");
+    const currentActor = { ...user, orgRole: actor.orgRole };
+    requireCrm(currentActor);
+    const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (fresh.project.typeId !== WORKSTREAM_DEAL || fresh.project.pipelineId !== a.project.pipelineId) throw conversionStale();
     // Touch the parent before facts: concurrent conversions either see these facts or refuse as stale.
     const changed = await tx.project.updateMany({
       where: { id: projectId, pipelineId: a.project.pipelineId, updatedAt: a.project.updatedAt, archivedAt: null },
@@ -363,10 +456,16 @@ export async function dealSignals(projects: SummaryProject[]) {
   const none = new Map<string, { nextStep: { id: string; title: string; dueDate: string } | null; lastActivity: Date }>();
   if (!ids.length) return none;
   const [tasks, logs, taskTouch, notes] = await Promise.all([
-    db.task.findMany({
-      where: { projectId: { in: ids }, deletedAt: null, completedAt: null, parentId: null, dueDate: { not: null } },
-      orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }], select: { id: true, title: true, dueDate: true, projectId: true },
-    }),
+    // A deal needs only its first dated open task. Keep the old due/created
+    // ordering while bounding the rows returned to one per visible deal.
+    db.$queryRaw<{ id: string; title: string; dueDate: Date; projectId: string }[]>(Prisma.sql`
+      SELECT DISTINCT ON ("projectId") "id", "title", "dueDate", "projectId"
+      FROM "Task"
+      WHERE "projectId" IN (${Prisma.join(ids)})
+        AND "deletedAt" IS NULL AND "completedAt" IS NULL
+        AND "parentId" IS NULL AND "dueDate" IS NOT NULL
+      ORDER BY "projectId", "dueDate" ASC, "createdAt" ASC, "id" ASC
+    `),
     db.actionLog.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, action: { not: "undo" } }, _max: { createdAt: true } }),
     db.task.groupBy({ by: ["projectId"], where: { projectId: { in: ids } }, _max: { updatedAt: true } }),
     db.note.groupBy({ by: ["projectId"], where: { projectId: { in: ids }, removedAt: null }, _max: { createdAt: true } }),
@@ -382,7 +481,6 @@ export async function dealSignals(projects: SummaryProject[]) {
   return none;
 }
 
-export const isWorking = (category: string | null | undefined) => !!category && (WORKING_CATEGORIES as readonly string[]).includes(category);
 export const isStalled = (category: string | null | undefined, lastActivity: Date, now = Date.now()) =>
   isWorking(category) && now - lastActivity.getTime() > STALL_DAYS * 86400_000;
 
@@ -464,20 +562,6 @@ export async function dealBlock(projectId: string, now = Date.now()) {
 }
 
 
-/** SHO-US-12.5 AC2: when a working deal is left with no dated open task, the Leader gets one notice (none while an unread one stands). */
-export async function ensureNextStep(tx: Prisma.TransactionClient, projectId: string, actorId: string | null) {
-  // project-lookup-ok: Internal transaction invariant for an already-authorized task mutation or scheduled reminder.
-  const p = await tx.project.findUnique({ where: { id: projectId }, select: { name: true, typeId: true, archivedAt: true, stage: { select: { category: true } } } });
-  if (!p || p.typeId !== WORKSTREAM_DEAL || p.archivedAt || !isWorking(p.stage?.category)) return;
-  const open = await tx.task.count({ where: { projectId, deletedAt: null, completedAt: null, parentId: null, dueDate: { not: null } } });
-  if (open > 0) return;
-  const leader = await tx.projectMember.findFirst({ where: { projectId, role: "LEADER" }, select: { userId: true } });
-  if (!leader) return;
-  const unread = await tx.notification.count({ where: { recipientId: leader.userId, projectId, type: "DEAL_NEEDS_NEXT_STEP", readAt: null } });
-  if (unread) return;
-  await notify(tx, [leader.userId], "DEAL_NEEDS_NEXT_STEP", { actorId, projectId, data: { project: p.name }, includeActor: true });
-}
-
 export type PartyRoleName = "BUYER" | "FUNDER" | "IMPLEMENTING_OFFICE" | "PARTNER" | "OTHER";
 
 /** SHO-US-12.4: parties are organisations. One Buyer (set at creation); other roles repeat. Archived organisations cannot be added. */
@@ -491,8 +575,35 @@ export async function addParty(user: Actor, projectId: string, organisationId: s
   const dup = await db.dealParty.findFirst({ where: { projectId, organisationId, role } });
   if (dup) throw new ApiError(409, "That organisation already has this role on the deal.");
   await db.$transaction(async (tx) => {
+    // A seat can be revoked or an organisation archived after the picker preview.
+    // Hold both rows while checking the current actor and duplicate state.
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${organisationId} FOR SHARE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor)) throw notFound("Project");
+    const currentActor = { ...user, orgRole: actor.orgRole };
+    requireCrm(currentActor);
+    const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (fresh.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only deals have parties.");
+    const activeOrg = await tx.organisation.findFirst({ where: { id: organisationId, workspaceId: actor.workspaceId, archivedAt: null }, select: { name: true } });
+    if (!activeOrg) throw new ApiError(400, "That organisation is archived or unavailable and cannot be added to a deal.");
+    if (await tx.dealParty.findFirst({ where: { projectId, organisationId, role }, select: { id: true } })) {
+      throw new ApiError(409, "That organisation already has this role on the deal.");
+    }
     const row = await tx.dealParty.create({ data: { projectId, organisationId, role } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_added", after: { partyId: row.id, organisation: org.name, role } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_added", after: { partyId: row.id, organisation: activeOrg.name, role } });
   });
 }
 
@@ -504,8 +615,32 @@ export async function removeParty(user: Actor, projectId: string, partyId: strin
   if (!row) throw notFound("Party");
   if (row.role === "BUYER") throw new ApiError(400, "The Buyer cannot be removed. Every deal has one.");
   await db.$transaction(async (tx) => {
+    // The editor's seat can change between selecting the party and deletion.
+    try {
+      const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE`;
+      if (!locked) throw notFound("Project");
+      await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      await tx.$queryRaw`SELECT "id" FROM "DealParty" WHERE "id" = ${partyId} FOR UPDATE NOWAIT`;
+    } catch (error) {
+      if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+        throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+    if (!actor || !isActive(actor)) throw notFound("Project");
+    const currentActor = { ...user, orgRole: actor.orgRole };
+    requireCrm(currentActor);
+    const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+    if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+    requireWrite(fresh);
+    if (fresh.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only deals have parties.");
+    const currentParty = await tx.dealParty.findFirst({ where: { id: partyId, projectId }, include: { organisation: { select: { name: true } } } });
+    if (!currentParty) throw notFound("Party");
+    if (currentParty.role === "BUYER") throw new ApiError(400, "The Buyer cannot be removed. Every deal has one.");
     await tx.dealParty.delete({ where: { id: partyId } });
-    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_removed", before: { organisation: row.organisation.name, role: row.role } });
+    await logAction(tx, { actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.party_removed", before: { organisation: currentParty.organisation.name, role: currentParty.role } });
   });
 }
 
@@ -525,46 +660,79 @@ export async function replaceBuyer(user: Actor, projectId: string, input: BuyerR
   if (input.organisationId === input.expectedOrganisationId) throw new ApiError(400, "Choose a different Buyer.");
 
   const actor = await scopedUser(user);
-  return db.$transaction(async (tx) => {
-    const current = await tx.dealParty.findFirst({
-      where: { projectId, role: "BUYER" },
-      include: { organisation: { select: { id: true, name: true } } },
-    });
-    if (!current) throw new ApiError(409, "This deal no longer has the Buyer you opened. Reload and try again.");
-    if (current.id !== input.expectedPartyId || current.organisationId !== input.expectedOrganisationId) {
+  try {
+    return await db.$transaction(async (tx) => {
+      // A Leader seat or account can change after the form's preflight check.
+      // Lock the proposed Buyer as the first statement, so the serializable
+      // snapshot and duplicate lookup agree with createDeal and conversion.
+      // Recheck access under locks before the Buyer row or history can change.
+      try {
+        await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${input.organisationId} FOR UPDATE NOWAIT`;
+        const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Project" WHERE "id" = ${projectId} FOR UPDATE NOWAIT`;
+        if (!locked) throw notFound("Project");
+        await tx.$queryRaw`SELECT "userId" FROM "ProjectMember" WHERE "projectId" = ${projectId} AND "userId" = ${user.id} FOR SHARE NOWAIT`;
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${user.id} FOR SHARE NOWAIT`;
+      } catch (error) {
+        if ((error as { code?: string; meta?: { code?: string } }).code === "P2010" && (error as { meta?: { code?: string } }).meta?.code === "55P03") {
+          throw new ApiError(409, "This deal or its access is changing. Reload and try again.");
+        }
+        throw error;
+      }
+      const currentAccount = await tx.user.findUnique({ where: { id: user.id }, select: { workspaceId: true, orgRole: true, deactivatedAt: true, emailVerifiedAt: true } });
+      if (!currentAccount || !isActive(currentAccount)) throw notFound("Project");
+      const currentActor = { ...user, orgRole: currentAccount.orgRole };
+      requireCrm(currentActor);
+      const fresh = await projectAccess(currentActor, projectId, { write: true, tx });
+      if (actor.workspaceId !== fresh.project.workspaceId) throw notFound("Project");
+      requireManage(fresh);
+      if (fresh.project.typeId !== WORKSTREAM_DEAL) throw new ApiError(400, "Only a deal has a Buyer.");
+      const current = await tx.dealParty.findFirst({
+        where: { projectId, role: "BUYER" },
+        include: { organisation: { select: { id: true, name: true } } },
+      });
+      if (!current) throw new ApiError(409, "This deal no longer has the Buyer you opened. Reload and try again.");
+      if (current.id !== input.expectedPartyId || current.organisationId !== input.expectedOrganisationId) {
+        throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
+      }
+      const replacement = await tx.organisation.findFirst({
+        where: { id: input.organisationId, workspaceId: currentAccount.workspaceId, archivedAt: null },
+        select: { id: true, name: true },
+      });
+      if (!replacement) throw new ApiError(400, "Choose an active organisation in this workspace.");
+
+      // project-lookup-ok: the duplicate warning deliberately checks every deal in this workspace for the proposed Buyer
+      const duplicate = await tx.project.findFirst({
+        where: {
+          id: { not: projectId }, workspaceId: currentAccount.workspaceId, typeId: WORKSTREAM_DEAL,
+          name: { equals: fresh.project.name, mode: "insensitive" },
+          parties: { some: { organisationId: replacement.id, role: "BUYER" } },
+        },
+        select: { id: true },
+      });
+      if (duplicate && !input.force) {
+        throw new ApiError(409, `A deal called "${fresh.project.name}" already exists for ${replacement.name}.`, { needsConfirm: "duplicate", existingId: duplicate.id });
+      }
+
+      const changed = await tx.dealParty.updateMany({
+        where: { id: current.id, projectId, role: "BUYER", organisationId: current.organisationId },
+        data: { organisationId: replacement.id },
+      });
+      if (changed.count !== 1) throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
+      await logAction(tx, {
+        actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.buyer_replaced",
+        before: { partyId: current.id, organisationId: current.organisation.id, organisation: current.organisation.name },
+        after: { partyId: current.id, organisationId: replacement.id, organisation: replacement.name },
+      });
+      return { oldBuyer: current.organisation, newBuyer: replacement };
+    }, { isolationLevel: "Serializable" });
+  } catch (error) {
+    // Another replacement can win between our snapshot read and write. Preserve
+    // the one-winner transaction, but tell the losing editor to reload.
+    if ((error as { code?: string })?.code === "P2034") {
       throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
     }
-    const replacement = await tx.organisation.findFirst({
-      where: { id: input.organisationId, workspaceId: actor.workspaceId, archivedAt: null },
-      select: { id: true, name: true },
-    });
-    if (!replacement) throw new ApiError(400, "Choose an active organisation in this workspace.");
-
-    // project-lookup-ok: the duplicate warning deliberately checks every deal in this workspace for the proposed Buyer
-    const duplicate = await tx.project.findFirst({
-      where: {
-        id: { not: projectId }, workspaceId: actor.workspaceId, typeId: WORKSTREAM_DEAL,
-        name: { equals: access.project.name, mode: "insensitive" },
-        parties: { some: { organisationId: replacement.id, role: "BUYER" } },
-      },
-      select: { id: true },
-    });
-    if (duplicate && !input.force) {
-      throw new ApiError(409, `A deal called "${access.project.name}" already exists for ${replacement.name}.`, { needsConfirm: "duplicate", existingId: duplicate.id });
-    }
-
-    const changed = await tx.dealParty.updateMany({
-      where: { id: current.id, projectId, role: "BUYER", organisationId: current.organisationId },
-      data: { organisationId: replacement.id },
-    });
-    if (changed.count !== 1) throw new ApiError(409, "The Buyer changed while you were editing. Reload and try again.", { code: "version_conflict" });
-    await logAction(tx, {
-      actorId: user.id, projectId, targetType: "deal", targetId: projectId, action: "deal.buyer_replaced",
-      before: { partyId: current.id, organisationId: current.organisation.id, organisation: current.organisation.name },
-      after: { partyId: current.id, organisationId: replacement.id, organisation: replacement.name },
-    });
-    return { oldBuyer: current.organisation, newBuyer: replacement };
-  }, { isolationLevel: "Serializable" });
+    throw error;
+  }
 }
 
 
@@ -621,6 +789,62 @@ export async function convertTaskToDeal(user: Actor, taskId: string, input: Conv
 
   const first = pipeline!.stages[0];
   return db.$transaction(async (tx) => {
+    // The dialog may have been open while another request moved or edited this task.
+    // Lock before creating the deal: otherwise two conversions can both create a deal
+    // and the second move leaves the first one orphaned.
+    const [locked] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Task" WHERE "id" = ${taskId} FOR UPDATE`;
+    if (!locked) throw notFound("Task");
+    const current = await tx.task.findUnique({ where: { id: taskId } });
+    if (!current || current.deletedAt) throw notFound("Task");
+    if (current.projectId !== t.projectId || current.updatedAt.getTime() !== t.updatedAt.getTime()) {
+      throw new ApiError(409, "This task changed. Reload before converting it.", { stale: true });
+    }
+    try {
+      for (const personId of [...new Set([user.id, leader.id])].sort()) {
+        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${personId} FOR SHARE NOWAIT`;
+      }
+    } catch (error) {
+      const failure = error as { code?: string; meta?: { code?: string } } | null;
+      if (failure?.code === "P2010" && failure.meta?.code === "55P03") {
+        throw new ApiError(409, "Deal people are changing. Reload and try again.");
+      }
+      throw error;
+    }
+    const actor = await tx.user.findUnique({ where: { id: user.id } });
+    if (!actor || !isActive(actor) || actor.workspaceId !== current.workspaceId) throw new ApiError(401, "Sign in with an active account.");
+    requireCrm(actor);
+    const currentLeader = await tx.user.findUnique({ where: { id: leader.id } });
+    if (!currentLeader || !isActive(currentLeader) || currentLeader.workspaceId !== actor.workspaceId) {
+      throw new ApiError(400, "Choose an active person as Leader.");
+    }
+    const freshAccess = await taskAccess({ ...user, orgRole: actor.orgRole }, current.projectId, { write: true, tx });
+    requireWrite(freshAccess);
+    if (freshAccess.project.typeId === WORKSTREAM_DEAL || current.parentId || current.completedAt || (current.approverId && current.assigneeId === current.approverId)) {
+      throw new ApiError(409, "This task cannot be converted now. Reload it.", { stale: true });
+    }
+    // Serialize duplicate checks for this Buyer across direct creation and
+    // conversion, while also holding the row against an archive until commit.
+    const [lockedBuyer] = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "Organisation" WHERE "id" = ${input.organisationId!} FOR UPDATE`;
+    if (!lockedBuyer) throw new ApiError(400, "Choose an organisation.");
+    const buyer = await tx.organisation.findUnique({ where: { id: input.organisationId! } });
+    if (!buyer || buyer.workspaceId !== actor.workspaceId) throw new ApiError(400, "Choose an organisation.");
+    if (buyer.archivedAt) throw new ApiError(400, "That organisation is archived.");
+    // The dialog's duplicate lookup may have gone stale before this task was
+    // locked. Check again after taking the same Buyer lock as createDeal.
+    // project-lookup-ok: taskAccess and requireWrite authorized conversion; this workspace-and-Buyer lookup enforces its duplicate warning.
+    const currentDuplicate = await tx.project.findFirst({
+      where: {
+        workspaceId: actor.workspaceId, typeId: WORKSTREAM_DEAL,
+        name: { equals: name, mode: "insensitive" },
+        parties: { some: { organisationId: buyer.id, role: "BUYER" } },
+      },
+      select: { id: true },
+    });
+    if (currentDuplicate && !input.force) {
+      throw new ApiError(409, `A deal called "${name}" already exists for ${buyer.name}.`, {
+        needsConfirm: "duplicate", existingId: currentDuplicate.id,
+      });
+    }
     const project = await tx.project.create({
       data: { workspaceId: u.workspaceId, name, typeId: WORKSTREAM_DEAL, pipelineId: pipeline!.id, stageId: first.id, stageChangedAt: new Date() },
     });
@@ -739,10 +963,19 @@ export async function notifyStalledDeals(now = new Date()) {
     const leader = d.members[0];
     // crmVisible is the same lever as crmProjectWhere. A leader the CRM is hidden from is not told.
     if (!leader || !crmVisible(leader.user)) continue;
-    const already = await db.notification.findFirst({ where: { recipientId: leader.userId, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
-    if (already) continue;
-    await db.$transaction((tx) => notify(tx, [leader.userId], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true }));
-    notified++;
+    const created = await db.$transaction(async (tx) => {
+      // Serialize only stalled-job invocations for this deal. A Project row
+      // lock would also block ordinary task writes that take FOR SHARE NOWAIT.
+      // Hash collisions only serialize unrelated jobs; they cannot merge rows.
+      // Select a plain integer so Prisma never has to deserialize the lock
+      // function's PostgreSQL void return type.
+      await tx.$queryRaw<{ locked: number }[]>`SELECT 1::integer AS locked FROM pg_advisory_xact_lock(hashtext('DEAL_STALLED'), hashtext(${d.id}))`;
+      const already = await tx.notification.findFirst({ where: { recipientId: leader.userId, projectId: d.id, type: "DEAL_STALLED", createdAt: { gt: last } }, select: { id: true } });
+      if (already) return false;
+      await notify(tx, [leader.userId], "DEAL_STALLED", { projectId: d.id, data: { project: d.name }, includeActor: true });
+      return true;
+    }, { isolationLevel: "ReadCommitted" });
+    if (created) notified++;
   }
   return { stalled, notified };
 }

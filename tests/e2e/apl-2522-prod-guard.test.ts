@@ -10,6 +10,7 @@ const PROD_APP = "https://app.sheethappensofficer.com";
 const PROD_WWW = "https://www.sheethappensofficer.com";
 // APL-2929: production moved to sheethappensofficer.aplyd.org. The guard refuses the old hosts and the new one.
 const PROD_NEW = "https://sheethappensofficer.aplyd.org";
+const PROD_TASKS = "https://tasks.aplyd.org";
 const STAGING = "https://staging.sheethappensofficer.com";
 const LOCAL = "http://127.0.0.1:9";
 
@@ -106,6 +107,20 @@ describe("APL-2522 spec prod guard", () => {
     for (const [old, host] of [[PROD, "sheethappensofficer.com"], [PROD_APP, "app.sheethappensofficer.com"], [PROD_WWW, "www.sheethappensofficer.com"]]) {
       expect(() => assertStoryTargetAllowed({ ...env, STAGING_URL: old }, LOCAL), old).toThrow(`Refusing to run story tests against production (${host}).`);
     }
+  });
+
+  it("refuses the current Tasks production host for every story-test target variable", () => {
+    for (const target of ["TASKBOARD_URL", "STAGING_URL"] as const) {
+      expect(() => assertStoryTargetAllowed({ NODE_ENV: "test", [target]: PROD_TASKS }, LOCAL)).toThrow(
+        "Refusing to run story tests against production (tasks.aplyd.org).",
+      );
+    }
+    expect(() => assertStoryTargetAllowed({ NODE_ENV: "test" }, PROD_TASKS)).toThrow(
+      "Refusing to run story tests against production (tasks.aplyd.org).",
+    );
+    const started = runSpec({ ...safe, BASE_URL: PROD_TASKS });
+    expect(started.status, started.output).not.toBe(0);
+    expect(started.output).toContain("Refusing to run story tests against production (tasks.aplyd.org).");
   });
 
   it("refuses a production host written with a port or a path and no scheme", () => {

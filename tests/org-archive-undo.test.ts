@@ -1,27 +1,35 @@
 // APL-2686: undo of Organisation archived / unarchived reverses the action (APL-2532 AC6).
 // Calls src/lib directly against Postgres. No dev server.
-import { afterAll, describe, expect, it } from "vitest";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { undoAction } from "../src/lib/undo";
 import type { Actor } from "../src/lib/access";
+import { assertLocalFixture } from "./e2e/local-fixture-guard";
 
 const db = new PrismaClient();
+const ownedUsers: string[] = [], ownedOrganisations: string[] = [];
+let safe = false;
+
+beforeAll(() => { assertLocalFixture(process.env.DATABASE_URL); safe = true; });
 
 let n = 0;
 
 async function seed(archived: boolean) {
   n += 1;
   const stamp = `${Date.now()}-${n}`;
-  const ws = await db.workspace.create({ data: { name: `org-undo-${stamp}` } });
+  const ws = (await db.workspace.findFirst()) ?? (await db.workspace.create({ data: { name: `org-undo-${stamp}` } }));
   const user = await db.user.create({
     data: {
       workspaceId: ws.id,
       email: `org-undo-${stamp}@aplyd.com`,
       name: "Undo",
       passwordHash: "not-used",
+      emailVerifiedAt: new Date(),
       orgRole: "MEMBER",
     },
   });
+  ownedUsers.push(user.id);
   const org = await db.organisation.create({
     data: {
       workspaceId: ws.id,
@@ -30,6 +38,7 @@ async function seed(archived: boolean) {
       archivedAt: archived ? new Date("2026-01-01T00:00:00Z") : null,
     },
   });
+  ownedOrganisations.push(org.id);
   const actor: Actor = { id: user.id, orgRole: "MEMBER", name: user.name };
   return { org, actor };
 }
@@ -58,7 +67,21 @@ function log(
 
 describe("undo of organisation archived / unarchived (APL-2686)", () => {
   afterAll(async () => {
-    await db.$disconnect();
+    let cleanup = false;
+    try {
+      if (safe) {
+        await db.actionLog.deleteMany({ where: { actorId: { in: ownedUsers } } });
+        await db.organisation.deleteMany({ where: { id: { in: ownedOrganisations } } });
+        await db.user.deleteMany({ where: { id: { in: ownedUsers } } });
+        expect(await db.organisation.count({ where: { id: { in: ownedOrganisations } } })).toBe(0);
+        expect(await db.user.count({ where: { id: { in: ownedUsers } } })).toBe(0);
+        cleanup = true;
+      }
+    } finally {
+      mkdirSync("test-results/org-archive-undo", { recursive: true });
+      writeFileSync("test-results/org-archive-undo/cleanup.json", JSON.stringify({ scope: "local-disposable-postgres", ownedUsers: ownedUsers.length, ownedOrganisations: ownedOrganisations.length, cleanup }, null, 2));
+      await db.$disconnect();
+    }
   });
 
   it("undo of Organisation archived unarchives the organisation", async () => {

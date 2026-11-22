@@ -5,11 +5,18 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { db } from "../../src/lib/db";
 import { guard, seedCommentsBasic, STAGING_DB_HOSTS } from "../../scripts/seed-apl2590-fixtures";
+import { assertLocalFixture } from "../e2e/local-fixture-guard";
 
 const SCRIPT = path.join(process.cwd(), "scripts/seed-apl2590-fixtures.ts");
 const PASS = "seed-pass-9";
 const testUrl = "postgresql://taskboard:taskboard@localhost:5432/sho_test?schema=public";
 const stagingUrl = "postgresql://taskboard:taskboard@staging.internal:5432/sho_staging";
+const fixtureRoles = ["lead", "admin", "worker", "writer", "viewer", "outsider", "inactive"];
+const fixtureEmails = fixtureRoles.map((role) => `nakul17+apl2590-${role}@gmail.com`);
+const fixtureTaskIds = ["zz_apl2590_t1", "zz_apl2590_t1_1", "zz_apl2590_t9"];
+const fixtureProjectIds = ["zz_apl2590_ops", "zz_apl2590_old"];
+let ownsFixture = false;
+let createdWorkspaceId: string | undefined;
 
 function env(over: Record<string, string | undefined> = {}) {
   return { NODE_ENV: "test", SEED_TARGET: "test", DATABASE_URL: testUrl, ...over };
@@ -87,7 +94,17 @@ describe("comments-basic seed", () => {
   });
 
   it("qa:TC-APL2590-7662ffd7@v2: comments-basic creates the ZZ-TEST Ops fixture and can be run again", async () => {
-    if (!(await db.workspace.findFirst())) await db.workspace.create({ data: { name: "ZZ-TEST workspace" } });
+    assertLocalFixture(process.env.DATABASE_URL);
+    const [users, projects, tasks] = await Promise.all([
+      db.user.count({ where: { email: { in: fixtureEmails } } }),
+      db.project.count({ where: { id: { in: fixtureProjectIds } } }),
+      db.task.count({ where: { id: { in: fixtureTaskIds } } }),
+    ]);
+    expect({ users, projects, tasks }, "refuse to adopt or clean up another seed fixture").toEqual({ users: 0, projects: 0, tasks: 0 });
+    ownsFixture = true;
+    if (!(await db.workspace.findFirst())) {
+      createdWorkspaceId = (await db.workspace.create({ data: { name: "ZZ-TEST workspace" } })).id;
+    }
     const once = await seedCommentsBasic(db, { password: PASS });
     const twice = await seedCommentsBasic(db, { password: PASS });
     expect(twice.users.map((u) => u.email).sort()).toEqual(once.users.map((u) => u.email).sort());
@@ -117,10 +134,15 @@ describe("comments-basic seed", () => {
   });
 
   afterAll(async () => {
-    const ids = ["zz_apl2590_t1", "zz_apl2590_t1_1", "zz_apl2590_t9"];
-    await db.comment.deleteMany({ where: { taskId: { in: ids } } });
-    await db.task.deleteMany({ where: { id: { in: ids } } });
-    await db.project.deleteMany({ where: { id: { in: ["zz_apl2590_ops", "zz_apl2590_old"] } } });
-    await db.user.deleteMany({ where: { email: { startsWith: "nakul17+apl2590-" } } });
+    if (!ownsFixture) return;
+    assertLocalFixture(process.env.DATABASE_URL);
+    await db.comment.deleteMany({ where: { taskId: { in: fixtureTaskIds } } });
+    await db.task.deleteMany({ where: { id: { in: fixtureTaskIds } } });
+    await db.project.deleteMany({ where: { id: { in: fixtureProjectIds } } });
+    await db.user.deleteMany({ where: { email: { in: fixtureEmails } } });
+    if (createdWorkspaceId) await db.workspace.delete({ where: { id: createdWorkspaceId } });
+    expect(await db.user.count({ where: { email: { in: fixtureEmails } } })).toBe(0);
+    expect(await db.project.count({ where: { id: { in: fixtureProjectIds } } })).toBe(0);
+    expect(await db.task.count({ where: { id: { in: fixtureTaskIds } } })).toBe(0);
   });
 });

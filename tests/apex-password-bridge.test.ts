@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ count: vi.fn(), find: vi.fn(), verify: vi.fn(), attempt: vi.fn(), clear: vi.fn(), create: vi.fn(), fresh: vi.fn() }));
+const m = vi.hoisted(() => ({ count: vi.fn(), find: vi.fn(), verify: vi.fn(), attempt: vi.fn(), clear: vi.fn(), create: vi.fn(), fresh: vi.fn(), lock: vi.fn() }));
 vi.mock("next/server", () => ({ connection: vi.fn() }));
 vi.mock("../src/lib/auth", () => ({ LOCKOUT_FAILURES: 5, LOCKOUT_MINUTES: 15, SESSION_DAYS: 30, verifyPassword: m.verify }));
-vi.mock("../src/lib/db", () => ({ db: { user: { findUnique: m.find }, loginAttempt: { count: m.count, create: m.attempt },
-  $transaction: (fn: (tx: unknown) => unknown) => fn({ user: { findUnique: m.fresh }, session: { create: m.create }, loginAttempt: { deleteMany: m.clear } }) } }));
+vi.mock("../src/lib/db", () => ({ db: {
+  $transaction: (fn: (tx: unknown) => unknown) => {
+    let reads = 0;
+    return fn({ $queryRaw: m.lock, user: { findUnique: (...args: unknown[]) => (++reads === 1 ? m.find : m.fresh)(...args) },
+      session: { create: m.create }, loginAttempt: { count: m.count, create: m.attempt, deleteMany: m.clear } });
+  },
+} }));
 import { POST } from "../src/app/api/suite/password/route";
 const user = { id: "native-1", email: "fixture@example.invalid", name: "Fixture", passwordHash: "old-hash", emailVerifiedAt: new Date(), deactivatedAt: null, tempPasswordAt: null, orgRole: "MEMBER" };
 const secret = "synthetic-only-accounts-client-0000000000";

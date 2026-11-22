@@ -185,9 +185,11 @@ describe("@APL-2700 trigger search_path guards", () => {
     expect(alters).toHaveLength(2);
     expect(readFileSync(path.join(process.cwd(), ".env.example"), "utf8")).toContain("schema=public");
     expect(readFileSync(path.join(process.cwd(), "README.md"), "utf8")).toContain("schema=public");
-    expect(readFileSync(path.join(process.cwd(), ".github/workflows/deploy.yml"), "utf8")).toContain("schema=public");
+    expect(readFileSync(path.join(process.cwd(), ".github/workflows/qualification.yml"), "utf8")).toContain("schema=public");
+    expect(readFileSync(path.join(process.cwd(), ".github/workflows/qualification.yml"), "utf8")).toContain(["npx prisma", command].join(" "));
     const releaseLines = readFileSync(path.join(process.cwd(), "deploy/release.sh"), "utf8").split("\n");
-    expect(releaseLines[40]).toBe(["npx prisma", command].join(" "));
+    expect(releaseLines).toContain("npx --no-install prisma migrate status");
+    expect(releaseLines.join("\n")).not.toContain(["npx prisma", command].join(" "));
     expect(readFileSync(path.join(MIGRATIONS, MIGRATION, "down.sql"), "utf8")).toContain("RESET search_path");
     expect(src).toContain("SIMULATED");
     expect(CONCURRENT_CREATES).toBeGreaterThanOrEqual(40);

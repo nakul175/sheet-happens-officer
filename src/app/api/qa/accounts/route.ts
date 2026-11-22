@@ -1,3 +1,4 @@
+import { singleWorkspace } from "@/lib/workspace";
 import { hashPassword } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { isZzTestAddress, qaToken, sinkMode, tokensEqual } from "@/lib/mail-sink";
@@ -53,8 +54,8 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "password must have at least 8 characters, a letter and a digit" }, { status: 400, headers: noStore });
   }
 
-  const workspace = await db.workspace.findFirst({ select: { id: true } });
-  if (!workspace) return Response.json({ error: "No test workspace" }, { status: 409, headers: noStore });
+  const workspace = await singleWorkspace().catch(() => null);
+  if (!workspace) return Response.json({ error: "Workspace configuration requires operator review." }, { status: 503, headers: noStore });
 
   const prepared = await Promise.all(parsed.map(async (row) => ({ ...row, passwordHash: await hashPassword(row.password) })));
   await db.$transaction(async (tx) => {
