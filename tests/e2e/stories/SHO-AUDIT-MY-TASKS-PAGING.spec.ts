@@ -80,12 +80,20 @@ test('audit My Tasks v2 pages exact own work, keeps legacy response and denies f
   try {
     expect((await context.request.post('/api/auth/signin', { data: { email: actor.email, password: PW } })).status()).toBe(200);
     const page = await context.newPage();
+    const myTaskRequests: URL[] = [];
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/my-tasks') myTaskRequests.push(url);
+    });
     await page.goto('/my-tasks');
     await expect(page.getByText('Next 7 days · 26')).toBeVisible();
     await expect(page.locator('.my-tasks-view .item.click')).toHaveCount(26); // 25 next-week + one overdue
     await page.getByRole('button', { name: 'Load more next 7 days' }).click();
     await expect(page.locator('.my-tasks-view .item.click')).toHaveCount(27);
     await expect(page.getByText(`ZZ-TEST paging ${fixture} 25`)).toBeVisible();
+    expect(myTaskRequests.some(url => url.searchParams.get('v') === '2' && !url.searchParams.has('group'))).toBe(true);
+    expect(myTaskRequests.some(url => url.searchParams.get('v') === '2' && url.searchParams.get('group') === 'next7')).toBe(true);
+    expect(myTaskRequests.every(url => url.searchParams.get('v') === '2')).toBe(true);
     mkdirSync(dir, { recursive: true });
     await page.screenshot({ path: `${dir}/loaded.png`, fullPage: true });
   } finally { await context.close(); }
@@ -127,5 +135,5 @@ test('audit My Tasks v2 pages exact own work, keeps legacy response and denies f
   expect(afterUndatedCursorDelete.status).toBe(200);
   expect(afterUndatedCursorDelete.json.page.total).toBe(49);
   expect(afterUndatedCursorDelete.json.page.items.map((row: { id: string }) => row.id)).toEqual(laterThird.json.page.items.map((row: { id: string }) => row.id));
-  writeFileSync(`${dir}/verification.json`, JSON.stringify({ fixture, firstPage: 25, secondPage: 1, next7Total: 26, overdueTotal: 1, initialBytes: bytes, foreignHidden: true, cursorDenied: true, legacyPreserved: true, uiLoaded: 27, deletedCursorRowStillPaginates: true, datedToUndatedCursorSurvivesDelete: true, undatedCursorSurvivesDelete: true }, null, 2));
+  writeFileSync(`${dir}/verification.json`, JSON.stringify({ fixture, firstPage: 25, secondPage: 1, next7Total: 26, overdueTotal: 1, initialBytes: bytes, foreignHidden: true, cursorDenied: true, legacyPreserved: true, uiLoaded: 27, uiUsedPagedEndpointForInitialAndMore: true, deletedCursorRowStillPaginates: true, datedToUndatedCursorSurvivesDelete: true, undatedCursorSurvivesDelete: true }, null, 2));
 });
